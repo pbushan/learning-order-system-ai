@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: order-consumer
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/learning_orders?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true}
+    username: ${SPRING_DATASOURCE_USERNAME:appuser}
+    password: ${SPRING_DATASOURCE_PASSWORD:apppass}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+  rabbitmq:
+    host: ${SPRING_RABBITMQ_HOST:localhost}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+
+app:
+  queue-name: ${APP_QUEUE_NAME:order.submitted.queue}
+  exchange-name: ${APP_EXCHANGE_NAME:learning.order.exchange}
+  routing-key: ${APP_ROUTING_KEY:order.submitted}
