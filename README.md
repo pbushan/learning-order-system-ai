@@ -9,6 +9,7 @@ This project is a hands-on sandbox to demonstrate:
 - **AI-assisted development workflows**
 - **Agentic system design for autonomous task execution**
 - A reviewable example of human-guided, agent-executed product delivery
+- GitHub App based PR review automation
 
 ---
 
