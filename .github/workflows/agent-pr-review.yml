@@ -26,16 +26,15 @@ jobs:
           app-id: ${{ vars.AGENT_APP_ID }}
           private-key: ${{ secrets.AGENT_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
           permission-pull-requests: write
           permission-issues: write
           permission-contents: read
 
-      - name: Post test comment as app
+      - name: Run formal app review
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
-        run: |
-          gh pr comment "$PR_NUMBER" \
-            --repo "$REPO" \
-            --body "Agent review test: this comment was posted by the GitHub App workflow, not by the PR author."
+          GITHUB_API_URL: ${{ github.api_url }}
+        run: node .github/agent-review/review-pr.mjs
