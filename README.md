@@ -10,6 +10,7 @@ This project is a hands-on sandbox to demonstrate:
 - **Agentic system design for autonomous task execution**
 - A reviewable example of human-guided, agent-executed product delivery
 - GitHub App based formal PR review automation
+- LLM-backed pull request review experimentation
 
 ---
 
