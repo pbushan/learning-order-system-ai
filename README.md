@@ -231,6 +231,29 @@ The UI will be available at:
 
 `http://localhost:8081`
 
+## Run the full stack without IntelliJ
+
+If you want to test the branch entirely through Docker, run this from the repo root:
+
+```bash
+docker compose up --build
+```
+
+That root compose file stitches together:
+
+- `order-api`
+- `order-ui`
+- `order-consumer`
+- MySQL
+- RabbitMQ
+- LocalStack
+
+Useful URLs in that mode:
+
+- UI: `http://localhost:8081`
+- API: `http://localhost:8080`
+- RabbitMQ UI: `http://localhost:15672`
+
 ---
 
 ## What each repo does

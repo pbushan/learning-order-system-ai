@@ -33,6 +33,17 @@ When `order-api` starts from IntelliJ, Docker Compose will build and run that UI
 
 The UI proxies `/api/*` requests back to the Spring Boot app on `http://host.docker.internal:8080`, so it can call all customer and order endpoints without extra CORS setup.
 
+## Standalone branch testing
+
+If you do not want to start the app from IntelliJ, use the root-level compose file instead:
+
+```bash
+cd /Users/phanibushan/Downloads/IntellijProjects/learning-order-system-ai
+docker compose up --build
+```
+
+That mode runs `order-api` as a container and still exposes the same UI at `http://localhost:8081`.
+
 ## Important endpoint
 
 `POST /api/orders/{id}/submit`
