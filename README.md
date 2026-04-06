@@ -197,6 +197,7 @@ This zip contains **three separate repos/projects** plus a root guide:
 ```text
 learning-order-system/
 ├── README.md
+├── order-ui/                <-- Browser UI for the full customer/order workflow
 ├── order-api/               <-- Main Spring Boot API app (open this in IntelliJ)
 ├── order-consumer/          <-- Separate Spring Boot consumer app
 └── order-pricing-lambda/    <-- Separate Lambda repo
@@ -222,8 +223,13 @@ When you run it in IntelliJ, Spring Boot will use the included **docker-compose.
 - RabbitMQ
 - LocalStack (for Lambda)
 - order-consumer
+- order-ui
 
 So your wife can focus on the concepts instead of manually starting infrastructure.
+
+The UI will be available at:
+
+`http://localhost:8081`
 
 ---
 

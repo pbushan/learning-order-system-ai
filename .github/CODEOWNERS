@@ -2,4 +2,5 @@
 /order-api/ @pbushan
 /order-consumer/ @pbushan
 /order-pricing-lambda/ @pbushan
+/order-ui/ @pbushan
 /ai-experiments/ @pbushan

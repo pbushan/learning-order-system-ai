@@ -66,3 +66,17 @@ services:
       APP_EXCHANGE_NAME: learning.order.exchange
       APP_ROUTING_KEY: order.submitted
     restart: unless-stopped
+
+  order-ui:
+    build:
+      context: ../order-ui
+      dockerfile: Dockerfile
+    container_name: learning-order-ui
+    pull_policy: build
+    environment:
+      API_PROXY_TARGET: http://host.docker.internal:8080
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8081:80"
+    restart: unless-stopped
