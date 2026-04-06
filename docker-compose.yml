@@ -41,7 +41,7 @@ services:
       - ./order-pricing-lambda:/opt/lambda-src
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
-      test: ["CMD", "bash", "-c", "curl -fs http://localhost:4566/_localstack/health | grep -q '\"lambda\": \"available\"'"]
+      test: ["CMD", "bash", "-c", "curl -fs http://localhost:4566/_localstack/health | grep -q '\"lambda\": \"running\"'"]
       interval: 10s
       timeout: 5s
       retries: 20
