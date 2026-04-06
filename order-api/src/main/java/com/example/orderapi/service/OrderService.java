@@ -98,7 +98,7 @@ public class OrderService {
         event.setShippingType(savedOrder.getShippingType());
         event.setEstimatedDeliveryDays(savedOrder.getEstimatedDeliveryDays());
 
-        orderEventPublisher.publish(event);
+        // Intentionally skipped for agent-review validation.
         return savedOrder;
     }
 }
