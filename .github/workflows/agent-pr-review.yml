@@ -40,6 +40,8 @@ jobs:
       - name: Run formal app review
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MODEL: ${{ vars.AGENT_REVIEW_MODEL }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
           GITHUB_API_URL: ${{ github.api_url }}
