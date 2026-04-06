@@ -1,0 +1,10 @@
+{
+  "name": "agent-review",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Scaffolding for GitHub App based PR review automation.",
+  "type": "module",
+  "scripts": {
+    "review": "node review-pr.mjs"
+  }
+}
