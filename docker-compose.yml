@@ -37,8 +37,8 @@ services:
     ports:
       - "4566:4566"
     volumes:
-      - ./localstack/init:/etc/localstack/init/ready.d
-      - ../order-pricing-lambda:/opt/lambda-src
+      - ./order-api/localstack/init:/etc/localstack/init/ready.d
+      - ./order-pricing-lambda:/opt/lambda-src
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "bash", "-c", "curl -fs http://localhost:4566/_localstack/health | grep -q '\"lambda\": \"running\"'"]
@@ -46,9 +46,35 @@ services:
       timeout: 5s
       retries: 20
 
+  order-api:
+    build:
+      context: ./order-api
+      dockerfile: Dockerfile
+    container_name: learning-order-api
+    environment:
+      SPRING_DOCKER_COMPOSE_ENABLED: "false"
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/learning_orders?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: appuser
+      SPRING_DATASOURCE_PASSWORD: apppass
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      APP_LAMBDA_ENDPOINT: http://localstack:4566
+      APP_LAMBDA_REGION: us-east-1
+      APP_LAMBDA_FUNCTION_NAME: shipping-rule-lambda
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    restart: unless-stopped
+
   order-consumer:
     build:
-      context: ../order-consumer
+      context: ./order-consumer
       dockerfile: Dockerfile
     container_name: learning-order-consumer
     depends_on:
@@ -69,14 +95,15 @@ services:
 
   order-ui:
     build:
-      context: ../order-ui
+      context: ./order-ui
       dockerfile: Dockerfile
     container_name: learning-order-ui
     pull_policy: build
     environment:
-      API_PROXY_TARGET: http://host.docker.internal:8080
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      API_PROXY_TARGET: http://order-api:8080
     ports:
       - "8081:80"
+    depends_on:
+      order-api:
+        condition: service_started
     restart: unless-stopped

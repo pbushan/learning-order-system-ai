@@ -8,6 +8,7 @@ This project is a hands-on sandbox to demonstrate:
 - Full Docker-based local environment
 - **AI-assisted development workflows**
 - **Agentic system design for autonomous task execution**
+- A reviewable example of human-guided, agent-executed product delivery
 
 ---
 
@@ -24,6 +25,29 @@ It is a **sandbox for exploring how AI can:**
 
 ---
 
+## 🤖 Agentic Build Showcase
+
+This repository now also serves as a portfolio example of **agentic software delivery**.
+
+On this branch, an LLM agent was used to:
+
+- inspect the existing repo structure and reconcile with the remote branch state
+- add a separate browser UI in `order-ui/`
+- connect that UI to the Spring Boot API and all existing order-management flows
+- wire the UI into the `order-api` Docker Compose startup for IntelliJ-based development
+- add a root `docker-compose.yml` so the entire stack can be tested without IntelliJ
+- preserve reviewability by isolating the work on a dedicated feature branch
+
+This is the collaboration model behind the change:
+
+- Human defines the goal, constraints, and review expectations
+- Agent inspects, implements, documents, and prepares the change
+- Human reviews locally, approves, and merges
+
+That hybrid workflow is intentional. It shows how LLMs can contribute beyond code generation by handling integration work, developer experience improvements, and documentation in a way that stays safe for human review.
+
+---
+
 ## 🧠 Key Concepts Demonstrated
 
 - REST APIs (CRUD)
@@ -31,8 +55,8 @@ It is a **sandbox for exploring how AI can:**
 - Background processing (consumer app)
 - Serverless decision-making (Lambda)
 - Integration testing vs unit testing
-- AI-assisted code evolution (coming soon)
-- Agentic workflows (planned)
+- AI-assisted code evolution
+- Agentic workflows in practice
 
 🧪 Interactive API Demo (Postman)
 
@@ -197,6 +221,7 @@ This zip contains **three separate repos/projects** plus a root guide:
 ```text
 learning-order-system/
 ├── README.md
+├── order-ui/                <-- Browser UI for the full customer/order workflow
 ├── order-api/               <-- Main Spring Boot API app (open this in IntelliJ)
 ├── order-consumer/          <-- Separate Spring Boot consumer app
 └── order-pricing-lambda/    <-- Separate Lambda repo
@@ -222,8 +247,38 @@ When you run it in IntelliJ, Spring Boot will use the included **docker-compose.
 - RabbitMQ
 - LocalStack (for Lambda)
 - order-consumer
+- order-ui
 
 So your wife can focus on the concepts instead of manually starting infrastructure.
+
+The UI will be available at:
+
+`http://localhost:8081`
+
+## Run the full stack without IntelliJ
+
+If you want to test the branch entirely through Docker, run this from the repo root:
+
+```bash
+docker compose up --build
+```
+
+That root compose file stitches together:
+
+- `order-api`
+- `order-ui`
+- `order-consumer`
+- MySQL
+- RabbitMQ
+- LocalStack
+
+Useful URLs in that mode:
+
+- UI: `http://localhost:8081`
+- API: `http://localhost:8080`
+- RabbitMQ UI: `http://localhost:15672`
+
+This makes the branch easier to demo as a complete, portfolio-ready system because the backend, messaging, Lambda emulator, and UI can all be started with one command from the repo root.
 
 ---
 

@@ -1,0 +1,374 @@
+const state = {
+    customers: [],
+    orders: []
+};
+
+const customerForm = document.getElementById("customer-form");
+const orderForm = document.getElementById("order-form");
+const customerTableBody = document.getElementById("customer-table-body");
+const orderTableBody = document.getElementById("order-table-body");
+const customerSelect = document.getElementById("order-customer-id");
+const activityStack = document.getElementById("activity-stack");
+const metricGrid = document.getElementById("metric-grid");
+const banner = document.getElementById("feedback-banner");
+const refreshButton = document.getElementById("refresh-button");
+const apiStatusDot = document.getElementById("api-status-dot");
+const apiStatusText = document.getElementById("api-status-text");
+
+document.addEventListener("DOMContentLoaded", () => {
+    customerForm.addEventListener("submit", handleCustomerSubmit);
+    orderForm.addEventListener("submit", handleOrderSubmit);
+    document.getElementById("customer-reset").addEventListener("click", resetCustomerForm);
+    document.getElementById("order-reset").addEventListener("click", resetOrderForm);
+    refreshButton.addEventListener("click", () => loadDashboard(true));
+    customerTableBody.addEventListener("click", handleCustomerTableClick);
+    orderTableBody.addEventListener("click", handleOrderTableClick);
+
+    loadDashboard();
+    window.setInterval(() => loadDashboard(false, true), 15000);
+});
+
+async function apiRequest(path, options = {}) {
+    const response = await fetch(path, {
+        headers: {
+            "Content-Type": "application/json",
+            ...(options.headers || {})
+        },
+        ...options
+    });
+
+    if (response.status === 204) {
+        return null;
+    }
+
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : null;
+
+    if (!response.ok) {
+        const message = data?.error || `Request failed with status ${response.status}`;
+        throw new Error(message);
+    }
+
+    return data;
+}
+
+async function loadDashboard(showSuccessMessage = false, silent = false) {
+    try {
+        const [customers, orders] = await Promise.all([
+            apiRequest("/api/customers"),
+            apiRequest("/api/orders")
+        ]);
+
+        state.customers = customers;
+        state.orders = orders;
+
+        updateConnectionStatus(true);
+        renderCustomers();
+        renderOrders();
+        renderCustomerOptions();
+        renderMetrics();
+        renderActivity();
+
+        if (showSuccessMessage) {
+            showBanner("Dashboard refreshed.", "success");
+        } else if (silent) {
+            hideBanner();
+        }
+    } catch (error) {
+        updateConnectionStatus(false, error.message);
+        if (!silent) {
+            showBanner(error.message, "error");
+        }
+    }
+}
+
+async function handleCustomerSubmit(event) {
+    event.preventDefault();
+
+    const id = document.getElementById("customer-id").value;
+    const payload = {
+        name: document.getElementById("customer-name").value.trim(),
+        email: document.getElementById("customer-email").value.trim()
+    };
+
+    try {
+        await apiRequest(id ? `/api/customers/${id}` : "/api/customers", {
+            method: id ? "PUT" : "POST",
+            body: JSON.stringify(payload)
+        });
+
+        showBanner(id ? "Customer updated." : "Customer created.", "success");
+        resetCustomerForm();
+        await loadDashboard();
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
+}
+
+async function handleOrderSubmit(event) {
+    event.preventDefault();
+
+    const id = document.getElementById("order-id").value;
+    const payload = {
+        customerId: Number(document.getElementById("order-customer-id").value),
+        productName: document.getElementById("order-product-name").value.trim(),
+        quantity: Number(document.getElementById("order-quantity").value),
+        totalAmount: Number(document.getElementById("order-total-amount").value).toFixed(2)
+    };
+
+    try {
+        await apiRequest(id ? `/api/orders/${id}` : "/api/orders", {
+            method: id ? "PUT" : "POST",
+            body: JSON.stringify(payload)
+        });
+
+        showBanner(id ? "Order updated." : "Order created.", "success");
+        resetOrderForm();
+        await loadDashboard();
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
+}
+
+async function handleCustomerTableClick(event) {
+    const button = event.target.closest("button[data-action]");
+    if (!button) {
+        return;
+    }
+
+    const customerId = Number(button.dataset.id);
+    const customer = state.customers.find((entry) => entry.id === customerId);
+
+    if (!customer) {
+        return;
+    }
+
+    if (button.dataset.action === "edit") {
+        document.getElementById("customer-id").value = customer.id;
+        document.getElementById("customer-name").value = customer.name;
+        document.getElementById("customer-email").value = customer.email;
+        document.getElementById("customer-submit").textContent = "Update customer";
+        customerForm.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+    }
+
+    if (!window.confirm(`Delete customer "${customer.name}"?`)) {
+        return;
+    }
+
+    try {
+        await apiRequest(`/api/customers/${customer.id}`, { method: "DELETE" });
+        showBanner("Customer deleted.", "success");
+        resetCustomerForm();
+        await loadDashboard();
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
+}
+
+async function handleOrderTableClick(event) {
+    const button = event.target.closest("button[data-action]");
+    if (!button) {
+        return;
+    }
+
+    const orderId = Number(button.dataset.id);
+    const order = state.orders.find((entry) => entry.id === orderId);
+
+    if (!order) {
+        return;
+    }
+
+    if (button.dataset.action === "edit") {
+        document.getElementById("order-id").value = order.id;
+        document.getElementById("order-customer-id").value = order.customerId;
+        document.getElementById("order-product-name").value = order.productName;
+        document.getElementById("order-quantity").value = order.quantity;
+        document.getElementById("order-total-amount").value = order.totalAmount;
+        document.getElementById("order-submit").textContent = "Update order";
+        orderForm.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+    }
+
+    if (button.dataset.action === "submit") {
+        try {
+            await apiRequest(`/api/orders/${order.id}/submit`, { method: "POST" });
+            showBanner(`Order ${order.id} submitted to Lambda and RabbitMQ.`, "success");
+            await loadDashboard();
+        } catch (error) {
+            showBanner(error.message, "error");
+        }
+        return;
+    }
+
+    if (!window.confirm(`Delete order #${order.id}?`)) {
+        return;
+    }
+
+    try {
+        await apiRequest(`/api/orders/${order.id}`, { method: "DELETE" });
+        showBanner("Order deleted.", "success");
+        resetOrderForm();
+        await loadDashboard();
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
+}
+
+function renderCustomers() {
+    if (!state.customers.length) {
+        customerTableBody.innerHTML = `<tr><td colspan="4" class="empty-state">No customers yet. Create one to get started.</td></tr>`;
+        return;
+    }
+
+    customerTableBody.innerHTML = state.customers.map((customer) => `
+        <tr>
+            <td>${customer.id}</td>
+            <td>${escapeHtml(customer.name)}</td>
+            <td>${escapeHtml(customer.email)}</td>
+            <td>
+                <div class="actions-row">
+                    <button class="inline-action" data-action="edit" data-id="${customer.id}" type="button">Edit</button>
+                    <button class="inline-action danger" data-action="delete" data-id="${customer.id}" type="button">Delete</button>
+                </div>
+            </td>
+        </tr>
+    `).join("");
+}
+
+function renderOrders() {
+    if (!state.orders.length) {
+        orderTableBody.innerHTML = `<tr><td colspan="6" class="empty-state">No orders yet. Draft one once a customer exists.</td></tr>`;
+        return;
+    }
+
+    orderTableBody.innerHTML = state.orders.map((order) => {
+        const customer = state.customers.find((entry) => entry.id === order.customerId);
+        const customerName = customer ? customer.name : `Customer ${order.customerId}`;
+        const shipping = order.shippingType
+            ? `${escapeHtml(order.shippingType)} · ${order.estimatedDeliveryDays} day${order.estimatedDeliveryDays === 1 ? "" : "s"}`
+            : "Pending submit";
+
+        return `
+            <tr>
+                <td>#${order.id}</td>
+                <td>${escapeHtml(customerName)}</td>
+                <td>
+                    <strong>${escapeHtml(order.productName)}</strong><br>
+                    <span class="hero-text">$${Number(order.totalAmount).toFixed(2)} · Qty ${order.quantity}</span>
+                </td>
+                <td>
+                    <span class="status-pill ${order.status === "SUBMITTED" ? "submitted" : ""}">
+                        ${escapeHtml(order.status)}
+                    </span>
+                </td>
+                <td>${shipping}</td>
+                <td>
+                    <div class="actions-row">
+                        <button class="inline-action" data-action="edit" data-id="${order.id}" type="button">Edit</button>
+                        <button class="inline-action accent" data-action="submit" data-id="${order.id}" type="button" ${order.status === "SUBMITTED" ? "disabled" : ""}>Submit</button>
+                        <button class="inline-action danger" data-action="delete" data-id="${order.id}" type="button">Delete</button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join("");
+}
+
+function renderCustomerOptions() {
+    const currentValue = document.getElementById("order-customer-id").value;
+    const options = state.customers.map((customer) => `
+        <option value="${customer.id}">${escapeHtml(customer.name)} (${escapeHtml(customer.email)})</option>
+    `).join("");
+
+    customerSelect.innerHTML = `<option value="">Select a customer</option>${options}`;
+    customerSelect.value = currentValue;
+}
+
+function renderMetrics() {
+    const submittedOrders = state.orders.filter((order) => order.status === "SUBMITTED");
+    const draftOrders = state.orders.filter((order) => order.status === "DRAFT");
+    const totals = [
+        { label: "Customers", value: state.customers.length },
+        { label: "Orders", value: state.orders.length },
+        { label: "Submitted", value: submittedOrders.length },
+        { label: "Drafts", value: draftOrders.length }
+    ];
+
+    metricGrid.innerHTML = totals.map((entry) => `
+        <article class="metric-card">
+            <span class="metric-label">${entry.label}</span>
+            <strong class="metric-value">${entry.value}</strong>
+        </article>
+    `).join("");
+}
+
+function renderActivity() {
+    const submittedOrders = state.orders
+        .filter((order) => order.status === "SUBMITTED")
+        .sort((left, right) => right.id - left.id)
+        .slice(0, 6);
+
+    if (!submittedOrders.length) {
+        activityStack.innerHTML = `
+            <article class="activity-card">
+                <p class="activity-title">Awaiting order data</p>
+                <p class="activity-text">Submitted orders will show shipping decisions here once the API returns them.</p>
+            </article>
+        `;
+        return;
+    }
+
+    activityStack.innerHTML = submittedOrders.map((order) => {
+        const customer = state.customers.find((entry) => entry.id === order.customerId);
+        return `
+            <article class="activity-card">
+                <p class="activity-title">Order #${order.id}</p>
+                <p class="activity-text">
+                    ${escapeHtml(order.productName)} for ${escapeHtml(customer ? customer.name : `Customer ${order.customerId}`)}<br>
+                    Shipping: ${escapeHtml(order.shippingType || "Pending")}<br>
+                    ETA: ${order.estimatedDeliveryDays ?? "Pending"} day${order.estimatedDeliveryDays === 1 ? "" : "s"}
+                </p>
+            </article>
+        `;
+    }).join("");
+}
+
+function updateConnectionStatus(isOnline, message) {
+    apiStatusDot.classList.remove("online", "offline");
+    apiStatusDot.classList.add(isOnline ? "online" : "offline");
+    apiStatusText.textContent = isOnline
+        ? "API reachable at /api through the UI container"
+        : `API unavailable: ${message}`;
+}
+
+function resetCustomerForm() {
+    customerForm.reset();
+    document.getElementById("customer-id").value = "";
+    document.getElementById("customer-submit").textContent = "Save customer";
+}
+
+function resetOrderForm() {
+    orderForm.reset();
+    document.getElementById("order-id").value = "";
+    document.getElementById("order-submit").textContent = "Save order";
+}
+
+function showBanner(message, type) {
+    banner.textContent = message;
+    banner.className = `banner ${type}`;
+}
+
+function hideBanner() {
+    banner.className = "banner hidden";
+    banner.textContent = "";
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+}
