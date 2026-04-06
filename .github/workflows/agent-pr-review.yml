@@ -31,6 +31,12 @@ jobs:
           permission-issues: write
           permission-contents: read
 
+      - name: Check out base repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
       - name: Run formal app review
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
