@@ -51,13 +51,13 @@ function initializeTabs() {
 
     tabButtons.forEach((button) => {
         const panel = panelsById.get(button.getAttribute("aria-controls"));
-        panel.setAttribute("aria-labelledby", button.id);
+        panel?.setAttribute("aria-labelledby", button.id);
         button.addEventListener("click", () => activateTab(button.dataset.tabTarget));
         button.addEventListener("keydown", handleTabKeydown);
     });
     window.addEventListener("hashchange", () => activateTab(getTabFromHash(), false));
 
-    activateTab(getTabFromHash(), false);
+    activateTab(getTabFromHash(), true);
 }
 
 function getTabFromHash() {
@@ -98,6 +98,12 @@ function isAvailableTab(tabName) {
 }
 
 function handleTabKeydown(event) {
+    if (["Enter", " "].includes(event.key)) {
+        event.preventDefault();
+        activateTab(event.currentTarget.dataset.tabTarget);
+        return;
+    }
+
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
         return;
     }
