@@ -45,6 +45,9 @@ function initializeTabs() {
     ));
 
     if (!tabButtons.length || !tabPanels.length) {
+        discoveredPanels.forEach((panel) => {
+            panel.hidden = false;
+        });
         console.warn("Workspace tabs are disabled because tab buttons and panels did not match.");
         return;
     }
@@ -98,7 +101,7 @@ function isAvailableTab(tabName) {
 }
 
 function handleTabKeydown(event) {
-    if (["Enter", " "].includes(event.key)) {
+    if (["Enter", " ", "Spacebar"].includes(event.key)) {
         event.preventDefault();
         activateTab(event.currentTarget.dataset.tabTarget);
         return;
