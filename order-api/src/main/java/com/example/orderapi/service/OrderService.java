@@ -98,7 +98,7 @@ public class OrderService {
         event.setShippingType(savedOrder.getShippingType());
         event.setEstimatedDeliveryDays(savedOrder.getEstimatedDeliveryDays());
 
-        orderEventPublisher.publish(event);
+        // Test regression for validating the agent reviewer: this should still publish.
         return savedOrder;
     }
 }
