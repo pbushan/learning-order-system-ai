@@ -134,7 +134,7 @@ async function runLlmReview(reviewContext) {
                     content: [
                         {
                             type: "input_text",
-                            text: "You are a careful senior code reviewer. Focus on correctness, regressions, security, data loss, broken workflows, and missing tests. Do not comment on style unless it blocks maintainability. Return only valid JSON."
+                            text: "You are a careful senior code reviewer. Focus on correctness, regressions, security, data loss, and broken workflows. Mention missing tests only when the diff clearly removes or weakens coverage, or when the changed behavior has no apparent guard in the provided context. Do not claim tests are absent if they may exist outside the diff. Do not comment on style unless it blocks maintainability. Return only valid JSON."
                         }
                     ]
                 },
@@ -192,6 +192,7 @@ function buildPrompt(reviewContext) {
         "",
         "Set blocking=true only for findings that should prevent merge. Use P1/P2 for blocking findings and P3 for informational findings.",
         "If there are no substantive issues, return blocking=false and findings=[].",
+        "Important test guidance: avoid broad claims like \"there are no tests\" unless the provided context proves it. If test coverage is uncertain because unchanged tests are not included, say that a targeted test should be considered rather than claiming coverage is missing.",
         "",
         `PR title: ${reviewContext.pullRequest.title}`,
         `PR body: ${reviewContext.pullRequest.body || "(none)"}`,
