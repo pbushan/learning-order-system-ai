@@ -44,16 +44,7 @@ const event = llmReview.blocking ? "REQUEST_CHANGES" : "COMMENT";
 const body = buildReviewBody(pull, reviewContext, llmReview, event);
 const comments = buildInlineComments(reviewContext, llmReview);
 
-await githubRequest(`${apiBaseUrl}/repos/${repo}/pulls/${prNumber}/reviews`, {
-    method: "POST",
-    body: JSON.stringify({
-        event,
-        body,
-        comments
-    })
-});
-
-console.log(`Posted ${event} review for PR #${prNumber} in ${repo} with ${comments.length} inline comments.`);
+await postReviewWithFallback({ event, body, comments });
 
 function buildReviewContext(pullRequest, changedFiles) {
     const reviewableFiles = changedFiles.filter((file) => {
@@ -315,7 +306,8 @@ function buildInlineComments(reviewContext, llmReview) {
     }));
 
     return llmReview.findings
-        .filter((finding) => finding.file && finding.line)
+        .map(normalizeInlineFinding)
+        .filter((finding) => finding)
         .filter((finding) => changedLinesByFile.get(finding.file)?.has(finding.line))
         .slice(0, maxInlineComments)
         .map((finding) => {
@@ -332,6 +324,66 @@ function buildInlineComments(reviewContext, llmReview) {
                 ].join("\n")
             };
         });
+}
+
+async function postReviewWithFallback({ event, body, comments }) {
+    try {
+        await postReview({ event, body, comments });
+        console.log(`Posted ${event} review for PR #${prNumber} in ${repo} with ${comments.length} inline comments.`);
+    } catch (error) {
+        if (!comments.length || !isInlineCommentValidationError(error)) {
+            throw error;
+        }
+
+        const fallbackBody = [
+            body,
+            "",
+            "Inline comment fallback:",
+            `- ${comments.length} inline comment(s) were omitted because GitHub rejected the inline review payload.`,
+            "- The top-level review was posted so feedback is not lost."
+        ].join("\n");
+
+        await postReview({ event, body: fallbackBody, comments: [] });
+        console.log(`Posted ${event} summary-only fallback review for PR #${prNumber} in ${repo}.`);
+    }
+}
+
+async function postReview({ event, body, comments }) {
+    const payload = {
+        event,
+        body
+    };
+
+    if (comments.length) {
+        payload.comments = comments;
+    }
+
+    await githubRequest(`${apiBaseUrl}/repos/${repo}/pulls/${prNumber}/reviews`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+    });
+}
+
+function isInlineCommentValidationError(error) {
+    return error instanceof GitHubRequestError && error.status >= 400 && error.status < 500;
+}
+
+function normalizeInlineFinding(finding) {
+    if (!finding.file || !finding.line) {
+        return null;
+    }
+
+    const line = Number(finding.line);
+
+    if (!Number.isInteger(line) || line <= 0) {
+        return null;
+    }
+
+    return {
+        ...finding,
+        file: String(finding.file).replace(/^\.\//, ""),
+        line
+    };
 }
 
 function collectNewFileLines(patch) {
@@ -355,13 +407,13 @@ function collectNewFileLines(patch) {
             continue;
         }
 
-        if (line.startsWith("+") && !line.startsWith("+++")) {
+        if (line.startsWith("+")) {
             lines.add(newLine);
             newLine += 1;
             continue;
         }
 
-        if (line.startsWith("-") && !line.startsWith("---")) {
+        if (line.startsWith("-")) {
             continue;
         }
 
@@ -384,7 +436,7 @@ async function githubRequest(url, options = {}) {
 
     if (!response.ok) {
         const body = await response.text();
-        throw new Error(`GitHub API request failed (${response.status}): ${body}`);
+        throw new GitHubRequestError(response.status, body);
     }
 
     if (response.status === 204) {
@@ -392,4 +444,12 @@ async function githubRequest(url, options = {}) {
     }
 
     return response.json();
+}
+
+class GitHubRequestError extends Error {
+    constructor(status, body) {
+        super(`GitHub API request failed (${status}): ${body}`);
+        this.status = status;
+        this.body = body;
+    }
 }
