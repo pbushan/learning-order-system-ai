@@ -14,6 +14,8 @@ const banner = document.getElementById("feedback-banner");
 const refreshButton = document.getElementById("refresh-button");
 const apiStatusDot = document.getElementById("api-status-dot");
 const apiStatusText = document.getElementById("api-status-text");
+let tabButtons = [];
+let tabPanels = [];
 
 document.addEventListener("DOMContentLoaded", () => {
     customerForm.addEventListener("submit", handleCustomerSubmit);
@@ -23,10 +25,119 @@ document.addEventListener("DOMContentLoaded", () => {
     refreshButton.addEventListener("click", () => loadDashboard(true));
     customerTableBody.addEventListener("click", handleCustomerTableClick);
     orderTableBody.addEventListener("click", handleOrderTableClick);
+    initializeTabs();
 
     loadDashboard();
     window.setInterval(() => loadDashboard(false, true), 15000);
 });
+
+function initializeTabs() {
+    const discoveredButtons = Array.from(document.querySelectorAll("[data-tab-target]"));
+    const discoveredPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
+    const panelsById = new Map(discoveredPanels.map((panel) => [panel.id, panel]));
+
+    tabButtons = discoveredButtons.filter((button) => {
+        const panel = panelsById.get(button.getAttribute("aria-controls"));
+        return panel?.dataset.tabPanel === button.dataset.tabTarget;
+    });
+    tabPanels = discoveredPanels.filter((panel) => (
+        tabButtons.some((button) => button.dataset.tabTarget === panel.dataset.tabPanel)
+    ));
+
+    if (!tabButtons.length || !tabPanels.length) {
+        discoveredPanels.forEach((panel) => {
+            panel.hidden = false;
+        });
+        console.warn("Workspace tabs are disabled because tab buttons and panels did not match.");
+        return;
+    }
+
+    tabButtons.forEach((button) => {
+        const panel = panelsById.get(button.getAttribute("aria-controls"));
+        panel?.setAttribute("aria-labelledby", button.id);
+        button.addEventListener("click", () => activateTab(button.dataset.tabTarget));
+        button.addEventListener("keydown", handleTabKeydown);
+    });
+    window.addEventListener("hashchange", () => activateTab(getTabFromHash(), false));
+
+    activateTab(getTabFromHash(), true);
+}
+
+function getTabFromHash() {
+    const requestedTab = window.location.hash.replace("#", "");
+    return isAvailableTab(requestedTab)
+        ? requestedTab
+        : "customers";
+}
+
+function activateTab(tabName, updateHash = true) {
+    if (!tabButtons.length || !tabPanels.length) {
+        return;
+    }
+
+    const nextTabName = isAvailableTab(tabName) ? tabName : "customers";
+
+    tabButtons.forEach((button) => {
+        const isActive = button.dataset.tabTarget === nextTabName;
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-selected", String(isActive));
+        button.tabIndex = isActive ? 0 : -1;
+    });
+
+    tabPanels.forEach((panel) => {
+        panel.hidden = panel.dataset.tabPanel !== nextTabName;
+    });
+
+    if (updateHash && window.location.hash !== `#${nextTabName}`) {
+        window.history.replaceState(null, "", `#${nextTabName}`);
+    }
+}
+
+function isAvailableTab(tabName) {
+    return tabButtons.length > 0
+        && tabPanels.length > 0
+        && tabButtons.some((button) => button.dataset.tabTarget === tabName)
+        && tabPanels.some((panel) => panel.dataset.tabPanel === tabName);
+}
+
+function handleTabKeydown(event) {
+    if (["Enter", " ", "Spacebar"].includes(event.key)) {
+        event.preventDefault();
+        activateTab(event.currentTarget.dataset.tabTarget);
+        return;
+    }
+
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+        return;
+    }
+
+    event.preventDefault();
+    const currentIndex = tabButtons.findIndex((button) => button === event.currentTarget);
+    if (currentIndex < 0) {
+        return;
+    }
+
+    const lastIndex = tabButtons.length - 1;
+    let nextIndex = currentIndex;
+
+    if (event.key === "ArrowLeft") {
+        nextIndex = currentIndex === 0 ? lastIndex : currentIndex - 1;
+    } else if (event.key === "ArrowRight") {
+        nextIndex = currentIndex === lastIndex ? 0 : currentIndex + 1;
+    } else if (event.key === "Home") {
+        nextIndex = 0;
+    } else if (event.key === "End") {
+        nextIndex = lastIndex;
+    }
+
+    const nextButton = tabButtons[nextIndex];
+    if (!nextButton) {
+        return;
+    }
+
+    activateTab(nextButton.dataset.tabTarget);
+    nextButton.focus();
+}
 
 async function apiRequest(path, options = {}) {
     const response = await fetch(path, {

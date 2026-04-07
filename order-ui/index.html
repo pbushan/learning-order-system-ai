@@ -47,7 +47,19 @@
     <section class="banner hidden" id="feedback-banner" aria-live="polite"></section>
 
     <main class="workspace">
-        <section class="panel">
+        <nav class="tab-list" aria-label="Workspace sections" role="tablist">
+            <button class="tab-button active" id="customers-tab" type="button" role="tab" aria-selected="true" aria-controls="customers-panel" data-tab-target="customers">
+                Customers
+            </button>
+            <button class="tab-button" id="orders-tab" type="button" role="tab" aria-selected="false" aria-controls="orders-panel" data-tab-target="orders" tabindex="-1">
+                Order workbench
+            </button>
+            <button class="tab-button" id="activity-tab" type="button" role="tab" aria-selected="false" aria-controls="activity-panel" data-tab-target="activity" tabindex="-1">
+                System activity
+            </button>
+        </nav>
+
+        <section class="panel tab-panel" id="customers-panel" role="tabpanel" aria-labelledby="customers-tab" data-tab-panel="customers">
             <div class="panel-header">
                 <div>
                     <p class="panel-kicker">Customers</p>
@@ -89,7 +101,7 @@
             </div>
         </section>
 
-        <section class="panel">
+        <section class="panel tab-panel" id="orders-panel" role="tabpanel" aria-labelledby="orders-tab" data-tab-panel="orders" hidden>
             <div class="panel-header">
                 <div>
                     <p class="panel-kicker">Orders</p>
@@ -143,7 +155,7 @@
             </div>
         </section>
 
-        <section class="panel accent-panel">
+        <section class="panel accent-panel tab-panel" id="activity-panel" role="tabpanel" aria-labelledby="activity-tab" data-tab-panel="activity" hidden>
             <div class="panel-header">
                 <div>
                     <p class="panel-kicker">Flow</p>
