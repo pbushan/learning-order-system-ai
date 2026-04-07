@@ -1,6 +1,7 @@
 const requiredEnv = ["GITHUB_TOKEN", "OPENAI_API_KEY", "REPO", "PR_NUMBER", "GITHUB_API_URL"];
 const maxFiles = 20;
 const maxPatchChars = 30000;
+const maxInlineComments = 10;
 const skippedPathPatterns = [
     /^node_modules\//,
     /^dist\//,
@@ -41,16 +42,9 @@ const llmReview = reviewContext.skipped
 
 const event = llmReview.blocking ? "REQUEST_CHANGES" : "COMMENT";
 const body = buildReviewBody(pull, reviewContext, llmReview, event);
+const comments = buildInlineComments(reviewContext, llmReview);
 
-await githubRequest(`${apiBaseUrl}/repos/${repo}/pulls/${prNumber}/reviews`, {
-    method: "POST",
-    body: JSON.stringify({
-        event,
-        body
-    })
-});
-
-console.log(`Posted ${event} review for PR #${prNumber} in ${repo}.`);
+await postReviewWithFallback({ event, body, comments });
 
 function buildReviewContext(pullRequest, changedFiles) {
     const reviewableFiles = changedFiles.filter((file) => {
@@ -192,6 +186,7 @@ function buildPrompt(reviewContext) {
         "",
         "Set blocking=true only for findings that should prevent merge. Use P1/P2 for blocking findings and P3 for informational findings.",
         "If there are no substantive issues, return blocking=false and findings=[].",
+        "For file-specific findings, set file to the changed file path and line to the new-file line number from the diff whenever possible. If the finding is general or cannot be tied to a changed line, use file=null and line=null.",
         "Important test guidance: avoid broad claims like \"there are no tests\" unless the provided context proves it. If test coverage is uncertain because unchanged tests are not included, say that a targeted test should be considered rather than claiming coverage is missing.",
         "",
         `PR title: ${reviewContext.pullRequest.title}`,
@@ -296,8 +291,187 @@ function buildReviewBody(pullRequest, reviewContext, llmReview, event) {
         "Policy:",
         `- Max reviewable files: ${maxFiles}`,
         `- Max patch characters: ${maxPatchChars}`,
-        "- Inline comments are not enabled yet; this is Phase 1 review behavior."
+        `- Max inline comments: ${maxInlineComments}`,
+        "- Findings with valid changed-file line references are also posted as inline review comments."
     ].filter(Boolean).join("\n");
+}
+
+function buildInlineComments(reviewContext, llmReview) {
+    if (!reviewContext.patches) {
+        console.warn("Inline comments skipped because review context did not include patch data.");
+        return [];
+    }
+
+    if (!llmReview || !Array.isArray(llmReview.findings)) {
+        console.warn("Inline comments skipped because the LLM review did not include a findings array.");
+        return [];
+    }
+
+    const changedLinesByFile = new Map(reviewContext.patches.map((file) => {
+        return [file.filename, collectNewFileLines(file.patch)];
+    }));
+    const seenLocations = new Set();
+
+    return llmReview.findings
+        .map(normalizeInlineFinding)
+        .filter((finding) => finding)
+        .filter((finding) => changedLinesByFile.get(finding.file)?.has(finding.line))
+        .sort(compareFindingSeverity)
+        .filter((finding) => {
+            const locationKey = `${finding.file}:${finding.line}`;
+
+            if (seenLocations.has(locationKey)) {
+                return false;
+            }
+
+            seenLocations.add(locationKey);
+            return true;
+        })
+        .slice(0, maxInlineComments)
+        .map((finding) => {
+            return {
+                path: finding.file,
+                line: finding.line,
+                side: "RIGHT",
+                body: [
+                    `**${finding.severity}: ${finding.title}**`,
+                    "",
+                    finding.body,
+                    "",
+                    "_Posted by the LLM-backed GitHub App reviewer. Human review is still required._"
+                ].join("\n")
+            };
+        });
+}
+
+async function postReviewWithFallback({ event, body, comments }) {
+    try {
+        await postReview({ event, body, comments });
+        console.log(`Posted ${event} review for PR #${prNumber} in ${repo} with ${comments.length} inline comments.`);
+    } catch (error) {
+        if (!comments.length || !isInlineCommentValidationError(error)) {
+            throw error;
+        }
+
+        const fallbackBody = [
+            body,
+            "",
+            "Inline comment fallback:",
+            `- ${comments.length} inline comment(s) were omitted because GitHub rejected the inline review payload.`,
+            `- GitHub response status: ${error.status}.`,
+            `- GitHub response body: ${truncateText(error.body, 500)}`,
+            "- The top-level review was posted so feedback is not lost.",
+            "",
+            "Omitted inline comments:",
+            ...comments.map((comment) => {
+                return [
+                    `- \`${comment.path}:${comment.line || comment.position || "unknown"}\``,
+                    comment.body
+                ].join("\n");
+            })
+        ].join("\n");
+
+        await postReview({ event, body: fallbackBody, comments: [] });
+        console.log(`Posted ${event} summary-only fallback review for PR #${prNumber} in ${repo}.`);
+    }
+}
+
+async function postReview({ event, body, comments }) {
+    const payload = {
+        event,
+        body
+    };
+
+    if (comments.length) {
+        payload.commit_id = pull.head.sha;
+        payload.comments = comments;
+    }
+
+    await githubRequest(`${apiBaseUrl}/repos/${repo}/pulls/${prNumber}/reviews`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+    });
+}
+
+function isInlineCommentValidationError(error) {
+    return error instanceof GitHubRequestError && [400, 409, 413, 422].includes(error.status);
+}
+
+function normalizeInlineFinding(finding) {
+    if (!finding.file || !finding.line) {
+        return null;
+    }
+
+    const line = Number(finding.line);
+
+    if (!Number.isInteger(line) || line <= 0) {
+        return null;
+    }
+
+    return {
+        ...finding,
+        file: String(finding.file).replace(/^\.\//, ""),
+        line
+    };
+}
+
+function compareFindingSeverity(left, right) {
+    const severityRank = {
+        P1: 0,
+        P2: 1,
+        P3: 2
+    };
+
+    return (severityRank[left.severity] ?? severityRank.P3) - (severityRank[right.severity] ?? severityRank.P3);
+}
+
+function truncateText(text, maxLength) {
+    const normalizedText = String(text || "").replace(/\s+/g, " ").trim();
+
+    if (normalizedText.length <= maxLength) {
+        return normalizedText || "(empty)";
+    }
+
+    return `${normalizedText.slice(0, maxLength)}...`;
+}
+
+function collectNewFileLines(patch) {
+    const lines = new Set();
+
+    if (!patch) {
+        return lines;
+    }
+
+    let newLine = null;
+
+    for (const line of patch.split("\n")) {
+        const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+
+        if (hunkMatch) {
+            newLine = Number(hunkMatch[1]);
+            continue;
+        }
+
+        if (newLine === null) {
+            continue;
+        }
+
+        if (line.startsWith("+")) {
+            lines.add(newLine);
+            newLine += 1;
+            continue;
+        }
+
+        if (line.startsWith("-")) {
+            continue;
+        }
+
+        if (!line.startsWith("\\")) {
+            newLine += 1;
+        }
+    }
+
+    return lines;
 }
 
 async function githubRequest(url, options = {}) {
@@ -311,7 +485,7 @@ async function githubRequest(url, options = {}) {
 
     if (!response.ok) {
         const body = await response.text();
-        throw new Error(`GitHub API request failed (${response.status}): ${body}`);
+        throw new GitHubRequestError(response.status, body);
     }
 
     if (response.status === 204) {
@@ -319,4 +493,12 @@ async function githubRequest(url, options = {}) {
     }
 
     return response.json();
+}
+
+class GitHubRequestError extends Error {
+    constructor(status, body) {
+        super(`GitHub API request failed (${status}): ${body}`);
+        this.status = status;
+        this.body = body;
+    }
 }
