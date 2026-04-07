@@ -1,13 +1,17 @@
 const state = {
     customers: [],
-    orders: []
+    orders: [],
+    products: []
 };
 
 const customerForm = document.getElementById("customer-form");
 const orderForm = document.getElementById("order-form");
+const productForm = document.getElementById("product-form");
 const customerTableBody = document.getElementById("customer-table-body");
 const orderTableBody = document.getElementById("order-table-body");
+const productTableBody = document.getElementById("product-table-body");
 const customerSelect = document.getElementById("order-customer-id");
+const orderProductSelect = document.getElementById("order-product-id");
 const activityStack = document.getElementById("activity-stack");
 const metricGrid = document.getElementById("metric-grid");
 const banner = document.getElementById("feedback-banner");
@@ -20,11 +24,14 @@ let tabPanels = [];
 document.addEventListener("DOMContentLoaded", () => {
     customerForm.addEventListener("submit", handleCustomerSubmit);
     orderForm.addEventListener("submit", handleOrderSubmit);
+    productForm.addEventListener("submit", handleProductSubmit);
     document.getElementById("customer-reset").addEventListener("click", resetCustomerForm);
     document.getElementById("order-reset").addEventListener("click", resetOrderForm);
+    document.getElementById("product-reset").addEventListener("click", resetProductForm);
     refreshButton.addEventListener("click", () => loadDashboard(true));
     customerTableBody.addEventListener("click", handleCustomerTableClick);
     orderTableBody.addEventListener("click", handleOrderTableClick);
+    productTableBody.addEventListener("click", handleProductTableClick);
     initializeTabs();
 
     loadDashboard();
@@ -165,18 +172,22 @@ async function apiRequest(path, options = {}) {
 
 async function loadDashboard(showSuccessMessage = false, silent = false) {
     try {
-        const [customers, orders] = await Promise.all([
+        const [customers, orders, products] = await Promise.all([
             apiRequest("/api/customers"),
-            apiRequest("/api/orders")
+            apiRequest("/api/orders"),
+            apiRequest("/api/products")
         ]);
 
         state.customers = customers;
         state.orders = orders;
+        state.products = products;
 
         updateConnectionStatus(true);
         renderCustomers();
         renderOrders();
+        renderProducts();
         renderCustomerOptions();
+        renderProductOptions();
         renderMetrics();
         renderActivity();
 
@@ -239,7 +250,7 @@ async function handleOrderSubmit(event) {
     const id = document.getElementById("order-id").value;
     const payload = {
         customerId: Number(document.getElementById("order-customer-id").value),
-        productName: document.getElementById("order-product-name").value.trim(),
+        productId: Number(document.getElementById("order-product-id").value),
         quantity: Number(document.getElementById("order-quantity").value),
         totalAmount: Number(document.getElementById("order-total-amount").value).toFixed(2)
     };
@@ -320,7 +331,7 @@ async function handleOrderTableClick(event) {
     if (button.dataset.action === "edit") {
         document.getElementById("order-id").value = order.id;
         document.getElementById("order-customer-id").value = order.customerId;
-        document.getElementById("order-product-name").value = order.productName;
+        document.getElementById("order-product-id").value = order.productId;
         document.getElementById("order-quantity").value = order.quantity;
         document.getElementById("order-total-amount").value = order.totalAmount;
         document.getElementById("order-submit").textContent = "Update order";
@@ -387,6 +398,7 @@ function renderOrders() {
         const shipping = order.shippingType
             ? `${escapeHtml(order.shippingType)} · ${order.estimatedDeliveryDays} day${order.estimatedDeliveryDays === 1 ? "" : "s"}`
             : "Pending submit";
+        const skuLabel = order.productSku ? ` · SKU ${escapeHtml(order.productSku)}` : "";
 
         return `
             <tr>
@@ -394,7 +406,7 @@ function renderOrders() {
                 <td>${escapeHtml(customerName)}</td>
                 <td>
                     <strong>${escapeHtml(order.productName)}</strong><br>
-                    <span class="hero-text">$${Number(order.totalAmount).toFixed(2)} · Qty ${order.quantity}</span>
+                    <span class="hero-text">$${Number(order.totalAmount).toFixed(2)}${skuLabel} · Qty ${order.quantity}</span>
                 </td>
                 <td>
                     <span class="status-pill ${order.status === "SUBMITTED" ? "submitted" : ""}">
@@ -414,6 +426,168 @@ function renderOrders() {
     }).join("");
 }
 
+function renderProducts() {
+    if (!productTableBody) {
+        return;
+    }
+
+    if (!state.products.length) {
+        productTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">No products yet. Create one to get started.</td></tr>`;
+        return;
+    }
+
+    productTableBody.innerHTML = state.products.map((product) => {
+        const tags = product.tags?.length ? escapeHtml(product.tags.join(", ")) : "N/A";
+        const statusLabel = product.status?.active ? "Active" : "Inactive";
+        const shippingLabels = [
+            product.shipping?.fragile ? "Fragile" : "Sturdy",
+            product.shipping?.hazmat ? "Hazmat" : "Non-hazmat",
+            product.shipping?.requiresCooling ? "Cooling" : "Ambient",
+            `Max stackable ${product.shipping?.maxStackable ?? "—"}`
+        ].join(" · ");
+
+        return `
+            <tr>
+                <td>${escapeHtml(product.sku)}</td>
+                <td>
+                    <strong>${escapeHtml(product.name)}</strong><br>
+                    <span class="hero-text">${escapeHtml(product.description)}</span>
+                </td>
+                <td>${escapeHtml(product.category)}</td>
+                <td>${statusLabel}</td>
+                <td>${shippingLabels}</td>
+                <td>${tags}</td>
+                <td>
+                    <div class="actions-row">
+                        <button class="inline-action" data-action="edit" data-id="${product.id}" type="button">Edit</button>
+                        <button class="inline-action danger" data-action="delete" data-id="${product.id}" type="button">Delete</button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join("");
+}
+
+async function handleProductSubmit(event) {
+    event.preventDefault();
+
+    const id = document.getElementById("product-id").value;
+    const tags = document.getElementById("product-tags").value
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean);
+
+    const payload = {
+        sku: document.getElementById("product-sku").value.trim(),
+        name: document.getElementById("product-name").value.trim(),
+        description: document.getElementById("product-description").value.trim(),
+        category: document.getElementById("product-category").value.trim(),
+        price: {
+            amount: Number(document.getElementById("product-price-amount").value),
+            currency: document.getElementById("product-price-currency").value.trim().toUpperCase()
+        },
+        physical: {
+            weight: {
+                value: Number(document.getElementById("product-weight-value").value),
+                unit: document.getElementById("product-weight-unit").value.trim()
+            },
+            dimensions: {
+                length: Number(document.getElementById("product-dimensions-length").value),
+                width: Number(document.getElementById("product-dimensions-width").value),
+                height: Number(document.getElementById("product-dimensions-height").value),
+                unit: document.getElementById("product-dimensions-unit").value.trim()
+            }
+        },
+        shipping: {
+            fragile: document.getElementById("product-shipping-fragile").value === "true",
+            hazmat: document.getElementById("product-shipping-hazmat").value === "true",
+            requiresCooling: document.getElementById("product-shipping-requires-cooling").value === "true",
+            maxStackable: Number(document.getElementById("product-shipping-max-stackable").value)
+        },
+        status: {
+            active: document.getElementById("product-status-active").value === "true",
+            shippable: document.getElementById("product-status-shippable").value === "true"
+        },
+        tags
+    };
+
+    try {
+        await apiRequest(id ? `/api/products/${id}` : "/api/products", {
+            method: id ? "PUT" : "POST",
+            body: JSON.stringify(payload)
+        });
+
+        showBanner(id ? "Product updated." : "Product created.", "success");
+        resetProductForm();
+        await loadDashboard();
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
+}
+
+function resetProductForm() {
+    productForm.reset();
+    document.getElementById("product-id").value = "";
+    document.getElementById("product-submit").textContent = "Save product";
+}
+
+function populateProductForm(product) {
+    document.getElementById("product-id").value = product.id;
+    document.getElementById("product-sku").value = product.sku || "";
+    document.getElementById("product-name").value = product.name || "";
+    document.getElementById("product-description").value = product.description || "";
+    document.getElementById("product-category").value = product.category || "";
+    document.getElementById("product-price-amount").value = product.price?.amount ?? "";
+    document.getElementById("product-price-currency").value = product.price?.currency || "";
+    document.getElementById("product-weight-value").value = product.physical?.weight?.value ?? "";
+    document.getElementById("product-weight-unit").value = product.physical?.weight?.unit || "";
+    document.getElementById("product-dimensions-length").value = product.physical?.dimensions?.length ?? "";
+    document.getElementById("product-dimensions-width").value = product.physical?.dimensions?.width ?? "";
+    document.getElementById("product-dimensions-height").value = product.physical?.dimensions?.height ?? "";
+    document.getElementById("product-dimensions-unit").value = product.physical?.dimensions?.unit || "";
+    document.getElementById("product-shipping-fragile").value = String(product.shipping?.fragile ?? "");
+    document.getElementById("product-shipping-hazmat").value = String(product.shipping?.hazmat ?? "");
+    document.getElementById("product-shipping-requires-cooling").value = String(product.shipping?.requiresCooling ?? "");
+    document.getElementById("product-shipping-max-stackable").value = product.shipping?.maxStackable ?? "";
+    document.getElementById("product-status-active").value = String(product.status?.active ?? "");
+    document.getElementById("product-status-shippable").value = String(product.status?.shippable ?? "");
+    document.getElementById("product-tags").value = (product.tags || []).join(", ");
+    document.getElementById("product-submit").textContent = "Update product";
+    productForm.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function handleProductTableClick(event) {
+    const button = event.target.closest("button[data-action]");
+    if (!button) {
+        return;
+    }
+
+    const productId = Number(button.dataset.id);
+    const product = state.products.find((entry) => entry.id === productId);
+
+    if (!product) {
+        return;
+    }
+
+    if (button.dataset.action === "edit") {
+        populateProductForm(product);
+        return;
+    }
+
+    if (!window.confirm(`Delete product "${product.name}"?`)) {
+        return;
+    }
+
+    try {
+        await apiRequest(`/api/products/${product.id}`, { method: "DELETE" });
+        showBanner("Product deleted.", "success");
+        resetProductForm();
+        await loadDashboard();
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
+}
+
 function renderCustomerOptions() {
     const currentValue = document.getElementById("order-customer-id").value;
     const options = state.customers.map((customer) => `
@@ -424,11 +598,26 @@ function renderCustomerOptions() {
     customerSelect.value = currentValue;
 }
 
+function renderProductOptions() {
+    if (!orderProductSelect) {
+        return;
+    }
+
+    const currentValue = orderProductSelect.value;
+    const options = state.products.map((product) => `
+        <option value="${product.id}">${escapeHtml(product.name)} (${escapeHtml(product.sku)})</option>
+    `).join("");
+
+    orderProductSelect.innerHTML = `<option value="">Select a product</option>${options}`;
+    orderProductSelect.value = currentValue;
+}
+
 function renderMetrics() {
     const submittedOrders = state.orders.filter((order) => order.status === "SUBMITTED");
     const draftOrders = state.orders.filter((order) => order.status === "DRAFT");
     const totals = [
         { label: "Customers", value: state.customers.length },
+        { label: "Products", value: state.products.length },
         { label: "Orders", value: state.orders.length },
         { label: "Submitted", value: submittedOrders.length },
         { label: "Drafts", value: draftOrders.length }
@@ -491,6 +680,7 @@ function resetOrderForm() {
     orderForm.reset();
     document.getElementById("order-id").value = "";
     document.getElementById("order-submit").textContent = "Save order";
+    orderProductSelect.value = "";
 }
 
 function showBanner(message, type) {

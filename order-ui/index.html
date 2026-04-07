@@ -54,6 +54,9 @@
             <button class="tab-button" id="orders-tab" type="button" role="tab" aria-selected="false" aria-controls="orders-panel" data-tab-target="orders" tabindex="-1">
                 Order workbench
             </button>
+            <button class="tab-button" id="products-tab" type="button" role="tab" aria-selected="false" aria-controls="products-panel" data-tab-target="products" tabindex="-1">
+                Product catalog
+            </button>
             <button class="tab-button" id="activity-tab" type="button" role="tab" aria-selected="false" aria-controls="activity-panel" data-tab-target="activity" tabindex="-1">
                 System activity
             </button>
@@ -142,6 +145,139 @@
             </div>
         </section>
 
+        <section class="panel tab-panel" id="products-panel" role="tabpanel" aria-labelledby="products-tab" data-tab-panel="products" hidden>
+            <div class="panel-header">
+                <div>
+                    <p class="panel-kicker">Products</p>
+                    <h2>Product catalog</h2>
+                </div>
+                <p class="panel-note">Define products with detailed metadata, pricing, and shipping rules.</p>
+            </div>
+            <form class="form-grid" id="product-form">
+                <input type="hidden" id="product-id">
+                <label>
+                    <span>SKU</span>
+                    <input id="product-sku" type="text" placeholder="WM-12345" maxlength="32" required>
+                </label>
+                <label>
+                    <span>Name</span>
+                    <input id="product-name" type="text" placeholder="Wireless Mouse" required>
+                </label>
+                <label>
+                    <span>Description</span>
+                    <input id="product-description" type="text" placeholder="Ergonomic Bluetooth mouse" required>
+                </label>
+                <label>
+                    <span>Category</span>
+                    <input id="product-category" type="text" placeholder="Electronics" required>
+                </label>
+                <label>
+                    <span>Price amount</span>
+                    <input id="product-price-amount" type="number" min="0" step="0.01" placeholder="29.99" required>
+                </label>
+                <label>
+                    <span>Price currency</span>
+                    <input id="product-price-currency" type="text" maxlength="3" minlength="3" placeholder="USD" required>
+                </label>
+                <label>
+                    <span>Weight value</span>
+                    <input id="product-weight-value" type="number" min="0" step="0.01" placeholder="0.2" required>
+                </label>
+                <label>
+                    <span>Weight unit</span>
+                    <input id="product-weight-unit" type="text" placeholder="kg" required>
+                </label>
+                <label>
+                    <span>Dimensions length</span>
+                    <input id="product-dimensions-length" type="number" min="0" step="0.01" placeholder="10" required>
+                </label>
+                <label>
+                    <span>Dimensions width</span>
+                    <input id="product-dimensions-width" type="number" min="0" step="0.01" placeholder="6" required>
+                </label>
+                <label>
+                    <span>Dimensions height</span>
+                    <input id="product-dimensions-height" type="number" min="0" step="0.01" placeholder="4" required>
+                </label>
+                <label>
+                    <span>Dimensions unit</span>
+                    <input id="product-dimensions-unit" type="text" placeholder="cm" required>
+                </label>
+                <label>
+                    <span>Fragile</span>
+                    <select id="product-shipping-fragile" required>
+                        <option value="">Select</option>
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Hazmat</span>
+                    <select id="product-shipping-hazmat" required>
+                        <option value="">Select</option>
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Requires cooling</span>
+                    <select id="product-shipping-requires-cooling" required>
+                        <option value="">Select</option>
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Max stackable</span>
+                    <input id="product-shipping-max-stackable" type="number" min="1" step="1" placeholder="10" required>
+                </label>
+                <label>
+                    <span>Status active</span>
+                    <select id="product-status-active" required>
+                        <option value="">Select</option>
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Status shippable</span>
+                    <select id="product-status-shippable" required>
+                        <option value="">Select</option>
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Tags</span>
+                    <input id="product-tags" type="text" placeholder="mouse, wireless, peripherals" required>
+                </label>
+                <div class="form-actions">
+                    <button class="primary-button" id="product-submit" type="submit">Save product</button>
+                    <button class="ghost-button" id="product-reset" type="button">Clear</button>
+                </div>
+            </form>
+            <div class="table-shell">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>SKU</th>
+                        <th>Name</th>
+                        <th>Category</th>
+                        <th>Status</th>
+                        <th>Shipping</th>
+                        <th>Tags</th>
+                        <th></th>
+                    </tr>
+                    </thead>
+                    <tbody id="product-table-body">
+                    <tr>
+                        <td colspan="7" class="empty-state">Loading products...</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
         <section class="panel tab-panel" id="orders-panel" role="tabpanel" aria-labelledby="orders-tab" data-tab-panel="orders" hidden>
             <div class="panel-header">
                 <div>
@@ -160,7 +296,9 @@
                 </label>
                 <label>
                     <span>Product</span>
-                    <input id="order-product-name" name="productName" type="text" placeholder="Celebration Gift Box" required>
+                    <select id="order-product-id" name="productId" required>
+                        <option value="">Select a product</option>
+                    </select>
                 </label>
                 <label>
                     <span>Quantity</span>
