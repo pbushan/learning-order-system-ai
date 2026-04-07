@@ -70,12 +70,52 @@
             <form class="form-grid" id="customer-form">
                 <input type="hidden" id="customer-id">
                 <label>
-                    <span>Name</span>
-                    <input id="customer-name" name="name" type="text" placeholder="Ava Thompson" required>
+                    <span>First name</span>
+                    <input id="customer-first-name" name="firstName" type="text" placeholder="Ava" required>
+                </label>
+                <label>
+                    <span>Last name</span>
+                    <input id="customer-last-name" name="lastName" type="text" placeholder="Thompson" required>
                 </label>
                 <label>
                     <span>Email</span>
                     <input id="customer-email" name="email" type="email" placeholder="ava@example.com" required>
+                </label>
+                <label>
+                    <span>Phone</span>
+                    <input id="customer-phone" name="phone" type="tel" placeholder="+1-416-555-0147" required>
+                </label>
+                <label>
+                    <span>Address type</span>
+                    <select id="customer-address-type" name="addressType" required>
+                        <option value="SHIPPING" selected>SHIPPING</option>
+                        <option value="BILLING">BILLING</option>
+                        <option value="OTHER">OTHER</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Address line 1</span>
+                    <input id="customer-address-line1" name="line1" type="text" placeholder="123 Main St" required>
+                </label>
+                <label>
+                    <span>Address line 2</span>
+                    <input id="customer-address-line2" name="line2" type="text" placeholder="Unit 5">
+                </label>
+                <label>
+                    <span>City</span>
+                    <input id="customer-city" name="city" type="text" placeholder="Toronto" required>
+                </label>
+                <label>
+                    <span>State / Province</span>
+                    <input id="customer-state" name="state" type="text" placeholder="ON" required>
+                </label>
+                <label>
+                    <span>Postal code</span>
+                    <input id="customer-postal-code" name="postalCode" type="text" placeholder="L6P 1A1" required>
+                </label>
+                <label>
+                    <span>Country (2-letter)</span>
+                    <input id="customer-country" name="country" type="text" placeholder="CA" maxlength="2" minlength="2" required>
                 </label>
                 <div class="form-actions">
                     <button class="primary-button" id="customer-submit" type="submit">Save customer</button>
@@ -89,12 +129,13 @@
                         <th>ID</th>
                         <th>Name</th>
                         <th>Email</th>
+                        <th>Phone</th>
                         <th></th>
                     </tr>
                     </thead>
                     <tbody id="customer-table-body">
                     <tr>
-                        <td colspan="4" class="empty-state">Loading customers...</td>
+                        <td colspan="5" class="empty-state">Loading customers...</td>
                     </tr>
                     </tbody>
                 </table>
