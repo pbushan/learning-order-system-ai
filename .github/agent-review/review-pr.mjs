@@ -203,8 +203,9 @@ function buildSkippedReview(reviewContext) {
 
 async function runLlmReview(reviewContext) {
     const prompt = buildPrompt(reviewContext);
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    const response = await fetchWithRetry("https://api.openai.com/v1/responses", {
         method: "POST",
+        signal: AbortSignal.timeout(180000),
         headers: {
             Authorization: `Bearer ${openAiApiKey}`,
             "Content-Type": "application/json"
@@ -252,6 +253,31 @@ async function runLlmReview(reviewContext) {
     }
 
     return normalizeReview(JSON.parse(text));
+}
+
+async function fetchWithRetry(url, options, attempts = 2) {
+    let lastError;
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        try {
+            return await fetch(url, options);
+        } catch (error) {
+            lastError = error;
+
+            if (attempt === attempts) {
+                throw error;
+            }
+
+            console.warn(`Fetch attempt ${attempt} failed for ${url}: ${error.message}. Retrying once.`);
+            await sleep(1000 * attempt);
+        }
+    }
+
+    throw lastError;
+}
+
+function sleep(milliseconds) {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function buildPrompt(reviewContext) {
