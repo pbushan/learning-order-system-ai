@@ -197,9 +197,26 @@ async function handleCustomerSubmit(event) {
     event.preventDefault();
 
     const id = document.getElementById("customer-id").value;
+    const line2 = document.getElementById("customer-address-line2").value.trim();
     const payload = {
-        name: document.getElementById("customer-name").value.trim(),
-        email: document.getElementById("customer-email").value.trim()
+        name: {
+            firstName: document.getElementById("customer-first-name").value.trim(),
+            lastName: document.getElementById("customer-last-name").value.trim()
+        },
+        email: document.getElementById("customer-email").value.trim(),
+        phone: document.getElementById("customer-phone").value.trim(),
+        addresses: [
+            {
+                type: document.getElementById("customer-address-type").value,
+                line1: document.getElementById("customer-address-line1").value.trim(),
+                line2: line2 || null,
+                city: document.getElementById("customer-city").value.trim(),
+                state: document.getElementById("customer-state").value.trim(),
+                postalCode: document.getElementById("customer-postal-code").value.trim(),
+                country: document.getElementById("customer-country").value.trim().toUpperCase(),
+                isDefault: true
+            }
+        ]
     };
 
     try {
@@ -256,14 +273,24 @@ async function handleCustomerTableClick(event) {
 
     if (button.dataset.action === "edit") {
         document.getElementById("customer-id").value = customer.id;
-        document.getElementById("customer-name").value = customer.name;
+        const primaryAddress = getDefaultAddress(customer);
+        document.getElementById("customer-first-name").value = customer.name?.firstName || "";
+        document.getElementById("customer-last-name").value = customer.name?.lastName || "";
         document.getElementById("customer-email").value = customer.email;
+        document.getElementById("customer-phone").value = customer.phone || "";
+        document.getElementById("customer-address-type").value = primaryAddress?.type || "SHIPPING";
+        document.getElementById("customer-address-line1").value = primaryAddress?.line1 || "";
+        document.getElementById("customer-address-line2").value = primaryAddress?.line2 || "";
+        document.getElementById("customer-city").value = primaryAddress?.city || "";
+        document.getElementById("customer-state").value = primaryAddress?.state || "";
+        document.getElementById("customer-postal-code").value = primaryAddress?.postalCode || "";
+        document.getElementById("customer-country").value = primaryAddress?.country || "";
         document.getElementById("customer-submit").textContent = "Update customer";
         customerForm.scrollIntoView({ behavior: "smooth", block: "start" });
         return;
     }
 
-    if (!window.confirm(`Delete customer "${customer.name}"?`)) {
+    if (!window.confirm(`Delete customer "${getCustomerDisplayName(customer)}"?`)) {
         return;
     }
 
@@ -328,15 +355,16 @@ async function handleOrderTableClick(event) {
 
 function renderCustomers() {
     if (!state.customers.length) {
-        customerTableBody.innerHTML = `<tr><td colspan="4" class="empty-state">No customers yet. Create one to get started.</td></tr>`;
+        customerTableBody.innerHTML = `<tr><td colspan="5" class="empty-state">No customers yet. Create one to get started.</td></tr>`;
         return;
     }
 
     customerTableBody.innerHTML = state.customers.map((customer) => `
         <tr>
             <td>${customer.id}</td>
-            <td>${escapeHtml(customer.name)}</td>
+            <td>${escapeHtml(getCustomerDisplayName(customer))}</td>
             <td>${escapeHtml(customer.email)}</td>
+            <td>${escapeHtml(customer.phone || "N/A")}</td>
             <td>
                 <div class="actions-row">
                     <button class="inline-action" data-action="edit" data-id="${customer.id}" type="button">Edit</button>
@@ -355,7 +383,7 @@ function renderOrders() {
 
     orderTableBody.innerHTML = state.orders.map((order) => {
         const customer = state.customers.find((entry) => entry.id === order.customerId);
-        const customerName = customer ? customer.name : `Customer ${order.customerId}`;
+        const customerName = customer ? getCustomerDisplayName(customer) : `Customer ${order.customerId}`;
         const shipping = order.shippingType
             ? `${escapeHtml(order.shippingType)} · ${order.estimatedDeliveryDays} day${order.estimatedDeliveryDays === 1 ? "" : "s"}`
             : "Pending submit";
@@ -389,7 +417,7 @@ function renderOrders() {
 function renderCustomerOptions() {
     const currentValue = document.getElementById("order-customer-id").value;
     const options = state.customers.map((customer) => `
-        <option value="${customer.id}">${escapeHtml(customer.name)} (${escapeHtml(customer.email)})</option>
+        <option value="${customer.id}">${escapeHtml(getCustomerDisplayName(customer))} (${escapeHtml(customer.email)})</option>
     `).join("");
 
     customerSelect.innerHTML = `<option value="">Select a customer</option>${options}`;
@@ -436,7 +464,7 @@ function renderActivity() {
             <article class="activity-card">
                 <p class="activity-title">Order #${order.id}</p>
                 <p class="activity-text">
-                    ${escapeHtml(order.productName)} for ${escapeHtml(customer ? customer.name : `Customer ${order.customerId}`)}<br>
+                    ${escapeHtml(order.productName)} for ${escapeHtml(customer ? getCustomerDisplayName(customer) : `Customer ${order.customerId}`)}<br>
                     Shipping: ${escapeHtml(order.shippingType || "Pending")}<br>
                     ETA: ${order.estimatedDeliveryDays ?? "Pending"} day${order.estimatedDeliveryDays === 1 ? "" : "s"}
                 </p>
@@ -482,4 +510,27 @@ function escapeHtml(value) {
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
+}
+
+function getCustomerDisplayName(customer) {
+    if (!customer) {
+        return "Unknown customer";
+    }
+
+    const firstName = customer.name?.firstName?.trim() || "";
+    const lastName = customer.name?.lastName?.trim() || "";
+    const fullName = `${firstName} ${lastName}`.trim();
+
+    if (fullName) {
+        return fullName;
+    }
+
+    return customer.name || "Unnamed customer";
+}
+
+function getDefaultAddress(customer) {
+    if (!customer?.addresses?.length) {
+        return null;
+    }
+    return customer.addresses.find((address) => address.isDefault) || customer.addresses[0];
 }
