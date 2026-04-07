@@ -10,6 +10,7 @@ for (const key of requiredEnv) {
 }
 
 const token = process.env.GITHUB_TOKEN;
+// Optional: policy-only and skipped reviews do not need an OpenAI key.
 const openAiApiKey = process.env.OPENAI_API_KEY;
 const model = process.env.MODEL || "gpt-5";
 const repo = process.env.REPO;
@@ -656,9 +657,9 @@ async function loadPolicy() {
     const rawPolicy = JSON.parse(await readFile(".github/agent-review/policy.json", "utf8"));
 
     return {
-        maxFiles: Number(rawPolicy.maxFiles ?? 20),
-        maxPatchChars: Number(rawPolicy.maxPatchChars ?? 30000),
-        maxInlineComments: Number(rawPolicy.maxInlineComments ?? 10),
+        maxFiles: readNonNegativeNumber(rawPolicy.maxFiles, 20),
+        maxPatchChars: readNonNegativeNumber(rawPolicy.maxPatchChars, 30000),
+        maxInlineComments: readNonNegativeNumber(rawPolicy.maxInlineComments, 10),
         reviewForks: Boolean(rawPolicy.reviewForks),
         blockPolicyWithRequestChanges: Boolean(rawPolicy.blockPolicyWithRequestChanges),
         allowPaths: Array.isArray(rawPolicy.allowPaths) ? rawPolicy.allowPaths : ["**"],
@@ -667,6 +668,16 @@ async function loadPolicy() {
         sensitivePaths: Array.isArray(rawPolicy.sensitivePaths) ? rawPolicy.sensitivePaths : [],
         checkRunName: String(rawPolicy.checkRunName || "Agent Review Governance")
     };
+}
+
+function readNonNegativeNumber(value, defaultValue) {
+    const candidate = Number(value ?? defaultValue);
+
+    if (!Number.isFinite(candidate) || candidate < 0) {
+        return defaultValue;
+    }
+
+    return candidate;
 }
 
 function matchesAny(filename, patterns) {
