@@ -200,17 +200,48 @@ button {
     align-items: start;
 }
 
+.tab-list {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px;
+    border: 1px solid var(--line);
+    background: rgba(255, 252, 247, 0.66);
+    border-radius: 22px;
+    box-shadow: var(--shadow);
+}
+
+.tab-button {
+    flex: 1 1 180px;
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid transparent;
+    border-radius: 16px;
+}
+
+.tab-button.active,
+.tab-button:focus-visible {
+    background: rgba(255, 255, 255, 0.82);
+    border-color: rgba(180, 83, 42, 0.22);
+    color: var(--ink);
+    box-shadow: 0 12px 28px rgba(77, 57, 34, 0.1);
+}
+
+.tab-button:focus-visible {
+    outline: none;
+}
+
 .panel {
     padding: 28px;
 }
 
-.panel:nth-child(1),
-.panel:nth-child(2) {
-    grid-column: span 6;
+.tab-panel {
+    grid-column: 1 / -1;
 }
 
-.panel:nth-child(3) {
-    grid-column: 1 / -1;
+.tab-panel[hidden] {
+    display: none;
 }
 
 .accent-panel {
@@ -424,12 +455,6 @@ tbody tr:last-child td {
 @media (max-width: 1080px) {
     .hero {
         grid-template-columns: 1fr;
-    }
-
-    .panel:nth-child(1),
-    .panel:nth-child(2),
-    .panel:nth-child(3) {
-        grid-column: 1 / -1;
     }
 }
 

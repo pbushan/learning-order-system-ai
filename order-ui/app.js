@@ -14,6 +14,8 @@ const banner = document.getElementById("feedback-banner");
 const refreshButton = document.getElementById("refresh-button");
 const apiStatusDot = document.getElementById("api-status-dot");
 const apiStatusText = document.getElementById("api-status-text");
+const tabButtons = Array.from(document.querySelectorAll("[data-tab-target]"));
+const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
 
 document.addEventListener("DOMContentLoaded", () => {
     customerForm.addEventListener("submit", handleCustomerSubmit);
@@ -23,10 +25,65 @@ document.addEventListener("DOMContentLoaded", () => {
     refreshButton.addEventListener("click", () => loadDashboard(true));
     customerTableBody.addEventListener("click", handleCustomerTableClick);
     orderTableBody.addEventListener("click", handleOrderTableClick);
+    tabButtons.forEach((button) => {
+        button.addEventListener("click", () => activateTab(button.dataset.tabTarget));
+        button.addEventListener("keydown", handleTabKeydown);
+    });
+    window.addEventListener("hashchange", () => activateTab(getTabFromHash(), false));
 
+    activateTab(getTabFromHash(), false);
     loadDashboard();
     window.setInterval(() => loadDashboard(false, true), 15000);
 });
+
+function getTabFromHash() {
+    const requestedTab = window.location.hash.replace("#", "");
+    return tabButtons.some((button) => button.dataset.tabTarget === requestedTab)
+        ? requestedTab
+        : "customers";
+}
+
+function activateTab(tabName, updateHash = true) {
+    tabButtons.forEach((button) => {
+        const isActive = button.dataset.tabTarget === tabName;
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-selected", String(isActive));
+        button.tabIndex = isActive ? 0 : -1;
+    });
+
+    tabPanels.forEach((panel) => {
+        panel.hidden = panel.dataset.tabPanel !== tabName;
+    });
+
+    if (updateHash && window.location.hash !== `#${tabName}`) {
+        window.history.replaceState(null, "", `#${tabName}`);
+    }
+}
+
+function handleTabKeydown(event) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+        return;
+    }
+
+    event.preventDefault();
+    const currentIndex = tabButtons.findIndex((button) => button === event.currentTarget);
+    const lastIndex = tabButtons.length - 1;
+    let nextIndex = currentIndex;
+
+    if (event.key === "ArrowLeft") {
+        nextIndex = currentIndex === 0 ? lastIndex : currentIndex - 1;
+    } else if (event.key === "ArrowRight") {
+        nextIndex = currentIndex === lastIndex ? 0 : currentIndex + 1;
+    } else if (event.key === "Home") {
+        nextIndex = 0;
+    } else if (event.key === "End") {
+        nextIndex = lastIndex;
+    }
+
+    const nextButton = tabButtons[nextIndex];
+    activateTab(nextButton.dataset.tabTarget);
+    nextButton.focus();
+}
 
 async function apiRequest(path, options = {}) {
     const response = await fetch(path, {
