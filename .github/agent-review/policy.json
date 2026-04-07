@@ -5,6 +5,9 @@
   "reviewForks": false,
   "blockPolicyWithRequestChanges": false,
   "requireActionForPolicyBlocked": true,
+  "agentReviewedLabel": "agent-reviewed",
+  "agentFixedLabel": "agent-fixed",
+  "enablePatchSuggestions": true,
   "allowPaths": [
     "**"
   ],
