@@ -357,6 +357,7 @@ async function postReviewWithFallback({ event, body, comments }) {
 
 async function postReview({ event, body, comments }) {
     const payload = {
+        commit_id: pull.head.sha,
         event,
         body
     };
@@ -372,7 +373,7 @@ async function postReview({ event, body, comments }) {
 }
 
 function isInlineCommentValidationError(error) {
-    return error instanceof GitHubRequestError && [400, 422].includes(error.status);
+    return error instanceof GitHubRequestError && [400, 413, 422].includes(error.status);
 }
 
 function normalizeInlineFinding(finding) {
