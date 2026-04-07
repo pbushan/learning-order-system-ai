@@ -16,7 +16,7 @@ const model = process.env.MODEL || "gpt-5";
 const repo = process.env.REPO;
 const prNumber = process.env.PR_NUMBER;
 const apiBaseUrl = process.env.GITHUB_API_URL;
-const policy = await loadPolicy();
+const policy = await loadPolicyWithFallback();
 
 const headers = {
     Accept: "application/vnd.github+json",
@@ -59,6 +59,10 @@ function buildReviewContext(pullRequest, changedFiles) {
     const sensitiveFiles = changedFileNames.filter((filename) => matchesAny(filename, policy.sensitivePaths));
     const outsideAllowedFiles = changedFileNames.filter((filename) => !matchesAny(filename, policy.allowPaths));
     const policyMessages = [];
+
+    if (policy.policyLoadError) {
+        policyMessages.push(`Agent review policy failed to load and safe defaults were used: ${policy.policyLoadError}`);
+    }
 
     if (isFork && !policy.reviewForks) {
         policyMessages.push("PR comes from a fork and fork review is disabled by policy.");
@@ -187,7 +191,7 @@ function buildPolicyBlockedReview(reviewContext) {
 
 function buildSkippedReview(reviewContext) {
     return {
-        summary: "Automated review skipped deep LLM analysis because this PR exceeded the configured safe review limits.",
+        summary: `Automated review skipped deep LLM analysis: ${reviewContext.skipReason}`,
         blocking: false,
         findings: [
             {
@@ -533,6 +537,11 @@ async function postCheckRun({ pull, reviewContext, llmReview, event, comments, c
 }
 
 async function postCheckRunWithFallback({ pull, reviewContext, llmReview, event, comments, checkConclusion }) {
+    if (reviewContext.isFork && !policy.reviewForks) {
+        console.warn("Skipping check run creation for fork PR because fork review is disabled by policy.");
+        return;
+    }
+
     try {
         await postCheckRun({ pull, reviewContext, llmReview, event, comments, checkConclusion });
     } catch (error) {
@@ -679,9 +688,18 @@ function truncateText(text, maxLength) {
     return `${normalizedText.slice(0, maxLength)}...`;
 }
 
-async function loadPolicy() {
-    const rawPolicy = JSON.parse(await readFile(".github/agent-review/policy.json", "utf8"));
+async function loadPolicyWithFallback() {
+    try {
+        return normalizePolicy(JSON.parse(await readFile(".github/agent-review/policy.json", "utf8")));
+    } catch (error) {
+        return {
+            ...normalizePolicy({}),
+            policyLoadError: error.message
+        };
+    }
+}
 
+function normalizePolicy(rawPolicy) {
     return {
         maxFiles: readNonNegativeNumber(rawPolicy.maxFiles, 20),
         maxPatchChars: readNonNegativeNumber(rawPolicy.maxPatchChars, 30000),

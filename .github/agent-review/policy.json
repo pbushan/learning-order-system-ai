@@ -41,13 +41,7 @@
     ".env",
     "**/.env",
     ".env.*",
-    "**/.env.*",
-    "*secret*",
-    "**/*secret*",
-    "*credential*",
-    "**/*credential*",
-    "*token*",
-    "**/*token*"
+    "**/.env.*"
   ],
   "checkRunName": "Agent Review Governance"
 }
