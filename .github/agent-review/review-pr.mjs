@@ -1,17 +1,6 @@
+import { readFile, writeFile } from "node:fs/promises";
+
 const requiredEnv = ["GITHUB_TOKEN", "OPENAI_API_KEY", "REPO", "PR_NUMBER", "GITHUB_API_URL"];
-const maxFiles = 20;
-const maxPatchChars = 30000;
-const maxInlineComments = 10;
-const skippedPathPatterns = [
-    /^node_modules\//,
-    /^dist\//,
-    /^build\//,
-    /^target\//,
-    /package-lock\.json$/,
-    /yarn\.lock$/,
-    /pnpm-lock\.yaml$/,
-    /\.min\.(js|css)$/
-];
 
 for (const key of requiredEnv) {
     if (!process.env[key]) {
@@ -25,6 +14,7 @@ const model = process.env.MODEL || "gpt-5";
 const repo = process.env.REPO;
 const prNumber = process.env.PR_NUMBER;
 const apiBaseUrl = process.env.GITHUB_API_URL;
+const policy = await loadPolicy();
 
 const headers = {
     Accept: "application/vnd.github+json",
@@ -36,28 +26,86 @@ const pull = await githubRequest(`${apiBaseUrl}/repos/${repo}/pulls/${prNumber}`
 const files = await githubRequest(`${apiBaseUrl}/repos/${repo}/pulls/${prNumber}/files?per_page=100`);
 
 const reviewContext = buildReviewContext(pull, files);
-const llmReview = reviewContext.skipped
+const llmReview = reviewContext.policyBlocked
+    ? buildPolicyBlockedReview(reviewContext)
+    : reviewContext.skipped
     ? buildSkippedReview(reviewContext)
     : await runLlmReview(reviewContext);
 
 const event = llmReview.blocking ? "REQUEST_CHANGES" : "COMMENT";
 const body = buildReviewBody(pull, reviewContext, llmReview, event);
 const comments = buildInlineComments(reviewContext, llmReview);
+const checkConclusion = getCheckConclusion(reviewContext, llmReview);
 
+await writeReviewArtifact({ pull, reviewContext, llmReview, event, comments, checkConclusion });
 await postReviewWithFallback({ event, body, comments });
+await postCheckRun({ pull, reviewContext, llmReview, event, comments, checkConclusion });
 
 function buildReviewContext(pullRequest, changedFiles) {
+    const isFork = pullRequest.head.repo?.full_name !== pullRequest.base.repo?.full_name;
+    const changedFileNames = changedFiles.map((file) => normalizePath(file.filename));
+    const ignoredFiles = changedFileNames.filter((filename) => matchesAny(filename, policy.ignoredPaths));
+    const deniedFiles = changedFileNames.filter((filename) => matchesAny(filename, policy.denyPaths));
+    const sensitiveFiles = changedFileNames.filter((filename) => matchesAny(filename, policy.sensitivePaths));
+    const outsideAllowedFiles = changedFileNames.filter((filename) => !matchesAny(filename, policy.allowPaths));
+    const policyMessages = [];
+
+    if (isFork && !policy.reviewForks) {
+        policyMessages.push("PR comes from a fork and fork review is disabled by policy.");
+    }
+
+    if (deniedFiles.length) {
+        policyMessages.push(`PR touches denied path(s): ${deniedFiles.join(", ")}.`);
+    }
+
+    if (sensitiveFiles.length) {
+        policyMessages.push(`PR touches sensitive path(s): ${sensitiveFiles.join(", ")}.`);
+    }
+
+    if (outsideAllowedFiles.length) {
+        policyMessages.push(`PR touches path(s) outside the allow list: ${outsideAllowedFiles.join(", ")}.`);
+    }
+
     const reviewableFiles = changedFiles.filter((file) => {
-        return !skippedPathPatterns.some((pattern) => pattern.test(file.filename));
+        const filename = normalizePath(file.filename);
+        return matchesAny(filename, policy.allowPaths)
+            && !matchesAny(filename, policy.ignoredPaths)
+            && !matchesAny(filename, policy.denyPaths)
+            && !matchesAny(filename, policy.sensitivePaths);
     });
 
-    if (reviewableFiles.length > maxFiles) {
+    if (policyMessages.length) {
+        return {
+            pullRequest,
+            changedFiles,
+            reviewableFiles: [],
+            ignoredFiles,
+            deniedFiles,
+            sensitiveFiles,
+            outsideAllowedFiles,
+            policyMessages,
+            isFork,
+            patches: [],
+            policyBlocked: true,
+            skipped: false
+        };
+    }
+
+    if (reviewableFiles.length > policy.maxFiles) {
         return {
             pullRequest,
             changedFiles,
             reviewableFiles,
+            ignoredFiles,
+            deniedFiles,
+            sensitiveFiles,
+            outsideAllowedFiles,
+            policyMessages,
+            isFork,
+            patches: [],
+            policyBlocked: false,
             skipped: true,
-            skipReason: `PR has ${reviewableFiles.length} reviewable files, which exceeds the safe limit of ${maxFiles}.`
+            skipReason: `PR has ${reviewableFiles.length} reviewable files, which exceeds the safe limit of ${policy.maxFiles}.`
         };
     }
 
@@ -68,13 +116,21 @@ function buildReviewContext(pullRequest, changedFiles) {
         const patch = file.patch || "";
         patchChars += patch.length;
 
-        if (patchChars > maxPatchChars) {
+        if (patchChars > policy.maxPatchChars) {
             return {
                 pullRequest,
                 changedFiles,
                 reviewableFiles,
+                ignoredFiles,
+                deniedFiles,
+                sensitiveFiles,
+                outsideAllowedFiles,
+                policyMessages,
+                isFork,
+                patches,
+                policyBlocked: false,
                 skipped: true,
-                skipReason: `PR patch context exceeds the safe limit of ${maxPatchChars} characters.`
+                skipReason: `PR patch context exceeds the safe limit of ${policy.maxPatchChars} characters.`
             };
         }
 
@@ -91,8 +147,31 @@ function buildReviewContext(pullRequest, changedFiles) {
         pullRequest,
         changedFiles,
         reviewableFiles,
+        ignoredFiles,
+        deniedFiles,
+        sensitiveFiles,
+        outsideAllowedFiles,
+        policyMessages,
+        isFork,
         patches,
+        policyBlocked: false,
         skipped: false
+    };
+}
+
+function buildPolicyBlockedReview(reviewContext) {
+    return {
+        summary: "Automated deep review was blocked by governance policy. Human review is required before merge.",
+        blocking: true,
+        findings: reviewContext.policyMessages.map((message) => {
+            return {
+                severity: "P2",
+                title: "Governance policy requires human review",
+                file: null,
+                line: null,
+                body: message
+            };
+        })
     };
 }
 
@@ -278,6 +357,10 @@ function buildReviewBody(pullRequest, reviewContext, llmReview, event) {
         `- PR number: #${pullRequest.number}`,
         `- Changed files: ${reviewContext.changedFiles.length}`,
         `- Reviewable files: ${reviewContext.reviewableFiles.length}`,
+        `- Ignored files: ${reviewContext.ignoredFiles.length}`,
+        `- Denied files: ${reviewContext.deniedFiles.length}`,
+        `- Sensitive files: ${reviewContext.sensitiveFiles.length}`,
+        `- Fork PR: ${reviewContext.isFork ? "yes" : "no"}`,
         `- Base branch: \`${pullRequest.base.ref}\``,
         `- Head branch: \`${pullRequest.head.ref}\``,
         "",
@@ -289,9 +372,10 @@ function buildReviewBody(pullRequest, reviewContext, llmReview, event) {
         ...findingLines,
         "",
         "Policy:",
-        `- Max reviewable files: ${maxFiles}`,
-        `- Max patch characters: ${maxPatchChars}`,
-        `- Max inline comments: ${maxInlineComments}`,
+        `- Max reviewable files: ${policy.maxFiles}`,
+        `- Max patch characters: ${policy.maxPatchChars}`,
+        `- Max inline comments: ${policy.maxInlineComments}`,
+        `- Fork review enabled: ${policy.reviewForks ? "yes" : "no"}`,
         "- Findings with valid changed-file line references are also posted as inline review comments."
     ].filter(Boolean).join("\n");
 }
@@ -327,7 +411,7 @@ function buildInlineComments(reviewContext, llmReview) {
             seenLocations.add(locationKey);
             return true;
         })
-        .slice(0, maxInlineComments)
+        .slice(0, policy.maxInlineComments)
         .map((finding) => {
             return {
                 path: finding.file,
@@ -393,6 +477,118 @@ async function postReview({ event, body, comments }) {
     });
 }
 
+async function postCheckRun({ pull, reviewContext, llmReview, event, comments, checkConclusion }) {
+    const payload = {
+        name: policy.checkRunName,
+        head_sha: pull.head.sha,
+        status: "completed",
+        conclusion: checkConclusion,
+        output: {
+            title: `Agent review ${event}`,
+            summary: llmReview.summary,
+            text: buildCheckRunText({ reviewContext, llmReview, comments, checkConclusion })
+        }
+    };
+
+    await githubRequest(`${apiBaseUrl}/repos/${repo}/check-runs`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+    });
+}
+
+function buildCheckRunText({ reviewContext, llmReview, comments, checkConclusion }) {
+    const findingSummary = llmReview.findings.length
+        ? llmReview.findings.map((finding) => `- ${finding.severity}: ${finding.title}`).join("\n")
+        : "- No substantive findings.";
+
+    return [
+        `Conclusion: ${checkConclusion}`,
+        "",
+        "Governance:",
+        `- Policy blocked: ${reviewContext.policyBlocked ? "yes" : "no"}`,
+        `- Skipped deep review: ${reviewContext.skipped ? "yes" : "no"}`,
+        `- Fork PR: ${reviewContext.isFork ? "yes" : "no"}`,
+        `- Sensitive files: ${reviewContext.sensitiveFiles.length}`,
+        `- Denied files: ${reviewContext.deniedFiles.length}`,
+        `- Ignored files: ${reviewContext.ignoredFiles.length}`,
+        `- Inline comments: ${comments.length}`,
+        "",
+        "Findings:",
+        findingSummary
+    ].join("\n");
+}
+
+async function writeReviewArtifact({ pull, reviewContext, llmReview, event, comments, checkConclusion }) {
+    const artifact = {
+        generatedAt: new Date().toISOString(),
+        repository: repo,
+        pullRequest: {
+            number: pull.number,
+            title: pull.title,
+            baseRef: pull.base.ref,
+            headRef: pull.head.ref,
+            headSha: pull.head.sha,
+            isFork: reviewContext.isFork
+        },
+        policy: {
+            maxFiles: policy.maxFiles,
+            maxPatchChars: policy.maxPatchChars,
+            maxInlineComments: policy.maxInlineComments,
+            reviewForks: policy.reviewForks,
+            allowPaths: policy.allowPaths,
+            ignoredPaths: policy.ignoredPaths,
+            denyPaths: policy.denyPaths,
+            sensitivePaths: policy.sensitivePaths,
+            policyBlocked: reviewContext.policyBlocked,
+            policyMessages: reviewContext.policyMessages
+        },
+        review: {
+            event,
+            checkConclusion,
+            summary: llmReview.summary,
+            blocking: llmReview.blocking,
+            findings: llmReview.findings,
+            inlineComments: comments.map((comment) => {
+                return {
+                    path: comment.path,
+                    line: comment.line || null,
+                    side: comment.side || null,
+                    body: comment.body
+                };
+            })
+        },
+        files: {
+            changed: reviewContext.changedFiles.map((file) => {
+                return {
+                    filename: file.filename,
+                    status: file.status,
+                    additions: file.additions,
+                    deletions: file.deletions
+                };
+            }),
+            reviewable: reviewContext.reviewableFiles.map((file) => file.filename),
+            ignored: reviewContext.ignoredFiles,
+            denied: reviewContext.deniedFiles,
+            sensitive: reviewContext.sensitiveFiles,
+            outsideAllowed: reviewContext.outsideAllowedFiles
+        }
+    };
+
+    await writeFile(policy.artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
+}
+
+function getCheckConclusion(reviewContext, llmReview) {
+    if (llmReview.blocking || reviewContext.policyBlocked) {
+        return "action_required";
+    }
+
+    if (reviewContext.skipped) {
+        return "neutral";
+    }
+
+    return "success";
+}
+
 function isInlineCommentValidationError(error) {
     return error instanceof GitHubRequestError && [400, 409, 413, 422].includes(error.status);
 }
@@ -410,7 +606,7 @@ function normalizeInlineFinding(finding) {
 
     return {
         ...finding,
-        file: String(finding.file).replace(/^\.\//, ""),
+        file: normalizePath(finding.file),
         line
     };
 }
@@ -433,6 +629,65 @@ function truncateText(text, maxLength) {
     }
 
     return `${normalizedText.slice(0, maxLength)}...`;
+}
+
+async function loadPolicy() {
+    const rawPolicy = JSON.parse(await readFile(".github/agent-review/policy.json", "utf8"));
+
+    return {
+        maxFiles: Number(rawPolicy.maxFiles || 20),
+        maxPatchChars: Number(rawPolicy.maxPatchChars || 30000),
+        maxInlineComments: Number(rawPolicy.maxInlineComments || 10),
+        reviewForks: Boolean(rawPolicy.reviewForks),
+        allowPaths: Array.isArray(rawPolicy.allowPaths) ? rawPolicy.allowPaths : ["**"],
+        ignoredPaths: Array.isArray(rawPolicy.ignoredPaths) ? rawPolicy.ignoredPaths : [],
+        denyPaths: Array.isArray(rawPolicy.denyPaths) ? rawPolicy.denyPaths : [],
+        sensitivePaths: Array.isArray(rawPolicy.sensitivePaths) ? rawPolicy.sensitivePaths : [],
+        checkRunName: String(rawPolicy.checkRunName || "Agent Review Governance"),
+        artifactPath: String(rawPolicy.artifactPath || "agent-review-result.json")
+    };
+}
+
+function matchesAny(filename, patterns) {
+    return patterns.some((pattern) => globToRegExp(pattern).test(filename));
+}
+
+function globToRegExp(pattern) {
+    const source = String(pattern);
+    let regex = "";
+
+    for (let index = 0; index < source.length; index += 1) {
+        const char = source[index];
+        const nextChar = source[index + 1];
+
+        if (char === "*" && nextChar === "*") {
+            regex += ".*";
+            index += 1;
+            continue;
+        }
+
+        if (char === "*") {
+            regex += "[^/]*";
+            continue;
+        }
+
+        regex += escapeRegExp(char);
+    }
+
+    return new RegExp(`^${regex}$`);
+}
+
+function escapeRegExp(value) {
+    return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+}
+
+function normalizePath(value) {
+    return String(value || "")
+        .trim()
+        .replace(/\\/g, "/")
+        .replace(/^\.?\//, "")
+        .replace(/^\/+/, "")
+        .replace(/\/+/g, "/");
 }
 
 function collectNewFileLines(patch) {

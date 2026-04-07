@@ -1,0 +1,53 @@
+{
+  "maxFiles": 20,
+  "maxPatchChars": 30000,
+  "maxInlineComments": 10,
+  "reviewForks": false,
+  "allowPaths": [
+    "**"
+  ],
+  "ignoredPaths": [
+    "node_modules/**",
+    "dist/**",
+    "build/**",
+    "target/**",
+    "package-lock.json",
+    "**/package-lock.json",
+    "yarn.lock",
+    "**/yarn.lock",
+    "pnpm-lock.yaml",
+    "**/pnpm-lock.yaml",
+    "*.min.js",
+    "**/*.min.js",
+    "*.min.css",
+    "**/*.min.css"
+  ],
+  "denyPaths": [
+    "secrets/**",
+    "private/**",
+    "**/*.pem",
+    "**/*.key",
+    "**/*.p12",
+    "**/*.pfx"
+  ],
+  "sensitivePaths": [
+    ".github/workflows/**",
+    ".github/actions/**",
+    ".github/agent-review/**",
+    ".github/dependabot.yml",
+    "infra/**",
+    "terraform/**",
+    ".env",
+    "**/.env",
+    ".env.*",
+    "**/.env.*",
+    "*secret*",
+    "**/*secret*",
+    "*credential*",
+    "**/*credential*",
+    "*token*",
+    "**/*token*"
+  ],
+  "checkRunName": "Agent Review Governance",
+  "artifactPath": "agent-review-result.json"
+}

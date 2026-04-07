@@ -12,6 +12,7 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
+  checks: write
 
 jobs:
   review:
@@ -30,6 +31,7 @@ jobs:
           permission-pull-requests: write
           permission-issues: write
           permission-contents: read
+          permission-checks: write
 
       - name: Check out base repository
         uses: actions/checkout@v4
@@ -46,3 +48,11 @@ jobs:
           REPO: ${{ github.repository }}
           GITHUB_API_URL: ${{ github.api_url }}
         run: node .github/agent-review/review-pr.mjs
+
+      - name: Upload structured review artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-review-result
+          path: agent-review-result.json
+          if-no-files-found: ignore
