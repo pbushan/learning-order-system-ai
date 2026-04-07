@@ -223,7 +223,7 @@ This zip contains **three separate repos/projects** plus a root guide:
 ```text
 learning-order-system/
 ├── README.md
-├── order-ui/                <-- Browser UI for the full customer/order workflow
+├── order-ui/                <-- Browser UI for the customer/order workflow plus the new product catalog tab
 ├── order-api/               <-- Main Spring Boot API app (open this in IntelliJ)
 ├── order-consumer/          <-- Separate Spring Boot consumer app
 └── order-pricing-lambda/    <-- Separate Lambda repo
@@ -279,6 +279,8 @@ Useful URLs in that mode:
 - UI: `http://localhost:8081`
 - API: `http://localhost:8080`
 - RabbitMQ UI: `http://localhost:15672`
+ 
+The backend now wires in `DataInitializer`, which seeds ten reference customers plus ten catalog products (complete with price, physical, shipping, status, and tags) whenever it starts. That guarantees the UI dashboards and product tab stay populated immediately after `docker compose up`.
 
 This makes the branch easier to demo as a complete, portfolio-ready system because the backend, messaging, Lambda emulator, and UI can all be started with one command from the repo root.
 
@@ -299,6 +301,8 @@ It shows:
 - JPA + MySQL
 - unit test
 - automated integration test
+- CRUD for products with pricing/shipping metadata
+- `DataInitializer` seeds ten reference customers and catalog products on each backend start
 
 ### 2) order-consumer
 Separate background application.
@@ -419,7 +423,7 @@ Body:
 ```json
 {
   "customerId": 1,
-  "productName": "Teddy Bear",
+  "productId": 1,
   "quantity": 2,
   "totalAmount": 75.00
 }
@@ -448,6 +452,72 @@ DELETE /api/orders/{id}
 #### Submit order
 ```http
 POST /api/orders/{id}/submit
+```
+
+### Product endpoints
+
+#### Create product
+```http
+POST /api/products
+```
+
+Body:
+```json
+{
+  "sku": "WM-12345",
+  "name": "Wireless Mouse",
+  "description": "Ergonomic Bluetooth mouse",
+  "category": "Electronics",
+  "price": {
+    "amount": 29.99,
+    "currency": "USD"
+  },
+  "physical": {
+    "weight": {
+      "value": 0.2,
+      "unit": "kg"
+    },
+    "dimensions": {
+      "length": 10,
+      "width": 6,
+      "height": 4,
+      "unit": "cm"
+    }
+  },
+  "shipping": {
+    "fragile": false,
+    "hazmat": false,
+    "requiresCooling": false,
+    "maxStackable": 10
+  },
+  "status": {
+    "active": true,
+    "shippable": true
+  },
+  "tags": ["mouse", "wireless"]
+}
+```
+
+The UI enforces every part of this payload, so the backend can rely on each product having price, physical, shipping, status, and tags metadata before saving it.
+
+#### Get all products
+```http
+GET /api/products
+```
+
+#### Get one product
+```http
+GET /api/products/{id}
+```
+
+#### Update product
+```http
+PUT /api/products/{id}
+```
+
+#### Delete product
+```http
+DELETE /api/products/{id}
 ```
 
 This is the most important teaching endpoint.
@@ -483,7 +553,7 @@ curl -X POST http://localhost:8080/api/orders \
   -H "Content-Type: application/json" \
   -d '{
     "customerId":1,
-    "productName":"Teddy Bear",
+    "productId":1,
     "quantity":2,
     "totalAmount":75.00
   }'
