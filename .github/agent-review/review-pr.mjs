@@ -1,6 +1,7 @@
 const requiredEnv = ["GITHUB_TOKEN", "OPENAI_API_KEY", "REPO", "PR_NUMBER", "GITHUB_API_URL"];
 const maxFiles = 20;
 const maxPatchChars = 30000;
+const maxInlineComments = 10;
 const skippedPathPatterns = [
     /^node_modules\//,
     /^dist\//,
@@ -41,16 +42,18 @@ const llmReview = reviewContext.skipped
 
 const event = llmReview.blocking ? "REQUEST_CHANGES" : "COMMENT";
 const body = buildReviewBody(pull, reviewContext, llmReview, event);
+const comments = buildInlineComments(reviewContext, llmReview);
 
 await githubRequest(`${apiBaseUrl}/repos/${repo}/pulls/${prNumber}/reviews`, {
     method: "POST",
     body: JSON.stringify({
         event,
-        body
+        body,
+        comments
     })
 });
 
-console.log(`Posted ${event} review for PR #${prNumber} in ${repo}.`);
+console.log(`Posted ${event} review for PR #${prNumber} in ${repo} with ${comments.length} inline comments.`);
 
 function buildReviewContext(pullRequest, changedFiles) {
     const reviewableFiles = changedFiles.filter((file) => {
@@ -192,6 +195,7 @@ function buildPrompt(reviewContext) {
         "",
         "Set blocking=true only for findings that should prevent merge. Use P1/P2 for blocking findings and P3 for informational findings.",
         "If there are no substantive issues, return blocking=false and findings=[].",
+        "For file-specific findings, set file to the changed file path and line to the new-file line number from the diff whenever possible. If the finding is general or cannot be tied to a changed line, use file=null and line=null.",
         "Important test guidance: avoid broad claims like \"there are no tests\" unless the provided context proves it. If test coverage is uncertain because unchanged tests are not included, say that a targeted test should be considered rather than claiming coverage is missing.",
         "",
         `PR title: ${reviewContext.pullRequest.title}`,
@@ -296,8 +300,77 @@ function buildReviewBody(pullRequest, reviewContext, llmReview, event) {
         "Policy:",
         `- Max reviewable files: ${maxFiles}`,
         `- Max patch characters: ${maxPatchChars}`,
-        "- Inline comments are not enabled yet; this is Phase 1 review behavior."
+        `- Max inline comments: ${maxInlineComments}`,
+        "- Findings with valid changed-file line references are also posted as inline review comments."
     ].filter(Boolean).join("\n");
+}
+
+function buildInlineComments(reviewContext, llmReview) {
+    if (!reviewContext.patches) {
+        return [];
+    }
+
+    const changedLinesByFile = new Map(reviewContext.patches.map((file) => {
+        return [file.filename, collectNewFileLines(file.patch)];
+    }));
+
+    return llmReview.findings
+        .filter((finding) => finding.file && finding.line)
+        .filter((finding) => changedLinesByFile.get(finding.file)?.has(finding.line))
+        .slice(0, maxInlineComments)
+        .map((finding) => {
+            return {
+                path: finding.file,
+                line: finding.line,
+                side: "RIGHT",
+                body: [
+                    `**${finding.severity}: ${finding.title}**`,
+                    "",
+                    finding.body,
+                    "",
+                    "_Posted by the LLM-backed GitHub App reviewer. Human review is still required._"
+                ].join("\n")
+            };
+        });
+}
+
+function collectNewFileLines(patch) {
+    const lines = new Set();
+
+    if (!patch) {
+        return lines;
+    }
+
+    let newLine = null;
+
+    for (const line of patch.split("\n")) {
+        const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+
+        if (hunkMatch) {
+            newLine = Number(hunkMatch[1]);
+            continue;
+        }
+
+        if (newLine === null) {
+            continue;
+        }
+
+        if (line.startsWith("+") && !line.startsWith("+++")) {
+            lines.add(newLine);
+            newLine += 1;
+            continue;
+        }
+
+        if (line.startsWith("-") && !line.startsWith("---")) {
+            continue;
+        }
+
+        if (!line.startsWith("\\")) {
+            newLine += 1;
+        }
+    }
+
+    return lines;
 }
 
 async function githubRequest(url, options = {}) {
