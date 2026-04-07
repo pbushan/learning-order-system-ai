@@ -298,6 +298,12 @@ function buildReviewBody(pullRequest, reviewContext, llmReview, event) {
 
 function buildInlineComments(reviewContext, llmReview) {
     if (!reviewContext.patches) {
+        console.warn("Inline comments skipped because review context did not include patch data.");
+        return [];
+    }
+
+    if (!llmReview || !Array.isArray(llmReview.findings)) {
+        console.warn("Inline comments skipped because the LLM review did not include a findings array.");
         return [];
     }
 
@@ -309,6 +315,7 @@ function buildInlineComments(reviewContext, llmReview) {
         .map(normalizeInlineFinding)
         .filter((finding) => finding)
         .filter((finding) => changedLinesByFile.get(finding.file)?.has(finding.line))
+        .sort(compareFindingSeverity)
         .slice(0, maxInlineComments)
         .map((finding) => {
             return {
@@ -365,7 +372,7 @@ async function postReview({ event, body, comments }) {
 }
 
 function isInlineCommentValidationError(error) {
-    return error instanceof GitHubRequestError && error.status >= 400 && error.status < 500;
+    return error instanceof GitHubRequestError && [400, 422].includes(error.status);
 }
 
 function normalizeInlineFinding(finding) {
@@ -384,6 +391,16 @@ function normalizeInlineFinding(finding) {
         file: String(finding.file).replace(/^\.\//, ""),
         line
     };
+}
+
+function compareFindingSeverity(left, right) {
+    const severityRank = {
+        P1: 0,
+        P2: 1,
+        P3: 2
+    };
+
+    return (severityRank[left.severity] ?? severityRank.P3) - (severityRank[right.severity] ?? severityRank.P3);
 }
 
 function collectNewFileLines(patch) {
