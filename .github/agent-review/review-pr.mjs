@@ -359,7 +359,16 @@ async function postReviewWithFallback({ event, body, comments }) {
             "Inline comment fallback:",
             `- ${comments.length} inline comment(s) were omitted because GitHub rejected the inline review payload.`,
             `- GitHub response status: ${error.status}.`,
-            "- The top-level review was posted so feedback is not lost."
+            `- GitHub response body: ${truncateText(error.body, 500)}`,
+            "- The top-level review was posted so feedback is not lost.",
+            "",
+            "Omitted inline comments:",
+            ...comments.map((comment) => {
+                return [
+                    `- \`${comment.path}:${comment.line || comment.position || "unknown"}\``,
+                    comment.body
+                ].join("\n");
+            })
         ].join("\n");
 
         await postReview({ event, body: fallbackBody, comments: [] });
@@ -414,6 +423,16 @@ function compareFindingSeverity(left, right) {
     };
 
     return (severityRank[left.severity] ?? severityRank.P3) - (severityRank[right.severity] ?? severityRank.P3);
+}
+
+function truncateText(text, maxLength) {
+    const normalizedText = String(text || "").replace(/\s+/g, " ").trim();
+
+    if (normalizedText.length <= maxLength) {
+        return normalizedText || "(empty)";
+    }
+
+    return `${normalizedText.slice(0, maxLength)}...`;
 }
 
 function collectNewFileLines(patch) {
