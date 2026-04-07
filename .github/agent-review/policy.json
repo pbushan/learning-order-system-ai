@@ -1,4 +1,5 @@
 {
+  "policyVersion": 1,
   "maxFiles": 20,
   "maxPatchChars": 30000,
   "maxInlineComments": 10,
