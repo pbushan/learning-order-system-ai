@@ -45,6 +45,7 @@ function initializeTabs() {
     ));
 
     if (!tabButtons.length || !tabPanels.length) {
+        console.warn("Workspace tabs are disabled because tab buttons and panels did not match.");
         return;
     }
 
@@ -121,6 +122,10 @@ function handleTabKeydown(event) {
     }
 
     const nextButton = tabButtons[nextIndex];
+    if (!nextButton) {
+        return;
+    }
+
     activateTab(nextButton.dataset.tabTarget);
     nextButton.focus();
 }
