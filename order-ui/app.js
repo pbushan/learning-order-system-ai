@@ -14,8 +14,8 @@ const banner = document.getElementById("feedback-banner");
 const refreshButton = document.getElementById("refresh-button");
 const apiStatusDot = document.getElementById("api-status-dot");
 const apiStatusText = document.getElementById("api-status-text");
-const tabButtons = Array.from(document.querySelectorAll("[data-tab-target]"));
-const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
+let tabButtons = [];
+let tabPanels = [];
 
 document.addEventListener("DOMContentLoaded", () => {
     customerForm.addEventListener("submit", handleCustomerSubmit);
@@ -25,6 +25,16 @@ document.addEventListener("DOMContentLoaded", () => {
     refreshButton.addEventListener("click", () => loadDashboard(true));
     customerTableBody.addEventListener("click", handleCustomerTableClick);
     orderTableBody.addEventListener("click", handleOrderTableClick);
+    initializeTabs();
+
+    loadDashboard();
+    window.setInterval(() => loadDashboard(false, true), 15000);
+});
+
+function initializeTabs() {
+    tabButtons = Array.from(document.querySelectorAll("[data-tab-target]"));
+    tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
+
     tabButtons.forEach((button) => {
         button.addEventListener("click", () => activateTab(button.dataset.tabTarget));
         button.addEventListener("keydown", handleTabKeydown);
@@ -32,32 +42,37 @@ document.addEventListener("DOMContentLoaded", () => {
     window.addEventListener("hashchange", () => activateTab(getTabFromHash(), false));
 
     activateTab(getTabFromHash(), false);
-    loadDashboard();
-    window.setInterval(() => loadDashboard(false, true), 15000);
-});
+}
 
 function getTabFromHash() {
     const requestedTab = window.location.hash.replace("#", "");
-    return tabButtons.some((button) => button.dataset.tabTarget === requestedTab)
+    return isAvailableTab(requestedTab)
         ? requestedTab
         : "customers";
 }
 
 function activateTab(tabName, updateHash = true) {
+    const nextTabName = isAvailableTab(tabName) ? tabName : "customers";
+
     tabButtons.forEach((button) => {
-        const isActive = button.dataset.tabTarget === tabName;
+        const isActive = button.dataset.tabTarget === nextTabName;
         button.classList.toggle("active", isActive);
         button.setAttribute("aria-selected", String(isActive));
         button.tabIndex = isActive ? 0 : -1;
     });
 
     tabPanels.forEach((panel) => {
-        panel.hidden = panel.dataset.tabPanel !== tabName;
+        panel.hidden = panel.dataset.tabPanel !== nextTabName;
     });
 
-    if (updateHash && window.location.hash !== `#${tabName}`) {
-        window.history.replaceState(null, "", `#${tabName}`);
+    if (updateHash && window.location.hash !== `#${nextTabName}`) {
+        window.history.replaceState(null, "", `#${nextTabName}`);
     }
+}
+
+function isAvailableTab(tabName) {
+    return tabButtons.some((button) => button.dataset.tabTarget === tabName)
+        && tabPanels.some((panel) => panel.dataset.tabPanel === tabName);
 }
 
 function handleTabKeydown(event) {
@@ -67,6 +82,10 @@ function handleTabKeydown(event) {
 
     event.preventDefault();
     const currentIndex = tabButtons.findIndex((button) => button === event.currentTarget);
+    if (currentIndex < 0) {
+        return;
+    }
+
     const lastIndex = tabButtons.length - 1;
     let nextIndex = currentIndex;
 
