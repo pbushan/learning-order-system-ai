@@ -17,15 +17,6 @@ const model = process.env.MODEL || "gpt-5";
 const repo = process.env.REPO;
 const prNumber = process.env.PR_NUMBER;
 const apiBaseUrl = process.env.GITHUB_API_URL;
-
-class GitHubRequestError extends Error {
-    constructor(status, body) {
-        super(`GitHub API request failed (${status}): ${body}`);
-        this.status = status;
-        this.body = body;
-    }
-}
-
 const policy = await loadPolicyWithFallback();
 
 const headers = {
@@ -1045,4 +1036,12 @@ async function githubRequest(url, options = {}) {
     }
 
     return response.json();
+}
+
+class GitHubRequestError extends Error {
+    constructor(status, body) {
+        super(`GitHub API request failed (${status}): ${body}`);
+        this.status = status;
+        this.body = body;
+    }
 }
