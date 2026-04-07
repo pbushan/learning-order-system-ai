@@ -307,21 +307,43 @@ function buildInlineComments(reviewContext, llmReview) {
         return [];
     }
 
-    const changedLinesByFile = new Map(reviewContext.patches.map((file) => {
-        return [file.filename, collectNewFileLines(file.patch)];
+    const changedLinePositionsByFile = new Map(reviewContext.patches.map((file) => {
+        return [file.filename, collectNewFileLinePositions(file.patch)];
     }));
+    const seenLocations = new Set();
 
     return llmReview.findings
         .map(normalizeInlineFinding)
         .filter((finding) => finding)
-        .filter((finding) => changedLinesByFile.get(finding.file)?.has(finding.line))
         .sort(compareFindingSeverity)
+        .map((finding) => {
+            const position = changedLinePositionsByFile.get(finding.file)?.get(finding.line);
+
+            if (!position) {
+                return null;
+            }
+
+            return {
+                ...finding,
+                position
+            };
+        })
+        .filter((finding) => finding)
+        .filter((finding) => {
+            const locationKey = `${finding.file}:${finding.line}`;
+
+            if (seenLocations.has(locationKey)) {
+                return false;
+            }
+
+            seenLocations.add(locationKey);
+            return true;
+        })
         .slice(0, maxInlineComments)
         .map((finding) => {
             return {
                 path: finding.file,
-                line: finding.line,
-                side: "RIGHT",
+                position: finding.position,
                 body: [
                     `**${finding.severity}: ${finding.title}**`,
                     "",
@@ -357,12 +379,12 @@ async function postReviewWithFallback({ event, body, comments }) {
 
 async function postReview({ event, body, comments }) {
     const payload = {
-        commit_id: pull.head.sha,
         event,
         body
     };
 
     if (comments.length) {
+        payload.commit_id = pull.head.sha;
         payload.comments = comments;
     }
 
@@ -373,7 +395,7 @@ async function postReview({ event, body, comments }) {
 }
 
 function isInlineCommentValidationError(error) {
-    return error instanceof GitHubRequestError && [400, 413, 422].includes(error.status);
+    return error instanceof GitHubRequestError && [400, 409, 413, 422].includes(error.status);
 }
 
 function normalizeInlineFinding(finding) {
@@ -404,14 +426,15 @@ function compareFindingSeverity(left, right) {
     return (severityRank[left.severity] ?? severityRank.P3) - (severityRank[right.severity] ?? severityRank.P3);
 }
 
-function collectNewFileLines(patch) {
-    const lines = new Set();
+function collectNewFileLinePositions(patch) {
+    const linePositions = new Map();
 
     if (!patch) {
-        return lines;
+        return linePositions;
     }
 
     let newLine = null;
+    let position = 0;
 
     for (const line of patch.split("\n")) {
         const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
@@ -425,8 +448,10 @@ function collectNewFileLines(patch) {
             continue;
         }
 
+        position += 1;
+
         if (line.startsWith("+")) {
-            lines.add(newLine);
+            linePositions.set(newLine, position);
             newLine += 1;
             continue;
         }
@@ -440,7 +465,7 @@ function collectNewFileLines(patch) {
         }
     }
 
-    return lines;
+    return linePositions;
 }
 
 async function githubRequest(url, options = {}) {
