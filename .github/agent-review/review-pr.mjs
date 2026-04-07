@@ -1,17 +1,7 @@
-const requiredEnv = ["GITHUB_TOKEN", "OPENAI_API_KEY", "REPO", "PR_NUMBER", "GITHUB_API_URL"];
-const maxFiles = 20;
-const maxPatchChars = 30000;
-const maxInlineComments = 10;
-const skippedPathPatterns = [
-    /^node_modules\//,
-    /^dist\//,
-    /^build\//,
-    /^target\//,
-    /package-lock\.json$/,
-    /yarn\.lock$/,
-    /pnpm-lock\.yaml$/,
-    /\.min\.(js|css)$/
-];
+import { readFile, writeFile } from "node:fs/promises";
+
+const requiredEnv = ["GITHUB_TOKEN", "REPO", "PR_NUMBER", "GITHUB_API_URL"];
+const artifactPath = "agent-review-result.json";
 
 for (const key of requiredEnv) {
     if (!process.env[key]) {
@@ -20,11 +10,13 @@ for (const key of requiredEnv) {
 }
 
 const token = process.env.GITHUB_TOKEN;
+// Optional: policy-only and skipped reviews do not need an OpenAI key.
 const openAiApiKey = process.env.OPENAI_API_KEY;
 const model = process.env.MODEL || "gpt-5";
 const repo = process.env.REPO;
 const prNumber = process.env.PR_NUMBER;
 const apiBaseUrl = process.env.GITHUB_API_URL;
+const policy = await loadPolicyWithFallback();
 
 const headers = {
     Accept: "application/vnd.github+json",
@@ -33,31 +25,107 @@ const headers = {
 };
 
 const pull = await githubRequest(`${apiBaseUrl}/repos/${repo}/pulls/${prNumber}`);
-const files = await githubRequest(`${apiBaseUrl}/repos/${repo}/pulls/${prNumber}/files?per_page=100`);
+const files = await fetchPullRequestFiles();
 
 const reviewContext = buildReviewContext(pull, files);
-const llmReview = reviewContext.skipped
-    ? buildSkippedReview(reviewContext)
-    : await runLlmReview(reviewContext);
+let llmReview;
+
+if (reviewContext.policyBlocked) {
+    llmReview = buildPolicyBlockedReview(reviewContext);
+} else if (reviewContext.skipped) {
+    llmReview = buildSkippedReview(reviewContext);
+} else if (!openAiApiKey) {
+    reviewContext.skipped = true;
+    reviewContext.skipReason = "OPENAI_API_KEY was not available, so deep LLM analysis was skipped.";
+    llmReview = buildSkippedReview(reviewContext);
+} else {
+    try {
+        llmReview = await runLlmReview(reviewContext);
+    } catch (error) {
+        reviewContext.skipped = true;
+        reviewContext.skipReason = `LLM review failed after retry: ${error.message}`;
+        llmReview = buildSkippedReview(reviewContext);
+    }
+}
 
 const event = llmReview.blocking ? "REQUEST_CHANGES" : "COMMENT";
 const body = buildReviewBody(pull, reviewContext, llmReview, event);
 const comments = buildInlineComments(reviewContext, llmReview);
+const checkConclusion = getCheckConclusion(reviewContext, llmReview);
 
+await writeReviewArtifact({ pull, reviewContext, llmReview, event, comments, checkConclusion });
 await postReviewWithFallback({ event, body, comments });
+await postCheckRunWithFallback({ pull, reviewContext, llmReview, event, comments, checkConclusion });
 
 function buildReviewContext(pullRequest, changedFiles) {
+    const isFork = pullRequest.head.repo?.full_name !== pullRequest.base.repo?.full_name;
+    const changedFileNames = changedFiles.map((file) => normalizePath(file.filename));
+    const ignoredFiles = changedFileNames.filter((filename) => matchesAny(filename, policy.ignoredPaths));
+    const deniedFiles = changedFileNames.filter((filename) => matchesAny(filename, policy.denyPaths));
+    const sensitiveFiles = changedFileNames.filter((filename) => matchesAny(filename, policy.sensitivePaths));
+    const outsideAllowedFiles = changedFileNames.filter((filename) => !matchesAny(filename, policy.allowPaths));
+    const policyMessages = [];
+
+    if (policy.policyLoadError) {
+        policyMessages.push(`Agent review policy failed to load and safe defaults were used: ${policy.policyLoadError}`);
+    }
+
+    if (isFork && !policy.reviewForks) {
+        policyMessages.push("PR comes from a fork and fork review is disabled by policy.");
+    }
+
+    if (deniedFiles.length) {
+        policyMessages.push(`PR touches denied path(s): ${formatPathList(deniedFiles)}.`);
+    }
+
+    if (sensitiveFiles.length) {
+        policyMessages.push(`PR touches sensitive path(s): ${formatPathList(sensitiveFiles)}.`);
+    }
+
+    if (outsideAllowedFiles.length) {
+        policyMessages.push(`PR touches path(s) outside the allow list: ${formatPathList(outsideAllowedFiles)}.`);
+    }
+
     const reviewableFiles = changedFiles.filter((file) => {
-        return !skippedPathPatterns.some((pattern) => pattern.test(file.filename));
+        const filename = normalizePath(file.filename);
+        return matchesAny(filename, policy.allowPaths)
+            && !matchesAny(filename, policy.ignoredPaths)
+            && !matchesAny(filename, policy.denyPaths)
+            && !matchesAny(filename, policy.sensitivePaths);
     });
 
-    if (reviewableFiles.length > maxFiles) {
+    if (policyMessages.length) {
+        return {
+            pullRequest,
+            changedFiles,
+            reviewableFiles: [],
+            ignoredFiles,
+            deniedFiles,
+            sensitiveFiles,
+            outsideAllowedFiles,
+            policyMessages,
+            isFork,
+            patches: [],
+            policyBlocked: true,
+            skipped: false
+        };
+    }
+
+    if (reviewableFiles.length > policy.maxFiles) {
         return {
             pullRequest,
             changedFiles,
             reviewableFiles,
+            ignoredFiles,
+            deniedFiles,
+            sensitiveFiles,
+            outsideAllowedFiles,
+            policyMessages,
+            isFork,
+            patches: [],
+            policyBlocked: false,
             skipped: true,
-            skipReason: `PR has ${reviewableFiles.length} reviewable files, which exceeds the safe limit of ${maxFiles}.`
+            skipReason: `PR has ${reviewableFiles.length} reviewable files, which exceeds the safe limit of ${policy.maxFiles}.`
         };
     }
 
@@ -68,13 +136,21 @@ function buildReviewContext(pullRequest, changedFiles) {
         const patch = file.patch || "";
         patchChars += patch.length;
 
-        if (patchChars > maxPatchChars) {
+        if (patchChars > policy.maxPatchChars) {
             return {
                 pullRequest,
                 changedFiles,
                 reviewableFiles,
+                ignoredFiles,
+                deniedFiles,
+                sensitiveFiles,
+                outsideAllowedFiles,
+                policyMessages,
+                isFork,
+                patches,
+                policyBlocked: false,
                 skipped: true,
-                skipReason: `PR patch context exceeds the safe limit of ${maxPatchChars} characters.`
+                skipReason: `PR patch context exceeds the safe limit of ${policy.maxPatchChars} characters.`
             };
         }
 
@@ -91,14 +167,53 @@ function buildReviewContext(pullRequest, changedFiles) {
         pullRequest,
         changedFiles,
         reviewableFiles,
+        ignoredFiles,
+        deniedFiles,
+        sensitiveFiles,
+        outsideAllowedFiles,
+        policyMessages,
+        isFork,
         patches,
+        policyBlocked: false,
         skipped: false
+    };
+}
+
+async function fetchPullRequestFiles() {
+    const allFiles = [];
+    let page = 1;
+
+    while (true) {
+        const pageFiles = await githubRequest(`${apiBaseUrl}/repos/${repo}/pulls/${prNumber}/files?per_page=100&page=${page}`);
+        allFiles.push(...pageFiles);
+
+        if (pageFiles.length < 100) {
+            return allFiles;
+        }
+
+        page += 1;
+    }
+}
+
+function buildPolicyBlockedReview(reviewContext) {
+    return {
+        summary: "Automated deep review was blocked by governance policy. Human review is required before merge.",
+        blocking: policy.blockPolicyWithRequestChanges,
+        findings: reviewContext.policyMessages.map((message) => {
+            return {
+                severity: "P2",
+                title: "Governance policy requires human review",
+                file: null,
+                line: null,
+                body: message
+            };
+        })
     };
 }
 
 function buildSkippedReview(reviewContext) {
     return {
-        summary: "Automated review skipped deep LLM analysis because this PR exceeded the configured safe review limits.",
+        summary: `Automated review skipped deep LLM analysis: ${reviewContext.skipReason}`,
         blocking: false,
         findings: [
             {
@@ -114,41 +229,50 @@ function buildSkippedReview(reviewContext) {
 
 async function runLlmReview(reviewContext) {
     const prompt = buildPrompt(reviewContext);
-    const response = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: {
-            Authorization: `Bearer ${openAiApiKey}`,
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-            model,
-            input: [
-                {
-                    role: "system",
-                    content: [
-                        {
-                            type: "input_text",
-                            text: "You are a careful senior code reviewer. Focus on correctness, regressions, security, data loss, and broken workflows. Mention missing tests only when the diff clearly removes or weakens coverage, or when the changed behavior has no apparent guard in the provided context. Do not claim tests are absent if they may exist outside the diff. Do not comment on style unless it blocks maintainability. Return only valid JSON."
-                        }
-                    ]
-                },
-                {
-                    role: "user",
-                    content: [
-                        {
-                            type: "input_text",
-                            text: prompt
-                        }
-                    ]
+    const timeoutSignal = createTimeoutSignal(180000);
+
+    let response;
+
+    try {
+        response = await fetchWithRetry("https://api.openai.com/v1/responses", {
+            method: "POST",
+            signal: timeoutSignal.signal,
+            headers: {
+                Authorization: `Bearer ${openAiApiKey}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                model,
+                input: [
+                    {
+                        role: "system",
+                        content: [
+                            {
+                                type: "input_text",
+                                text: "You are a careful senior code reviewer. Focus on correctness, regressions, security, data loss, and broken workflows. Mention missing tests only when the diff clearly removes or weakens coverage, or when the changed behavior has no apparent guard in the provided context. Do not claim tests are absent if they may exist outside the diff. Do not comment on style unless it blocks maintainability. Return only valid JSON."
+                            }
+                        ]
+                    },
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "input_text",
+                                text: prompt
+                            }
+                        ]
+                    }
+                ],
+                text: {
+                    format: {
+                        type: "json_object"
+                    }
                 }
-            ],
-            text: {
-                format: {
-                    type: "json_object"
-                }
-            }
-        })
-    });
+            })
+        });
+    } finally {
+        timeoutSignal.clear();
+    }
 
     if (!response.ok) {
         const body = await response.text();
@@ -163,6 +287,53 @@ async function runLlmReview(reviewContext) {
     }
 
     return normalizeReview(JSON.parse(text));
+}
+
+async function fetchWithRetry(url, options, attempts = 2) {
+    let lastError;
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        try {
+            const response = await fetch(url, options);
+
+            if (!isRetryableResponse(response) || attempt === attempts) {
+                return response;
+            }
+
+            lastError = new Error(`Retryable HTTP response ${response.status}`);
+            console.warn(`Fetch attempt ${attempt} received ${response.status} for ${url}. Retrying once.`);
+            await sleep(getRetryDelayMilliseconds(response, attempt));
+        } catch (error) {
+            lastError = error;
+
+            if (attempt === attempts) {
+                throw error;
+            }
+
+            console.warn(`Fetch attempt ${attempt} failed for ${url}: ${error.message}. Retrying once.`);
+            await sleep(1000 * attempt);
+        }
+    }
+
+    throw lastError;
+}
+
+function isRetryableResponse(response) {
+    return [429, 500, 502, 503, 504].includes(response.status);
+}
+
+function getRetryDelayMilliseconds(response, attempt) {
+    const retryAfter = Number(response.headers.get("retry-after"));
+
+    if (Number.isFinite(retryAfter) && retryAfter > 0) {
+        return retryAfter * 1000;
+    }
+
+    return 1000 * attempt;
+}
+
+function sleep(milliseconds) {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function buildPrompt(reviewContext) {
@@ -278,6 +449,10 @@ function buildReviewBody(pullRequest, reviewContext, llmReview, event) {
         `- PR number: #${pullRequest.number}`,
         `- Changed files: ${reviewContext.changedFiles.length}`,
         `- Reviewable files: ${reviewContext.reviewableFiles.length}`,
+        `- Ignored files: ${reviewContext.ignoredFiles.length}`,
+        `- Denied files: ${reviewContext.deniedFiles.length}`,
+        `- Sensitive files: ${reviewContext.sensitiveFiles.length}`,
+        `- Fork PR: ${reviewContext.isFork ? "yes" : "no"}`,
         `- Base branch: \`${pullRequest.base.ref}\``,
         `- Head branch: \`${pullRequest.head.ref}\``,
         "",
@@ -289,9 +464,10 @@ function buildReviewBody(pullRequest, reviewContext, llmReview, event) {
         ...findingLines,
         "",
         "Policy:",
-        `- Max reviewable files: ${maxFiles}`,
-        `- Max patch characters: ${maxPatchChars}`,
-        `- Max inline comments: ${maxInlineComments}`,
+        `- Max reviewable files: ${policy.maxFiles}`,
+        `- Max patch characters: ${policy.maxPatchChars}`,
+        `- Max inline comments: ${policy.maxInlineComments}`,
+        `- Fork review enabled: ${policy.reviewForks ? "yes" : "no"}`,
         "- Findings with valid changed-file line references are also posted as inline review comments."
     ].filter(Boolean).join("\n");
 }
@@ -327,7 +503,7 @@ function buildInlineComments(reviewContext, llmReview) {
             seenLocations.add(locationKey);
             return true;
         })
-        .slice(0, maxInlineComments)
+        .slice(0, policy.maxInlineComments)
         .map((finding) => {
             return {
                 path: finding.file,
@@ -393,6 +569,140 @@ async function postReview({ event, body, comments }) {
     });
 }
 
+async function postCheckRun({ pull, reviewContext, llmReview, event, comments, checkConclusion }) {
+    const payload = {
+        name: policy.checkRunName,
+        head_sha: pull.head.sha,
+        status: "completed",
+        conclusion: checkConclusion,
+        output: {
+            title: `Agent review ${event}`,
+            summary: llmReview.summary,
+            text: buildCheckRunText({ reviewContext, llmReview, comments, checkConclusion })
+        }
+    };
+
+    await githubRequest(`${apiBaseUrl}/repos/${repo}/check-runs`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+    });
+}
+
+async function postCheckRunWithFallback({ pull, reviewContext, llmReview, event, comments, checkConclusion }) {
+    if (reviewContext.isFork && !policy.reviewForks) {
+        console.warn("Skipping check run creation for fork PR because fork review is disabled by policy.");
+        return;
+    }
+
+    try {
+        await postCheckRun({ pull, reviewContext, llmReview, event, comments, checkConclusion });
+    } catch (error) {
+        if (!(error instanceof GitHubRequestError) || ![403, 404, 409, 422].includes(error.status)) {
+            throw error;
+        }
+
+        console.warn(`Unable to post agent review check run (${error.status}): ${truncateText(error.body, 500)}`);
+    }
+}
+
+function buildCheckRunText({ reviewContext, llmReview, comments, checkConclusion }) {
+    const findingSummary = llmReview.findings.length
+        ? llmReview.findings.map((finding) => `- ${finding.severity}: ${finding.title}`).join("\n")
+        : "- No substantive findings.";
+
+    return [
+        `Conclusion: ${checkConclusion}`,
+        "",
+        "Governance:",
+        `- Policy blocked: ${reviewContext.policyBlocked ? "yes" : "no"}`,
+        `- Skipped deep review: ${reviewContext.skipped ? "yes" : "no"}`,
+        `- Fork PR: ${reviewContext.isFork ? "yes" : "no"}`,
+        `- Sensitive files: ${reviewContext.sensitiveFiles.length}`,
+        `- Denied files: ${reviewContext.deniedFiles.length}`,
+        `- Ignored files: ${reviewContext.ignoredFiles.length}`,
+        `- Inline comments: ${comments.length}`,
+        "",
+        "Findings:",
+        findingSummary
+    ].join("\n");
+}
+
+async function writeReviewArtifact({ pull, reviewContext, llmReview, event, comments, checkConclusion }) {
+    const artifact = {
+        generatedAt: new Date().toISOString(),
+        repository: repo,
+        pullRequest: {
+            number: pull.number,
+            title: pull.title,
+            baseRef: pull.base.ref,
+            headRef: pull.head.ref,
+            headSha: pull.head.sha,
+            isFork: reviewContext.isFork
+        },
+        policy: {
+            maxFiles: policy.maxFiles,
+            maxPatchChars: policy.maxPatchChars,
+            maxInlineComments: policy.maxInlineComments,
+            reviewForks: policy.reviewForks,
+            requireActionForPolicyBlocked: policy.requireActionForPolicyBlocked,
+            allowPaths: policy.allowPaths,
+            ignoredPaths: policy.ignoredPaths,
+            denyPaths: policy.denyPaths,
+            sensitivePaths: policy.sensitivePaths,
+            policyBlocked: reviewContext.policyBlocked,
+            policyMessages: reviewContext.policyMessages
+        },
+        review: {
+            event,
+            checkConclusion,
+            summary: llmReview.summary,
+            blocking: llmReview.blocking,
+            findings: llmReview.findings,
+            inlineComments: comments.map((comment) => {
+                return {
+                    path: comment.path,
+                    line: comment.line || null,
+                    side: comment.side || null,
+                    body: comment.body
+                };
+            })
+        },
+        files: {
+            changed: reviewContext.changedFiles.map((file) => {
+                return {
+                    filename: file.filename,
+                    status: file.status,
+                    additions: file.additions,
+                    deletions: file.deletions
+                };
+            }),
+            reviewable: reviewContext.reviewableFiles.map((file) => file.filename),
+            ignored: reviewContext.ignoredFiles,
+            denied: reviewContext.deniedFiles,
+            sensitive: reviewContext.sensitiveFiles,
+            outsideAllowed: reviewContext.outsideAllowedFiles
+        }
+    };
+
+    await writeFile(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
+}
+
+function getCheckConclusion(reviewContext, llmReview) {
+    if (reviewContext.policyBlocked) {
+        return policy.requireActionForPolicyBlocked ? "action_required" : "neutral";
+    }
+
+    if (llmReview.blocking) {
+        return "action_required";
+    }
+
+    if (reviewContext.skipped) {
+        return "neutral";
+    }
+
+    return "success";
+}
+
 function isInlineCommentValidationError(error) {
     return error instanceof GitHubRequestError && [400, 409, 413, 422].includes(error.status);
 }
@@ -410,7 +720,7 @@ function normalizeInlineFinding(finding) {
 
     return {
         ...finding,
-        file: String(finding.file).replace(/^\.\//, ""),
+        file: normalizePath(finding.file),
         line
     };
 }
@@ -433,6 +743,115 @@ function truncateText(text, maxLength) {
     }
 
     return `${normalizedText.slice(0, maxLength)}...`;
+}
+
+function formatPathList(paths, maxItems = 20) {
+    const visiblePaths = paths.slice(0, maxItems).join(", ");
+    const hiddenCount = paths.length - maxItems;
+
+    if (hiddenCount > 0) {
+        return `${visiblePaths}, and ${hiddenCount} more`;
+    }
+
+    return visiblePaths;
+}
+
+function createTimeoutSignal(milliseconds) {
+    if (typeof AbortSignal.timeout === "function") {
+        return {
+            signal: AbortSignal.timeout(milliseconds),
+            clear: () => {}
+        };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), milliseconds);
+
+    return {
+        signal: controller.signal,
+        clear: () => clearTimeout(timeout)
+    };
+}
+
+async function loadPolicyWithFallback() {
+    try {
+        return normalizePolicy(JSON.parse(await readFile(".github/agent-review/policy.json", "utf8")));
+    } catch (error) {
+        return {
+            ...normalizePolicy({}),
+            policyLoadError: error.message
+        };
+    }
+}
+
+function normalizePolicy(rawPolicy) {
+    return {
+        maxFiles: readNonNegativeNumber(rawPolicy.maxFiles, 20),
+        maxPatchChars: readNonNegativeNumber(rawPolicy.maxPatchChars, 30000),
+        maxInlineComments: readNonNegativeNumber(rawPolicy.maxInlineComments, 10),
+        reviewForks: Boolean(rawPolicy.reviewForks),
+        blockPolicyWithRequestChanges: Boolean(rawPolicy.blockPolicyWithRequestChanges),
+        requireActionForPolicyBlocked: rawPolicy.requireActionForPolicyBlocked !== false,
+        allowPaths: Array.isArray(rawPolicy.allowPaths) ? rawPolicy.allowPaths : ["**"],
+        ignoredPaths: Array.isArray(rawPolicy.ignoredPaths) ? rawPolicy.ignoredPaths : [],
+        denyPaths: Array.isArray(rawPolicy.denyPaths) ? rawPolicy.denyPaths : [],
+        sensitivePaths: Array.isArray(rawPolicy.sensitivePaths) ? rawPolicy.sensitivePaths : [],
+        checkRunName: String(rawPolicy.checkRunName || "Agent Review Governance")
+    };
+}
+
+function readNonNegativeNumber(value, defaultValue) {
+    const candidate = Number(value ?? defaultValue);
+
+    if (!Number.isFinite(candidate) || candidate < 0) {
+        return defaultValue;
+    }
+
+    return candidate;
+}
+
+function matchesAny(filename, patterns) {
+    return patterns.some((pattern) => globToRegExp(pattern).test(filename));
+}
+
+function globToRegExp(pattern) {
+    // Governance policy patterns intentionally support only simple globs:
+    // "*" within a path segment and "**" across path segments.
+    const source = String(pattern);
+    let regex = "";
+
+    for (let index = 0; index < source.length; index += 1) {
+        const char = source[index];
+        const nextChar = source[index + 1];
+
+        if (char === "*" && nextChar === "*") {
+            regex += ".*";
+            index += 1;
+            continue;
+        }
+
+        if (char === "*") {
+            regex += "[^/]*";
+            continue;
+        }
+
+        regex += escapeRegExp(char);
+    }
+
+    return new RegExp(`^${regex}$`);
+}
+
+function escapeRegExp(value) {
+    return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+}
+
+function normalizePath(value) {
+    return String(value || "")
+        .trim()
+        .replace(/\\/g, "/")
+        .replace(/^\.?\//, "")
+        .replace(/^\/+/, "")
+        .replace(/\/+/g, "/");
 }
 
 function collectNewFileLines(patch) {
