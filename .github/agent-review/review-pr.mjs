@@ -75,15 +75,15 @@ function buildReviewContext(pullRequest, changedFiles) {
     }
 
     if (deniedFiles.length) {
-        policyMessages.push(`PR touches denied path(s): ${deniedFiles.join(", ")}.`);
+        policyMessages.push(`PR touches denied path(s): ${formatPathList(deniedFiles)}.`);
     }
 
     if (sensitiveFiles.length) {
-        policyMessages.push(`PR touches sensitive path(s): ${sensitiveFiles.join(", ")}.`);
+        policyMessages.push(`PR touches sensitive path(s): ${formatPathList(sensitiveFiles)}.`);
     }
 
     if (outsideAllowedFiles.length) {
-        policyMessages.push(`PR touches path(s) outside the allow list: ${outsideAllowedFiles.join(", ")}.`);
+        policyMessages.push(`PR touches path(s) outside the allow list: ${formatPathList(outsideAllowedFiles)}.`);
     }
 
     const reviewableFiles = changedFiles.filter((file) => {
@@ -229,42 +229,50 @@ function buildSkippedReview(reviewContext) {
 
 async function runLlmReview(reviewContext) {
     const prompt = buildPrompt(reviewContext);
-    const response = await fetchWithRetry("https://api.openai.com/v1/responses", {
-        method: "POST",
-        signal: AbortSignal.timeout(180000),
-        headers: {
-            Authorization: `Bearer ${openAiApiKey}`,
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-            model,
-            input: [
-                {
-                    role: "system",
-                    content: [
-                        {
-                            type: "input_text",
-                            text: "You are a careful senior code reviewer. Focus on correctness, regressions, security, data loss, and broken workflows. Mention missing tests only when the diff clearly removes or weakens coverage, or when the changed behavior has no apparent guard in the provided context. Do not claim tests are absent if they may exist outside the diff. Do not comment on style unless it blocks maintainability. Return only valid JSON."
-                        }
-                    ]
-                },
-                {
-                    role: "user",
-                    content: [
-                        {
-                            type: "input_text",
-                            text: prompt
-                        }
-                    ]
+    const timeoutSignal = createTimeoutSignal(180000);
+
+    let response;
+
+    try {
+        response = await fetchWithRetry("https://api.openai.com/v1/responses", {
+            method: "POST",
+            signal: timeoutSignal.signal,
+            headers: {
+                Authorization: `Bearer ${openAiApiKey}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                model,
+                input: [
+                    {
+                        role: "system",
+                        content: [
+                            {
+                                type: "input_text",
+                                text: "You are a careful senior code reviewer. Focus on correctness, regressions, security, data loss, and broken workflows. Mention missing tests only when the diff clearly removes or weakens coverage, or when the changed behavior has no apparent guard in the provided context. Do not claim tests are absent if they may exist outside the diff. Do not comment on style unless it blocks maintainability. Return only valid JSON."
+                            }
+                        ]
+                    },
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "input_text",
+                                text: prompt
+                            }
+                        ]
+                    }
+                ],
+                text: {
+                    format: {
+                        type: "json_object"
+                    }
                 }
-            ],
-            text: {
-                format: {
-                    type: "json_object"
-                }
-            }
-        })
-    });
+            })
+        });
+    } finally {
+        timeoutSignal.clear();
+    }
 
     if (!response.ok) {
         const body = await response.text();
@@ -737,6 +745,34 @@ function truncateText(text, maxLength) {
     return `${normalizedText.slice(0, maxLength)}...`;
 }
 
+function formatPathList(paths, maxItems = 20) {
+    const visiblePaths = paths.slice(0, maxItems).join(", ");
+    const hiddenCount = paths.length - maxItems;
+
+    if (hiddenCount > 0) {
+        return `${visiblePaths}, and ${hiddenCount} more`;
+    }
+
+    return visiblePaths;
+}
+
+function createTimeoutSignal(milliseconds) {
+    if (typeof AbortSignal.timeout === "function") {
+        return {
+            signal: AbortSignal.timeout(milliseconds),
+            clear: () => {}
+        };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), milliseconds);
+
+    return {
+        signal: controller.signal,
+        clear: () => clearTimeout(timeout)
+    };
+}
+
 async function loadPolicyWithFallback() {
     try {
         return normalizePolicy(JSON.parse(await readFile(".github/agent-review/policy.json", "utf8")));
@@ -779,6 +815,8 @@ function matchesAny(filename, patterns) {
 }
 
 function globToRegExp(pattern) {
+    // Governance policy patterns intentionally support only simple globs:
+    // "*" within a path segment and "**" across path segments.
     const source = String(pattern);
     let regex = "";
 
