@@ -4,6 +4,7 @@
   "maxInlineComments": 10,
   "reviewForks": false,
   "blockPolicyWithRequestChanges": false,
+  "requireActionForPolicyBlocked": true,
   "allowPaths": [
     "**"
   ],

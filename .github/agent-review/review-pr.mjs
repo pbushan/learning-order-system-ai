@@ -25,7 +25,7 @@ const headers = {
 };
 
 const pull = await githubRequest(`${apiBaseUrl}/repos/${repo}/pulls/${prNumber}`);
-const files = await githubRequest(`${apiBaseUrl}/repos/${repo}/pulls/${prNumber}/files?per_page=100`);
+const files = await fetchPullRequestFiles();
 
 const reviewContext = buildReviewContext(pull, files);
 let llmReview;
@@ -39,7 +39,13 @@ if (reviewContext.policyBlocked) {
     reviewContext.skipReason = "OPENAI_API_KEY was not available, so deep LLM analysis was skipped.";
     llmReview = buildSkippedReview(reviewContext);
 } else {
-    llmReview = await runLlmReview(reviewContext);
+    try {
+        llmReview = await runLlmReview(reviewContext);
+    } catch (error) {
+        reviewContext.skipped = true;
+        reviewContext.skipReason = `LLM review failed after retry: ${error.message}`;
+        llmReview = buildSkippedReview(reviewContext);
+    }
 }
 
 const event = llmReview.blocking ? "REQUEST_CHANGES" : "COMMENT";
@@ -173,6 +179,22 @@ function buildReviewContext(pullRequest, changedFiles) {
     };
 }
 
+async function fetchPullRequestFiles() {
+    const allFiles = [];
+    let page = 1;
+
+    while (true) {
+        const pageFiles = await githubRequest(`${apiBaseUrl}/repos/${repo}/pulls/${prNumber}/files?per_page=100&page=${page}`);
+        allFiles.push(...pageFiles);
+
+        if (pageFiles.length < 100) {
+            return allFiles;
+        }
+
+        page += 1;
+    }
+}
+
 function buildPolicyBlockedReview(reviewContext) {
     return {
         summary: "Automated deep review was blocked by governance policy. Human review is required before merge.",
@@ -264,7 +286,15 @@ async function fetchWithRetry(url, options, attempts = 2) {
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
         try {
-            return await fetch(url, options);
+            const response = await fetch(url, options);
+
+            if (!isRetryableResponse(response) || attempt === attempts) {
+                return response;
+            }
+
+            lastError = new Error(`Retryable HTTP response ${response.status}`);
+            console.warn(`Fetch attempt ${attempt} received ${response.status} for ${url}. Retrying once.`);
+            await sleep(getRetryDelayMilliseconds(response, attempt));
         } catch (error) {
             lastError = error;
 
@@ -278,6 +308,20 @@ async function fetchWithRetry(url, options, attempts = 2) {
     }
 
     throw lastError;
+}
+
+function isRetryableResponse(response) {
+    return [429, 500, 502, 503, 504].includes(response.status);
+}
+
+function getRetryDelayMilliseconds(response, attempt) {
+    const retryAfter = Number(response.headers.get("retry-after"));
+
+    if (Number.isFinite(retryAfter) && retryAfter > 0) {
+        return retryAfter * 1000;
+    }
+
+    return 1000 * attempt;
 }
 
 function sleep(milliseconds) {
@@ -592,6 +636,7 @@ async function writeReviewArtifact({ pull, reviewContext, llmReview, event, comm
             maxPatchChars: policy.maxPatchChars,
             maxInlineComments: policy.maxInlineComments,
             reviewForks: policy.reviewForks,
+            requireActionForPolicyBlocked: policy.requireActionForPolicyBlocked,
             allowPaths: policy.allowPaths,
             ignoredPaths: policy.ignoredPaths,
             denyPaths: policy.denyPaths,
@@ -635,7 +680,11 @@ async function writeReviewArtifact({ pull, reviewContext, llmReview, event, comm
 }
 
 function getCheckConclusion(reviewContext, llmReview) {
-    if (llmReview.blocking || reviewContext.policyBlocked) {
+    if (reviewContext.policyBlocked) {
+        return policy.requireActionForPolicyBlocked ? "action_required" : "neutral";
+    }
+
+    if (llmReview.blocking) {
         return "action_required";
     }
 
@@ -706,6 +755,7 @@ function normalizePolicy(rawPolicy) {
         maxInlineComments: readNonNegativeNumber(rawPolicy.maxInlineComments, 10),
         reviewForks: Boolean(rawPolicy.reviewForks),
         blockPolicyWithRequestChanges: Boolean(rawPolicy.blockPolicyWithRequestChanges),
+        requireActionForPolicyBlocked: rawPolicy.requireActionForPolicyBlocked !== false,
         allowPaths: Array.isArray(rawPolicy.allowPaths) ? rawPolicy.allowPaths : ["**"],
         ignoredPaths: Array.isArray(rawPolicy.ignoredPaths) ? rawPolicy.ignoredPaths : [],
         denyPaths: Array.isArray(rawPolicy.denyPaths) ? rawPolicy.denyPaths : [],
