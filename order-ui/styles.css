@@ -236,11 +236,11 @@ button {
     padding: 28px;
 }
 
-.tab-panel {
+.workspace > .tab-panel {
     grid-column: 1 / -1;
 }
 
-.tab-panel[hidden] {
+.workspace > .tab-panel[hidden] {
     display: none;
 }
 

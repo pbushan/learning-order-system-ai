@@ -32,10 +32,25 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 function initializeTabs() {
-    tabButtons = Array.from(document.querySelectorAll("[data-tab-target]"));
-    tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
+    const discoveredButtons = Array.from(document.querySelectorAll("[data-tab-target]"));
+    const discoveredPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
+    const panelsById = new Map(discoveredPanels.map((panel) => [panel.id, panel]));
+
+    tabButtons = discoveredButtons.filter((button) => {
+        const panel = panelsById.get(button.getAttribute("aria-controls"));
+        return panel?.dataset.tabPanel === button.dataset.tabTarget;
+    });
+    tabPanels = discoveredPanels.filter((panel) => (
+        tabButtons.some((button) => button.dataset.tabTarget === panel.dataset.tabPanel)
+    ));
+
+    if (!tabButtons.length || !tabPanels.length) {
+        return;
+    }
 
     tabButtons.forEach((button) => {
+        const panel = panelsById.get(button.getAttribute("aria-controls"));
+        panel.setAttribute("aria-labelledby", button.id);
         button.addEventListener("click", () => activateTab(button.dataset.tabTarget));
         button.addEventListener("keydown", handleTabKeydown);
     });
@@ -52,6 +67,10 @@ function getTabFromHash() {
 }
 
 function activateTab(tabName, updateHash = true) {
+    if (!tabButtons.length || !tabPanels.length) {
+        return;
+    }
+
     const nextTabName = isAvailableTab(tabName) ? tabName : "customers";
 
     tabButtons.forEach((button) => {
@@ -71,7 +90,9 @@ function activateTab(tabName, updateHash = true) {
 }
 
 function isAvailableTab(tabName) {
-    return tabButtons.some((button) => button.dataset.tabTarget === tabName)
+    return tabButtons.length > 0
+        && tabPanels.length > 0
+        && tabButtons.some((button) => button.dataset.tabTarget === tabName)
         && tabPanels.some((panel) => panel.dataset.tabPanel === tabName);
 }
 
