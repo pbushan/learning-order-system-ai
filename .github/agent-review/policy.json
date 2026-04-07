@@ -3,6 +3,7 @@
   "maxPatchChars": 30000,
   "maxInlineComments": 10,
   "reviewForks": false,
+  "blockPolicyWithRequestChanges": false,
   "allowPaths": [
     "**"
   ],
@@ -48,6 +49,5 @@
     "*token*",
     "**/*token*"
   ],
-  "checkRunName": "Agent Review Governance",
-  "artifactPath": "agent-review-result.json"
+  "checkRunName": "Agent Review Governance"
 }

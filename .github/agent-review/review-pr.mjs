@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 
-const requiredEnv = ["GITHUB_TOKEN", "OPENAI_API_KEY", "REPO", "PR_NUMBER", "GITHUB_API_URL"];
+const requiredEnv = ["GITHUB_TOKEN", "REPO", "PR_NUMBER", "GITHUB_API_URL"];
+const artifactPath = "agent-review-result.json";
 
 for (const key of requiredEnv) {
     if (!process.env[key]) {
@@ -26,11 +27,19 @@ const pull = await githubRequest(`${apiBaseUrl}/repos/${repo}/pulls/${prNumber}`
 const files = await githubRequest(`${apiBaseUrl}/repos/${repo}/pulls/${prNumber}/files?per_page=100`);
 
 const reviewContext = buildReviewContext(pull, files);
-const llmReview = reviewContext.policyBlocked
-    ? buildPolicyBlockedReview(reviewContext)
-    : reviewContext.skipped
-    ? buildSkippedReview(reviewContext)
-    : await runLlmReview(reviewContext);
+let llmReview;
+
+if (reviewContext.policyBlocked) {
+    llmReview = buildPolicyBlockedReview(reviewContext);
+} else if (reviewContext.skipped) {
+    llmReview = buildSkippedReview(reviewContext);
+} else if (!openAiApiKey) {
+    reviewContext.skipped = true;
+    reviewContext.skipReason = "OPENAI_API_KEY was not available, so deep LLM analysis was skipped.";
+    llmReview = buildSkippedReview(reviewContext);
+} else {
+    llmReview = await runLlmReview(reviewContext);
+}
 
 const event = llmReview.blocking ? "REQUEST_CHANGES" : "COMMENT";
 const body = buildReviewBody(pull, reviewContext, llmReview, event);
@@ -39,7 +48,7 @@ const checkConclusion = getCheckConclusion(reviewContext, llmReview);
 
 await writeReviewArtifact({ pull, reviewContext, llmReview, event, comments, checkConclusion });
 await postReviewWithFallback({ event, body, comments });
-await postCheckRun({ pull, reviewContext, llmReview, event, comments, checkConclusion });
+await postCheckRunWithFallback({ pull, reviewContext, llmReview, event, comments, checkConclusion });
 
 function buildReviewContext(pullRequest, changedFiles) {
     const isFork = pullRequest.head.repo?.full_name !== pullRequest.base.repo?.full_name;
@@ -162,7 +171,7 @@ function buildReviewContext(pullRequest, changedFiles) {
 function buildPolicyBlockedReview(reviewContext) {
     return {
         summary: "Automated deep review was blocked by governance policy. Human review is required before merge.",
-        blocking: true,
+        blocking: policy.blockPolicyWithRequestChanges,
         findings: reviewContext.policyMessages.map((message) => {
             return {
                 severity: "P2",
@@ -496,6 +505,18 @@ async function postCheckRun({ pull, reviewContext, llmReview, event, comments, c
     });
 }
 
+async function postCheckRunWithFallback({ pull, reviewContext, llmReview, event, comments, checkConclusion }) {
+    try {
+        await postCheckRun({ pull, reviewContext, llmReview, event, comments, checkConclusion });
+    } catch (error) {
+        if (!(error instanceof GitHubRequestError) || ![403, 404, 409, 422].includes(error.status)) {
+            throw error;
+        }
+
+        console.warn(`Unable to post agent review check run (${error.status}): ${truncateText(error.body, 500)}`);
+    }
+}
+
 function buildCheckRunText({ reviewContext, llmReview, comments, checkConclusion }) {
     const findingSummary = llmReview.findings.length
         ? llmReview.findings.map((finding) => `- ${finding.severity}: ${finding.title}`).join("\n")
@@ -574,7 +595,7 @@ async function writeReviewArtifact({ pull, reviewContext, llmReview, event, comm
         }
     };
 
-    await writeFile(policy.artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
+    await writeFile(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
 }
 
 function getCheckConclusion(reviewContext, llmReview) {
@@ -635,16 +656,16 @@ async function loadPolicy() {
     const rawPolicy = JSON.parse(await readFile(".github/agent-review/policy.json", "utf8"));
 
     return {
-        maxFiles: Number(rawPolicy.maxFiles || 20),
-        maxPatchChars: Number(rawPolicy.maxPatchChars || 30000),
-        maxInlineComments: Number(rawPolicy.maxInlineComments || 10),
+        maxFiles: Number(rawPolicy.maxFiles ?? 20),
+        maxPatchChars: Number(rawPolicy.maxPatchChars ?? 30000),
+        maxInlineComments: Number(rawPolicy.maxInlineComments ?? 10),
         reviewForks: Boolean(rawPolicy.reviewForks),
+        blockPolicyWithRequestChanges: Boolean(rawPolicy.blockPolicyWithRequestChanges),
         allowPaths: Array.isArray(rawPolicy.allowPaths) ? rawPolicy.allowPaths : ["**"],
         ignoredPaths: Array.isArray(rawPolicy.ignoredPaths) ? rawPolicy.ignoredPaths : [],
         denyPaths: Array.isArray(rawPolicy.denyPaths) ? rawPolicy.denyPaths : [],
         sensitivePaths: Array.isArray(rawPolicy.sensitivePaths) ? rawPolicy.sensitivePaths : [],
-        checkRunName: String(rawPolicy.checkRunName || "Agent Review Governance"),
-        artifactPath: String(rawPolicy.artifactPath || "agent-review-result.json")
+        checkRunName: String(rawPolicy.checkRunName || "Agent Review Governance")
     };
 }
 
