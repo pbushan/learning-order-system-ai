@@ -42,6 +42,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (intakeChatForm) {
         intakeChatForm.addEventListener("submit", handleIntakeChatSubmit);
     }
+    validateIntakeTabSetup();
     initializeTabs();
 
     loadDashboard();
@@ -281,7 +282,7 @@ async function handleOrderSubmit(event) {
 
 async function handleIntakeChatSubmit(event) {
     event.preventDefault();
-    if (!intakeChatInput || !intakeChatSend || !intakeChatHistory || !intakeChatLoading) {
+    if (!intakeChatInput || !intakeChatSend || !intakeChatHistory) {
         showBanner("Intake chat is unavailable right now.", "error");
         return;
     }
@@ -309,7 +310,10 @@ async function handleIntakeChatSubmit(event) {
                 }))
             })
         });
-        const reply = response?.reply || "I need a little more detail to capture this intake.";
+        if (!response || typeof response.reply !== "string" || !response.reply.trim()) {
+            throw new Error("Invalid intake response");
+        }
+        const reply = response.reply.trim();
         state.intakeMessages.push({ role: "assistant", content: reply });
     } catch (error) {
         state.intakeMessages.push({
@@ -363,6 +367,16 @@ function setIntakeChatLoading(isLoading) {
     }
     if (intakeChatLoading) {
         intakeChatLoading.classList.toggle("hidden", !isLoading);
+    }
+}
+
+function validateIntakeTabSetup() {
+    const intakeTab = document.getElementById("intake-tab");
+    const intakePanel = document.getElementById("intake-panel");
+    const tabLinked = intakeTab?.getAttribute("aria-controls") === intakePanel?.id;
+    const dataLinked = intakeTab?.dataset.tabTarget === intakePanel?.dataset.tabPanel;
+    if (!tabLinked || !dataLinked) {
+        console.warn("Intake tab wiring mismatch detected; intake tab may not behave correctly.");
     }
 }
 
