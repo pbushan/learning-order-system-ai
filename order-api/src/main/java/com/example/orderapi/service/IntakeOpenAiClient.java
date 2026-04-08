@@ -12,6 +12,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -81,8 +82,11 @@ public class IntakeOpenAiClient {
                     .retrieve()
                     .body(String.class);
             return parseNormalizedResult(raw);
+        } catch (RestClientResponseException ex) {
+            log.warn("OpenAI intake request failed with status {}", ex.getStatusCode());
+            return fallbackResult("Intake service is temporarily unavailable. Please try again shortly.");
         } catch (Exception ex) {
-            log.warn("OpenAI intake request failed", ex);
+            log.warn("OpenAI intake request failed: {}", ex.getMessage());
             return fallbackResult();
         }
     }
@@ -187,29 +191,12 @@ public class IntakeOpenAiClient {
         }
         if (StringUtils.hasText(content)) {
             String jsonOnly = unwrapJson(content);
-            try {
-                return objectMapper.readTree(jsonOnly);
-            } catch (Exception ex) {
-                String objectSlice = extractJsonObjectSlice(jsonOnly);
-                if (objectSlice == null) {
-                    throw ex;
-                }
-                return objectMapper.readTree(objectSlice);
-            }
+            return objectMapper.readTree(jsonOnly);
         }
 
         JsonNode parsed = messageNode.path("parsed");
         if (!parsed.isMissingNode() && !parsed.isNull()) {
             return parsed;
-        }
-        return null;
-    }
-
-    private String extractJsonObjectSlice(String value) {
-        int start = value.indexOf('{');
-        int end = value.lastIndexOf('}');
-        if (start >= 0 && end > start) {
-            return value.substring(start, end + 1);
         }
         return null;
     }
@@ -251,10 +238,18 @@ public class IntakeOpenAiClient {
     }
 
     private NormalizedIntakeResult fallbackResult() {
+        return fallbackResult("I need a bit more detail to capture this intake. Please share whether this is a bug or feature, plus title and description.");
+    }
+
+    private NormalizedIntakeResult fallbackResult(String reply) {
         StructuredIntakeData fallbackData = new StructuredIntakeData();
+        fallbackData.setTitle("");
+        fallbackData.setDescription("");
+        fallbackData.setStepsToReproduce("");
+        fallbackData.setExpectedBehavior("");
         fallbackData.setAffectedComponents(Collections.emptyList());
         return new NormalizedIntakeResult(
-                "I need a bit more detail to capture this intake. Please share whether this is a bug or feature, plus title and description.",
+                reply,
                 false,
                 fallbackData
         );
