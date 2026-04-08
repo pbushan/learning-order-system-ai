@@ -29,3 +29,8 @@ app:
     endpoint: http://localhost:4566
     region: us-east-1
     function-name: shipping-rule-lambda
+  intake:
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+    model: gpt-4.1-mini
+    audit-log-path: order-api/audit/intake-chat.jsonl
