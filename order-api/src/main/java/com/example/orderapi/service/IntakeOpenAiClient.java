@@ -86,7 +86,7 @@ public class IntakeOpenAiClient {
         } catch (RestClientResponseException ex) {
             String responseBody = ex.getResponseBodyAsString();
             log.warn("OpenAI intake request failed with status {} body={}", ex.getStatusCode(), safeSnippet(responseBody));
-            if (ex.getStatusCode().value() == 400 && responseBody != null && responseBody.contains("response_format")) {
+            if (ex.getStatusCode().value() == 400 && looksLikeJsonModeIncompatibility(responseBody)) {
                 return fallbackResult("OpenAI model configuration is incompatible with JSON response mode. Please update app.intake.model.");
             }
             return fallbackResult("Intake service is temporarily unavailable. Please try again shortly.");
@@ -130,10 +130,10 @@ public class IntakeOpenAiClient {
     private StructuredIntakeData toStructuredData(JsonNode node) {
         StructuredIntakeData data = new StructuredIntakeData();
         data.setType(validType(node.path("type").asText(null)));
-        data.setTitle(blankToNull(node.path("title").asText(null)));
-        data.setDescription(blankToNull(node.path("description").asText(null)));
-        data.setStepsToReproduce(blankToNull(node.path("stepsToReproduce").asText(null)));
-        data.setExpectedBehavior(blankToNull(node.path("expectedBehavior").asText(null)));
+        data.setTitle(blankToEmpty(node.path("title").asText(null)));
+        data.setDescription(blankToEmpty(node.path("description").asText(null)));
+        data.setStepsToReproduce(blankToEmpty(node.path("stepsToReproduce").asText(null)));
+        data.setExpectedBehavior(blankToEmpty(node.path("expectedBehavior").asText(null)));
         data.setPriority(validPriority(node.path("priority").asText(null)));
 
         List<String> affectedComponents = new ArrayList<>();
@@ -192,16 +192,34 @@ public class IntakeOpenAiClient {
             return parseJsonFromContent(contentNode.asText(""));
         }
         if (contentNode.isArray()) {
-            StringBuilder sb = new StringBuilder();
+            List<String> fragments = new ArrayList<>();
             for (JsonNode item : contentNode) {
                 if (item.isTextual()) {
-                    sb.append(item.asText(""));
+                    JsonNode parsed = parseJsonFromContent(item.asText(""));
+                    if (parsed != null) {
+                        return parsed;
+                    }
+                    fragments.add(item.asText(""));
                 } else {
-                    sb.append(item.path("text").asText(""));
-                    sb.append(item.path("value").asText(""));
+                    String text = item.path("text").asText("");
+                    String value = item.path("value").asText("");
+                    JsonNode parsedText = parseJsonFromContent(text);
+                    if (parsedText != null) {
+                        return parsedText;
+                    }
+                    JsonNode parsedValue = parseJsonFromContent(value);
+                    if (parsedValue != null) {
+                        return parsedValue;
+                    }
+                    if (StringUtils.hasText(text)) {
+                        fragments.add(text);
+                    }
+                    if (StringUtils.hasText(value)) {
+                        fragments.add(value);
+                    }
                 }
             }
-            return parseJsonFromContent(sb.toString());
+            return parseJsonFromContent(String.join("\n", fragments));
         }
         if (contentNode.isObject()) {
             String text = contentNode.path("text").asText("");
@@ -284,6 +302,24 @@ public class IntakeOpenAiClient {
             return null;
         }
         return value.trim();
+    }
+
+    private String blankToEmpty(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        return value.trim();
+    }
+
+    private boolean looksLikeJsonModeIncompatibility(String responseBody) {
+        if (!StringUtils.hasText(responseBody)) {
+            return false;
+        }
+        String normalized = responseBody.toLowerCase();
+        return normalized.contains("response_format")
+                || normalized.contains("json_object")
+                || normalized.contains("unsupported")
+                || normalized.contains("not supported");
     }
 
     private String validType(String value) {
