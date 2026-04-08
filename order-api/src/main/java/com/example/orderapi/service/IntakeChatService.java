@@ -138,8 +138,8 @@ public class IntakeChatService {
             return emptyStructuredData();
         }
         StructuredIntakeData safe = new StructuredIntakeData();
-        safe.setType(source.getType());
-        safe.setPriority(source.getPriority());
+        safe.setType(truncateForAudit(redactSensitive(source.getType()), MAX_AUDIT_CONTENT_CHARS));
+        safe.setPriority(truncateForAudit(redactSensitive(source.getPriority()), MAX_AUDIT_CONTENT_CHARS));
         safe.setTitle(truncateForAudit(redactSensitive(source.getTitle()), MAX_AUDIT_CONTENT_CHARS));
         safe.setDescription(truncateForAudit(redactSensitive(source.getDescription()), MAX_AUDIT_CONTENT_CHARS));
         safe.setStepsToReproduce(truncateForAudit(redactSensitive(source.getStepsToReproduce()), MAX_AUDIT_CONTENT_CHARS));
@@ -148,7 +148,8 @@ public class IntakeChatService {
         List<String> safeComponents = new ArrayList<>();
         int start = Math.max(0, components.size() - MAX_AUDIT_MESSAGES);
         for (int i = start; i < components.size(); i++) {
-            safeComponents.add(truncateForAudit(redactSensitive(components.get(i)), MAX_AUDIT_CONTENT_CHARS));
+            String value = components.get(i);
+            safeComponents.add(truncateForAudit(redactSensitive(value), MAX_AUDIT_CONTENT_CHARS));
         }
         safe.setAffectedComponents(safeComponents);
         return safe;

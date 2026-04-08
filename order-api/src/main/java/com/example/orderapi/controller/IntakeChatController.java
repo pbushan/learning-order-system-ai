@@ -32,17 +32,8 @@ public class IntakeChatController {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                     .body(serviceUnavailableResponse(requestId));
         } catch (IntakeChatService.IntakeProcessingException ex) {
-            IntakeChatResponse fallback = ex.getFallbackResponse();
-            if (fallback == null) {
-                fallback = serviceUnavailableResponse(requestId);
-            }
-            if (fallback.getRequestId() == null || fallback.getRequestId().isBlank()) {
-                fallback.setRequestId(requestId);
-            }
-            if (fallback.getStructuredData() == null) {
-                fallback.setStructuredData(serviceUnavailableResponse(requestId).getStructuredData());
-            }
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(fallback);
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body(normalizeErrorResponse(ex.getFallbackResponse(), requestId));
         }
     }
 
@@ -58,6 +49,32 @@ public class IntakeChatController {
         data.setAffectedComponents(Collections.emptyList());
         response.setStructuredData(data);
         response.setRequestId(requestId);
+        return response;
+    }
+
+    private IntakeChatResponse normalizeErrorResponse(IntakeChatResponse fallback, String requestId) {
+        IntakeChatResponse response = fallback != null ? fallback : serviceUnavailableResponse(requestId);
+        if (response.getRequestId() == null || response.getRequestId().isBlank()) {
+            response.setRequestId(requestId);
+        }
+        StructuredIntakeData fallbackData = serviceUnavailableResponse(requestId).getStructuredData();
+        StructuredIntakeData data = response.getStructuredData() != null ? response.getStructuredData() : fallbackData;
+        if (data.getTitle() == null) {
+            data.setTitle("");
+        }
+        if (data.getDescription() == null) {
+            data.setDescription("");
+        }
+        if (data.getStepsToReproduce() == null) {
+            data.setStepsToReproduce("");
+        }
+        if (data.getExpectedBehavior() == null) {
+            data.setExpectedBehavior("");
+        }
+        if (data.getAffectedComponents() == null) {
+            data.setAffectedComponents(Collections.emptyList());
+        }
+        response.setStructuredData(data);
         return response;
     }
 }
