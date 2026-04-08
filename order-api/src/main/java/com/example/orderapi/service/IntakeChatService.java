@@ -35,7 +35,7 @@ public class IntakeChatService {
             response.setStructuredData(result.getStructuredData());
             response.setRequestId(requestId);
 
-            fileAuditLogService.logEntry(
+            safeAuditLog(
                     requestId,
                     messages,
                     model,
@@ -46,7 +46,7 @@ public class IntakeChatService {
             );
             return response;
         } catch (IllegalStateException ex) {
-            fileAuditLogService.logEntry(
+            safeAuditLog(
                     requestId,
                     messages,
                     model,
@@ -58,7 +58,7 @@ public class IntakeChatService {
             throw new IntakeConfigurationException("Intake service is not configured. Please set OPENAI_API_KEY.");
         } catch (Exception ex) {
             IntakeChatResponse fallback = fallbackResponse(requestId);
-            fileAuditLogService.logEntry(
+            safeAuditLog(
                     requestId,
                     messages,
                     model,
@@ -78,6 +78,20 @@ public class IntakeChatService {
         response.setStructuredData(emptyStructuredData());
         response.setRequestId(requestId);
         return response;
+    }
+
+    private void safeAuditLog(String requestId,
+                              List<ChatMessage> messages,
+                              String model,
+                              String reply,
+                              Boolean intakeComplete,
+                              StructuredIntakeData structuredData,
+                              String error) {
+        try {
+            fileAuditLogService.logEntry(requestId, messages, model, reply, intakeComplete, structuredData, error);
+        } catch (Exception ignored) {
+            // Do not fail intake responses due to audit logging.
+        }
     }
 
     private StructuredIntakeData emptyStructuredData() {
