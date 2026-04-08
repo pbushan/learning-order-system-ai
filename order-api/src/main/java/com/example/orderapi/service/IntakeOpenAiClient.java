@@ -100,8 +100,9 @@ public class IntakeOpenAiClient {
             }
 
             String reply = intakeJson.path("reply").asText("").trim();
-            boolean intakeComplete = intakeJson.path("intakeComplete").asBoolean(false);
             StructuredIntakeData structuredData = toStructuredData(intakeJson.path("structuredData"));
+            boolean intakeComplete = intakeJson.path("intakeComplete").asBoolean(false)
+                    && hasMeaningfulStructuredData(structuredData);
 
             if (reply.isEmpty()) {
                 return new NormalizedIntakeResult(
@@ -166,13 +167,13 @@ public class IntakeOpenAiClient {
         return trimmed;
     }
 
-    private String extractModelContent(JsonNode root) {
+    private JsonNode extractStructuredJson(JsonNode root) throws Exception {
         JsonNode messageNode = root.path("choices").path(0).path("message");
         JsonNode contentNode = messageNode.path("content");
+        String content = "";
         if (contentNode.isTextual()) {
-            return contentNode.asText("");
-        }
-        if (contentNode.isArray()) {
+            content = contentNode.asText("");
+        } else if (contentNode.isArray()) {
             StringBuilder sb = new StringBuilder();
             for (JsonNode item : contentNode) {
                 if (item.isTextual()) {
@@ -182,45 +183,26 @@ public class IntakeOpenAiClient {
                     sb.append(item.path("value").asText(""));
                 }
             }
-            return sb.toString();
+            content = sb.toString();
         }
-        if (contentNode.isObject()) {
-            String text = contentNode.path("text").asText("");
-            if (!text.isBlank()) {
-                return text;
+        if (StringUtils.hasText(content)) {
+            String jsonOnly = unwrapJson(content);
+            try {
+                return objectMapper.readTree(jsonOnly);
+            } catch (Exception ex) {
+                String objectSlice = extractJsonObjectSlice(jsonOnly);
+                if (objectSlice == null) {
+                    throw ex;
+                }
+                return objectMapper.readTree(objectSlice);
             }
         }
 
-        String outputText = root.path("output_text").asText("");
-        if (!outputText.isBlank()) {
-            return outputText;
-        }
-
-        JsonNode alt = root.path("output").path(0).path("content").path(0).path("text");
-        return alt.asText("");
-    }
-
-    private JsonNode extractStructuredJson(JsonNode root) throws Exception {
-        JsonNode parsed = root.path("choices").path(0).path("message").path("parsed");
+        JsonNode parsed = messageNode.path("parsed");
         if (!parsed.isMissingNode() && !parsed.isNull()) {
             return parsed;
         }
-
-        String content = extractModelContent(root).trim();
-        if (content.isEmpty()) {
-            return null;
-        }
-
-        String jsonOnly = unwrapJson(content);
-        try {
-            return objectMapper.readTree(jsonOnly);
-        } catch (Exception ex) {
-            String objectSlice = extractJsonObjectSlice(jsonOnly);
-            if (objectSlice == null) {
-                throw ex;
-            }
-            return objectMapper.readTree(objectSlice);
-        }
+        return null;
     }
 
     private String extractJsonObjectSlice(String value) {
@@ -230,6 +212,19 @@ public class IntakeOpenAiClient {
             return value.substring(start, end + 1);
         }
         return null;
+    }
+
+    private boolean hasMeaningfulStructuredData(StructuredIntakeData data) {
+        if (data == null) {
+            return false;
+        }
+        return StringUtils.hasText(data.getType())
+                || StringUtils.hasText(data.getTitle())
+                || StringUtils.hasText(data.getDescription())
+                || StringUtils.hasText(data.getStepsToReproduce())
+                || StringUtils.hasText(data.getExpectedBehavior())
+                || StringUtils.hasText(data.getPriority())
+                || (data.getAffectedComponents() != null && !data.getAffectedComponents().isEmpty());
     }
 
     private String blankToNull(String value) {
