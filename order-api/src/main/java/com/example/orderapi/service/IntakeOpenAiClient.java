@@ -25,6 +25,10 @@ import java.util.Map;
 public class IntakeOpenAiClient {
 
     private static final Logger log = LoggerFactory.getLogger(IntakeOpenAiClient.class);
+    static final int MAX_TOTAL_MESSAGES = 20;
+    static final int MAX_HISTORY_MESSAGES = Math.max(0, MAX_TOTAL_MESSAGES - 1);
+    static final int MAX_CONTENT_CHARS = 2000;
+    static final int TRUNCATION_BOUNDARY_WINDOW = 80;
     private static final String SYSTEM_PROMPT = "You are a product intake assistant. Classify the request as bug or feature. "
             + "Ask only minimal clarifying questions. Stop when enough information is collected. "
             + "Return valid JSON only with keys: reply, intakeComplete, structuredData. "
@@ -58,6 +62,7 @@ public class IntakeOpenAiClient {
         requestMessages.add(Map.of("role", "system", "content", SYSTEM_PROMPT));
 
         if (messages != null) {
+            List<Map<String, String>> filtered = new ArrayList<>();
             for (ChatMessage message : messages) {
                 if (message == null) {
                     continue;
@@ -68,9 +73,23 @@ public class IntakeOpenAiClient {
                 }
                 String content = message.getContent() != null ? message.getContent().trim() : "";
                 if (!content.isEmpty()) {
-                    requestMessages.add(Map.of("role", role, "content", content));
+                    filtered.add(Map.of("role", role, "content", truncateContent(content)));
+                } else {
+                    log.debug("Skipping empty chat message content for role {}", role);
                 }
             }
+            if (filtered.size() <= MAX_HISTORY_MESSAGES) {
+                requestMessages.addAll(filtered);
+            } else {
+                // Preserve earliest non-empty context plus the most recent history.
+                requestMessages.add(filtered.get(0));
+                int tailCount = Math.max(0, MAX_HISTORY_MESSAGES - 1);
+                int tailStart = Math.max(1, filtered.size() - tailCount);
+                requestMessages.addAll(filtered.subList(tailStart, filtered.size()));
+            }
+        }
+        if (requestMessages.size() > MAX_TOTAL_MESSAGES) {
+            requestMessages = new ArrayList<>(requestMessages.subList(0, MAX_TOTAL_MESSAGES));
         }
 
         Map<String, Object> body = new LinkedHashMap<>();
@@ -90,7 +109,13 @@ public class IntakeOpenAiClient {
             String responseBody = ex.getResponseBodyAsString();
             log.warn("OpenAI intake request failed with status {}", ex.getStatusCode().value());
             if (ex.getStatusCode().value() == 400 && isJsonModeIncompatibility(responseBody)) {
-                return fallbackResult("OpenAI model configuration is incompatible with JSON response mode. Please update app.intake.model.");
+                return fallbackResult("Intake service model settings are currently incompatible. Please try again shortly.");
+            }
+            if (ex.getStatusCode().value() == 401 || ex.getStatusCode().value() == 403) {
+                return fallbackResult("Intake authorization is currently failing. Please try again shortly.");
+            }
+            if (ex.getStatusCode().value() == 429) {
+                return fallbackResult("OpenAI is rate-limiting requests right now. Please retry shortly.");
             }
             return fallbackResult("Intake service is temporarily unavailable. Please try again shortly.");
         } catch (Exception ex) {
@@ -238,6 +263,10 @@ public class IntakeOpenAiClient {
             if (StringUtils.hasText(text)) {
                 return parseJsonFromContent(text);
             }
+            String value = contentNode.path("value").asText("");
+            if (StringUtils.hasText(value)) {
+                return parseJsonFromContent(value);
+            }
         }
         return null;
     }
@@ -259,6 +288,46 @@ public class IntakeOpenAiClient {
             return null;
         }
         return value.trim();
+    }
+
+    String truncateContent(String content) {
+        int rawCap = MAX_CONTENT_CHARS + TRUNCATION_BOUNDARY_WINDOW;
+        if (content.length() > rawCap) {
+            content = content.substring(0, rawCap);
+        }
+        if (content.length() <= MAX_CONTENT_CHARS) {
+            return content;
+        }
+        int cap = MAX_CONTENT_CHARS;
+        int boundary = findBoundary(content, cap);
+        int preferredBoundary = boundary >= (cap - 20) ? boundary : cap;
+        int safeBoundary = safeBoundary(content, preferredBoundary);
+        int cappedBoundary = Math.max(1, Math.min(safeBoundary, cap));
+        return content.substring(0, cappedBoundary);
+    }
+
+    int findBoundary(String content, int maxChars) {
+        int effectiveMax = Math.max(1, Math.min(maxChars, content.length()));
+        int minBoundary = Math.max(1, effectiveMax - TRUNCATION_BOUNDARY_WINDOW);
+        for (int i = effectiveMax; i >= minBoundary; i--) {
+            char ch = content.charAt(i - 1);
+            if (ch == '\n' || ch == '}' || ch == '.' || ch == '!' || ch == '?' || Character.isWhitespace(ch)) {
+                return i;
+            }
+        }
+        return effectiveMax;
+    }
+
+    int safeBoundary(String content, int boundary) {
+        if (boundary <= 0 || boundary >= content.length()) {
+            return Math.max(0, Math.min(boundary, content.length()));
+        }
+        char prev = content.charAt(boundary - 1);
+        char next = content.charAt(boundary);
+        if (Character.isHighSurrogate(prev) && Character.isLowSurrogate(next)) {
+            return boundary - 1;
+        }
+        return boundary;
     }
 
     private String blankToEmpty(String value) {
