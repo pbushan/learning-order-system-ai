@@ -63,6 +63,9 @@ public class IntakeOpenAiClient {
                     continue;
                 }
                 String role = normalizeRole(message.getRole());
+                if (!StringUtils.hasText(role)) {
+                    continue;
+                }
                 String content = message.getContent() != null ? message.getContent().trim() : "";
                 if (!content.isEmpty()) {
                     requestMessages.add(Map.of("role", role, "content", content));
@@ -86,7 +89,7 @@ public class IntakeOpenAiClient {
         } catch (RestClientResponseException ex) {
             String responseBody = ex.getResponseBodyAsString();
             log.warn("OpenAI intake request failed with status {} body={}", ex.getStatusCode(), safeSnippet(responseBody));
-            if (ex.getStatusCode().value() == 400 && looksLikeJsonModeIncompatibility(responseBody)) {
+            if (ex.getStatusCode().value() == 400 && isJsonModeIncompatibility(responseBody)) {
                 return fallbackResult("OpenAI model configuration is incompatible with JSON response mode. Please update app.intake.model.");
             }
             return fallbackResult("Intake service is temporarily unavailable. Please try again shortly.");
@@ -166,7 +169,7 @@ public class IntakeOpenAiClient {
         if ("user".equals(role)) {
             return "user";
         }
-        return "user";
+        return null;
     }
 
     private String unwrapJson(String content) {
@@ -238,55 +241,8 @@ public class IntakeOpenAiClient {
         try {
             return objectMapper.readTree(jsonOnly);
         } catch (Exception ex) {
-            String extracted = extractFirstJsonObject(jsonOnly);
-            if (extracted == null) {
-                return null;
-            }
-            try {
-                return objectMapper.readTree(extracted);
-            } catch (Exception ignored) {
-                return null;
-            }
+            return null;
         }
-    }
-
-    private String extractFirstJsonObject(String value) {
-        int start = -1;
-        int depth = 0;
-        boolean inString = false;
-        boolean escaped = false;
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            if (inString) {
-                if (escaped) {
-                    escaped = false;
-                } else if (c == '\\') {
-                    escaped = true;
-                } else if (c == '"') {
-                    inString = false;
-                }
-                continue;
-            }
-
-            if (c == '"') {
-                inString = true;
-                continue;
-            }
-            if (c == '{') {
-                if (start < 0) {
-                    start = i;
-                }
-                depth++;
-            } else if (c == '}') {
-                if (depth > 0) {
-                    depth--;
-                    if (depth == 0 && start >= 0) {
-                        return value.substring(start, i + 1);
-                    }
-                }
-            }
-        }
-        return null;
     }
 
     private String safeSnippet(String value) {
@@ -311,15 +267,25 @@ public class IntakeOpenAiClient {
         return value.trim();
     }
 
-    private boolean looksLikeJsonModeIncompatibility(String responseBody) {
+    private boolean isJsonModeIncompatibility(String responseBody) {
         if (!StringUtils.hasText(responseBody)) {
             return false;
         }
-        String normalized = responseBody.toLowerCase();
-        return normalized.contains("response_format")
-                || normalized.contains("json_object")
-                || normalized.contains("unsupported")
-                || normalized.contains("not supported");
+        try {
+            JsonNode root = objectMapper.readTree(responseBody);
+            JsonNode error = root.path("error");
+            String param = error.path("param").asText("").toLowerCase();
+            String code = error.path("code").asText("").toLowerCase();
+            String type = error.path("type").asText("").toLowerCase();
+            String message = error.path("message").asText("").toLowerCase();
+            return param.contains("response_format")
+                    || code.contains("response_format")
+                    || type.contains("invalid_request")
+                    || message.contains("response_format")
+                    || message.contains("json_object");
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private String validType(String value) {
