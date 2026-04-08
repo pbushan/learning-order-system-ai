@@ -78,8 +78,15 @@ public class IntakeOpenAiClient {
                     log.debug("Skipping empty chat message content for role {}", role);
                 }
             }
-            int start = Math.max(0, filtered.size() - MAX_HISTORY_MESSAGES);
-            requestMessages.addAll(filtered.subList(start, filtered.size()));
+            if (filtered.size() <= MAX_HISTORY_MESSAGES) {
+                requestMessages.addAll(filtered);
+            } else {
+                // Preserve earliest non-empty context plus the most recent history.
+                requestMessages.add(filtered.get(0));
+                int tailCount = Math.max(0, MAX_HISTORY_MESSAGES - 1);
+                int tailStart = Math.max(1, filtered.size() - tailCount);
+                requestMessages.addAll(filtered.subList(tailStart, filtered.size()));
+            }
         }
 
         Map<String, Object> body = new LinkedHashMap<>();
@@ -281,6 +288,10 @@ public class IntakeOpenAiClient {
     }
 
     String truncateContent(String content) {
+        int rawCap = MAX_CONTENT_CHARS + TRUNCATION_BOUNDARY_WINDOW;
+        if (content.length() > rawCap) {
+            content = content.substring(0, rawCap);
+        }
         if (content.length() <= MAX_CONTENT_CHARS) {
             return content;
         }
