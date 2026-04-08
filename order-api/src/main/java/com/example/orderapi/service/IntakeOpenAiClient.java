@@ -88,7 +88,11 @@ public class IntakeOpenAiClient {
                     .body(String.class);
             return parseNormalizedResult(raw);
         } catch (RestClientResponseException ex) {
-            log.warn("OpenAI intake request failed with status {}", ex.getStatusCode());
+            String responseBody = ex.getResponseBodyAsString();
+            log.warn("OpenAI intake request failed with status {} body={}", ex.getStatusCode(), safeSnippet(responseBody));
+            if (ex.getStatusCode().value() == 400 && responseBody != null && responseBody.contains("response_format")) {
+                return fallbackResult("OpenAI model configuration is incompatible with JSON response mode. Please update app.intake.model.");
+            }
             return fallbackResult("Intake service is temporarily unavailable. Please try again shortly.");
         } catch (Exception ex) {
             log.warn("OpenAI intake request failed: {}", ex.getMessage());
@@ -178,10 +182,25 @@ public class IntakeOpenAiClient {
     private JsonNode extractStructuredJson(JsonNode root) throws Exception {
         JsonNode messageNode = root.path("choices").path(0).path("message");
         JsonNode contentNode = messageNode.path("content");
-        String content = "";
+        JsonNode fromContent = parseJsonFromContentNode(contentNode);
+        if (fromContent != null) {
+            return fromContent;
+        }
+
+        JsonNode fromOutputText = parseJsonFromContent(root.path("output_text").asText(""));
+        if (fromOutputText != null) {
+            return fromOutputText;
+        }
+
+        JsonNode altText = root.path("output").path(0).path("content").path(0).path("text");
+        return parseJsonFromContent(altText.asText(""));
+    }
+
+    private JsonNode parseJsonFromContentNode(JsonNode contentNode) throws Exception {
         if (contentNode.isTextual()) {
-            content = contentNode.asText("");
-        } else if (contentNode.isArray()) {
+            return parseJsonFromContent(contentNode.asText(""));
+        }
+        if (contentNode.isArray()) {
             StringBuilder sb = new StringBuilder();
             for (JsonNode item : contentNode) {
                 if (item.isTextual()) {
@@ -191,13 +210,72 @@ public class IntakeOpenAiClient {
                     sb.append(item.path("value").asText(""));
                 }
             }
-            content = sb.toString();
-        }
-        if (StringUtils.hasText(content)) {
-            String jsonOnly = unwrapJson(content);
-            return objectMapper.readTree(jsonOnly);
+            return parseJsonFromContent(sb.toString());
         }
         return null;
+    }
+
+    private JsonNode parseJsonFromContent(String content) throws Exception {
+        if (!StringUtils.hasText(content)) {
+            return null;
+        }
+        String jsonOnly = unwrapJson(content);
+        try {
+            return objectMapper.readTree(jsonOnly);
+        } catch (Exception ex) {
+            String extracted = extractFirstJsonObject(jsonOnly);
+            if (extracted == null) {
+                throw ex;
+            }
+            return objectMapper.readTree(extracted);
+        }
+    }
+
+    private String extractFirstJsonObject(String value) {
+        int start = -1;
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (c == '"') {
+                inString = true;
+                continue;
+            }
+            if (c == '{') {
+                if (start < 0) {
+                    start = i;
+                }
+                depth++;
+            } else if (c == '}') {
+                if (depth > 0) {
+                    depth--;
+                    if (depth == 0 && start >= 0) {
+                        return value.substring(start, i + 1);
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private String safeSnippet(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        String normalized = value.replaceAll("\\s+", " ").trim();
+        return normalized.length() > 240 ? normalized.substring(0, 240) + "..." : normalized;
     }
 
     private String blankToNull(String value) {
