@@ -323,10 +323,13 @@ async function handleIntakeChatSubmit(event) {
         const reply = response.reply.trim();
         state.intakeMessages.push({ role: "assistant", content: reply });
     } catch (error) {
+        const fallbackMessage = error?.message === "Invalid intake response"
+            ? "Intake service returned an unexpected response. Please try again."
+            : "I could not reach intake service right now. Please try again shortly.";
         showBanner("Intake chat request failed. Please try again shortly.", "error");
         state.intakeMessages.push({
             role: "assistant",
-            content: "I could not reach intake service right now. Please try again shortly."
+            content: fallbackMessage
         });
     } finally {
         setIntakeChatLoading(false);
@@ -340,7 +343,7 @@ function renderIntakeChatHistory() {
     }
 
     if (!state.intakeMessages.length) {
-        intakeChatHistory.replaceChildren(createIntakeMessageElement("assistant", "Hi, tell me about your bug or feature request."));
+        replaceElementChildren(intakeChatHistory, [createIntakeMessageElement("assistant", "Hi, tell me about your bug or feature request.")]);
         return;
     }
 
@@ -348,7 +351,7 @@ function renderIntakeChatHistory() {
     state.intakeMessages.forEach((message) => {
         fragment.appendChild(createIntakeMessageElement(message.role, message.content));
     });
-    intakeChatHistory.replaceChildren(fragment);
+    replaceElementChildren(intakeChatHistory, [fragment]);
     intakeChatHistory.scrollTop = intakeChatHistory.scrollHeight;
 }
 
@@ -359,6 +362,15 @@ function createIntakeMessageElement(role, content) {
     text.textContent = content;
     article.appendChild(text);
     return article;
+}
+
+function replaceElementChildren(element, nodes) {
+    while (element.firstChild) {
+        element.removeChild(element.firstChild);
+    }
+    nodes.forEach((node) => {
+        element.appendChild(node);
+    });
 }
 
 function setIntakeChatLoading(isLoading) {
