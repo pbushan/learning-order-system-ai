@@ -68,4 +68,22 @@ class IntakeOpenAiClientTest {
         assertTrue(result.length() <= maxChars);
         assertFalse(result.endsWith("\uD83D"));
     }
+
+    @Test
+    void truncateContent_maxPlusOneRemainsWithinCap() {
+        String input = "a".repeat(maxChars) + "b";
+
+        String result = client.truncateContent(input);
+
+        assertEquals(maxChars, result.length());
+    }
+
+    @Test
+    void truncateContent_usesHardCapWhenOnlyEarlyBoundaryExists() {
+        String input = "a".repeat(maxChars - 60) + " " + "b".repeat(120);
+
+        String result = client.truncateContent(input);
+
+        assertEquals(maxChars, result.length());
+    }
 }
