@@ -60,7 +60,9 @@ public class IntakeOpenAiClient {
         requestMessages.add(Map.of("role", "system", "content", SYSTEM_PROMPT));
 
         if (messages != null) {
-            for (ChatMessage message : messages) {
+            int start = Math.max(0, messages.size() - (MAX_MESSAGES - 1));
+            for (int idx = start; idx < messages.size(); idx++) {
+                ChatMessage message = messages.get(idx);
                 if (message == null) {
                     continue;
                 }
@@ -286,14 +288,15 @@ public class IntakeOpenAiClient {
     }
 
     int findBoundary(String content, int maxChars) {
-        int minBoundary = Math.max(1, maxChars - 200);
-        for (int i = maxChars; i >= minBoundary; i--) {
+        int effectiveMax = Math.max(1, Math.min(maxChars, content.length()));
+        int minBoundary = Math.max(1, effectiveMax - 200);
+        for (int i = effectiveMax; i >= minBoundary; i--) {
             char ch = content.charAt(i - 1);
             if (ch == '\n' || ch == '}' || ch == '.' || ch == '!' || ch == '?' || Character.isWhitespace(ch)) {
                 return i;
             }
         }
-        return maxChars;
+        return effectiveMax;
     }
 
     int safeBoundary(String content, int boundary) {
