@@ -86,7 +86,7 @@ public class IntakeOpenAiClient {
     private NormalizedIntakeResult parseNormalizedResult(String rawResponse) {
         try {
             JsonNode root = objectMapper.readTree(rawResponse != null ? rawResponse : "{}");
-            String content = root.path("choices").path(0).path("message").path("content").asText("").trim();
+            String content = extractModelContent(root).trim();
             if (content.isEmpty()) {
                 return fallbackResult();
             }
@@ -99,7 +99,11 @@ public class IntakeOpenAiClient {
             StructuredIntakeData structuredData = toStructuredData(intakeJson.path("structuredData"));
 
             if (reply.isEmpty()) {
-                return fallbackResult();
+                return new NormalizedIntakeResult(
+                        "I need a bit more detail to capture this intake. Please share whether this is a bug or feature, plus title and description.",
+                        false,
+                        structuredData
+                );
             }
 
             return new NormalizedIntakeResult(reply, intakeComplete, structuredData);
@@ -139,19 +143,46 @@ public class IntakeOpenAiClient {
         if ("system".equals(role)) {
             return "system";
         }
+        if ("tool".equals(role)) {
+            return "tool";
+        }
+        if ("user".equals(role)) {
+            return "user";
+        }
         return "user";
     }
 
     private String unwrapJson(String content) {
         String trimmed = content.trim();
-        if (trimmed.startsWith("```")) {
-            int firstNewline = trimmed.indexOf('\n');
-            int lastFence = trimmed.lastIndexOf("```");
-            if (firstNewline > -1 && lastFence > firstNewline) {
-                trimmed = trimmed.substring(firstNewline + 1, lastFence).trim();
-            }
-        }
+        trimmed = trimmed.replaceFirst("^```[a-zA-Z0-9_-]*\\s*", "");
+        trimmed = trimmed.replaceFirst("\\s*```\\s*$", "");
         return trimmed;
+    }
+
+    private String extractModelContent(JsonNode root) {
+        JsonNode contentNode = root.path("choices").path(0).path("message").path("content");
+        if (contentNode.isTextual()) {
+            return contentNode.asText("");
+        }
+        if (contentNode.isArray()) {
+            StringBuilder sb = new StringBuilder();
+            for (JsonNode item : contentNode) {
+                if (item.isTextual()) {
+                    sb.append(item.asText(""));
+                } else {
+                    sb.append(item.path("text").asText(""));
+                }
+            }
+            return sb.toString();
+        }
+
+        String outputText = root.path("output_text").asText("");
+        if (!outputText.isBlank()) {
+            return outputText;
+        }
+
+        JsonNode alt = root.path("output").path(0).path("content").path(0).path("text");
+        return alt.asText("");
     }
 
     private String blankToNull(String value) {
