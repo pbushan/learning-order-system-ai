@@ -58,7 +58,18 @@ public class IntakeChatController {
             response.setRequestId(requestId);
         }
         StructuredIntakeData fallbackData = serviceUnavailableResponse(requestId).getStructuredData();
+        if (fallbackData == null) {
+            fallbackData = new StructuredIntakeData();
+            fallbackData.setTitle("");
+            fallbackData.setDescription("");
+            fallbackData.setStepsToReproduce("");
+            fallbackData.setExpectedBehavior("");
+            fallbackData.setAffectedComponents(Collections.emptyList());
+        }
         StructuredIntakeData data = response.getStructuredData() != null ? response.getStructuredData() : fallbackData;
+        if (data == null) {
+            data = fallbackData;
+        }
         if (data.getTitle() == null) {
             data.setTitle("");
         }
