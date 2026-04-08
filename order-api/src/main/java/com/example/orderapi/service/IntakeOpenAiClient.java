@@ -25,8 +25,8 @@ import java.util.Map;
 public class IntakeOpenAiClient {
 
     private static final Logger log = LoggerFactory.getLogger(IntakeOpenAiClient.class);
-    private static final int MAX_MESSAGES = 20;
-    private static final int MAX_CONTENT_CHARS = 2000;
+    static final int MAX_MESSAGES = 20;
+    static final int MAX_CONTENT_CHARS = 2000;
     private static final String SYSTEM_PROMPT = "You are a product intake assistant. Classify the request as bug or feature. "
             + "Ask only minimal clarifying questions. Stop when enough information is collected. "
             + "Return valid JSON only with keys: reply, intakeComplete, structuredData. "
@@ -276,7 +276,7 @@ public class IntakeOpenAiClient {
         return value.trim();
     }
 
-    private String truncateContent(String content) {
+    String truncateContent(String content) {
         if (content.length() <= MAX_CONTENT_CHARS) {
             return content;
         }
@@ -284,11 +284,11 @@ public class IntakeOpenAiClient {
         return content.substring(0, boundary).trim();
     }
 
-    private int findBoundary(String content, int maxChars) {
+    int findBoundary(String content, int maxChars) {
         int minBoundary = Math.max(1, maxChars - 200);
         for (int i = maxChars; i >= minBoundary; i--) {
             char ch = content.charAt(i - 1);
-            if (ch == '.' || ch == '!' || ch == '?' || Character.isWhitespace(ch)) {
+            if (ch == '\n' || ch == '}' || ch == '.' || ch == '!' || ch == '?' || Character.isWhitespace(ch)) {
                 return i;
             }
         }
