@@ -39,7 +39,9 @@ document.addEventListener("DOMContentLoaded", () => {
     customerTableBody.addEventListener("click", handleCustomerTableClick);
     orderTableBody.addEventListener("click", handleOrderTableClick);
     productTableBody.addEventListener("click", handleProductTableClick);
-    intakeChatForm.addEventListener("submit", handleIntakeChatSubmit);
+    if (intakeChatForm) {
+        intakeChatForm.addEventListener("submit", handleIntakeChatSubmit);
+    }
     initializeTabs();
 
     loadDashboard();
@@ -279,6 +281,10 @@ async function handleOrderSubmit(event) {
 
 async function handleIntakeChatSubmit(event) {
     event.preventDefault();
+    if (!intakeChatInput || !intakeChatSend || !intakeChatHistory || !intakeChatLoading) {
+        showBanner("Intake chat is unavailable right now.", "error");
+        return;
+    }
     if (state.intakeLoading) {
         return;
     }
@@ -339,14 +345,25 @@ function renderIntakeChatHistory() {
 }
 
 function escapeIntakeText(value) {
-    return escapeHtml(value);
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
 }
 
 function setIntakeChatLoading(isLoading) {
     state.intakeLoading = isLoading;
-    intakeChatInput.disabled = isLoading;
-    intakeChatSend.disabled = isLoading;
-    intakeChatLoading.classList.toggle("hidden", !isLoading);
+    if (intakeChatInput) {
+        intakeChatInput.disabled = isLoading;
+    }
+    if (intakeChatSend) {
+        intakeChatSend.disabled = isLoading;
+    }
+    if (intakeChatLoading) {
+        intakeChatLoading.classList.toggle("hidden", !isLoading);
+    }
 }
 
 async function handleCustomerTableClick(event) {
