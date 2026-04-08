@@ -57,4 +57,15 @@ class IntakeOpenAiClientTest {
         assertFalse(result.isBlank());
         assertTrue(result.length() <= maxChars);
     }
+
+    @Test
+    void truncateContent_doesNotSplitSurrogatePairs() {
+        String emoji = "\uD83D\uDE80";
+        String input = "a".repeat(maxChars - 1) + emoji + " trailing";
+
+        String result = client.truncateContent(input);
+
+        assertTrue(result.length() <= maxChars);
+        assertFalse(result.endsWith("\uD83D"));
+    }
 }

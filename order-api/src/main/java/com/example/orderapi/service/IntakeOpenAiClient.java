@@ -281,7 +281,8 @@ public class IntakeOpenAiClient {
             return content;
         }
         int boundary = findBoundary(content, MAX_CONTENT_CHARS);
-        return content.substring(0, boundary).trim();
+        int safeBoundary = safeBoundary(content, boundary);
+        return content.substring(0, safeBoundary);
     }
 
     int findBoundary(String content, int maxChars) {
@@ -293,6 +294,18 @@ public class IntakeOpenAiClient {
             }
         }
         return maxChars;
+    }
+
+    int safeBoundary(String content, int boundary) {
+        if (boundary <= 0 || boundary >= content.length()) {
+            return Math.max(0, Math.min(boundary, content.length()));
+        }
+        char prev = content.charAt(boundary - 1);
+        char next = content.charAt(boundary);
+        if (Character.isHighSurrogate(prev) && Character.isLowSurrogate(next)) {
+            return boundary - 1;
+        }
+        return boundary;
     }
 
     private String blankToEmpty(String value) {
