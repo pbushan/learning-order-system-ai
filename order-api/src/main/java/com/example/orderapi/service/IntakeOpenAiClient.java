@@ -89,16 +89,14 @@ public class IntakeOpenAiClient {
 
     private NormalizedIntakeResult parseNormalizedResult(String rawResponse) {
         try {
-            JsonNode root = objectMapper.readTree(rawResponse != null ? rawResponse : "{}");
-            JsonNode intakeJson = root.path("choices").path(0).path("message").path("parsed");
-            if (intakeJson.isMissingNode() || intakeJson.isNull()) {
-                String content = extractModelContent(root).trim();
-                if (content.isEmpty()) {
-                    return fallbackResult();
-                }
-
-                String jsonOnly = unwrapJson(content);
-                intakeJson = objectMapper.readTree(jsonOnly);
+            if (!StringUtils.hasText(rawResponse)) {
+                log.warn("OpenAI intake response body was empty");
+                return fallbackResult();
+            }
+            JsonNode root = objectMapper.readTree(rawResponse);
+            JsonNode intakeJson = extractStructuredJson(root);
+            if (intakeJson == null || intakeJson.isNull() || intakeJson.isMissingNode()) {
+                return fallbackResult();
             }
 
             String reply = intakeJson.path("reply").asText("").trim();
@@ -169,7 +167,8 @@ public class IntakeOpenAiClient {
     }
 
     private String extractModelContent(JsonNode root) {
-        JsonNode contentNode = root.path("choices").path(0).path("message").path("content");
+        JsonNode messageNode = root.path("choices").path(0).path("message");
+        JsonNode contentNode = messageNode.path("content");
         if (contentNode.isTextual()) {
             return contentNode.asText("");
         }
@@ -180,9 +179,16 @@ public class IntakeOpenAiClient {
                     sb.append(item.asText(""));
                 } else {
                     sb.append(item.path("text").asText(""));
+                    sb.append(item.path("value").asText(""));
                 }
             }
             return sb.toString();
+        }
+        if (contentNode.isObject()) {
+            String text = contentNode.path("text").asText("");
+            if (!text.isBlank()) {
+                return text;
+            }
         }
 
         String outputText = root.path("output_text").asText("");
@@ -192,6 +198,38 @@ public class IntakeOpenAiClient {
 
         JsonNode alt = root.path("output").path(0).path("content").path(0).path("text");
         return alt.asText("");
+    }
+
+    private JsonNode extractStructuredJson(JsonNode root) throws Exception {
+        JsonNode parsed = root.path("choices").path(0).path("message").path("parsed");
+        if (!parsed.isMissingNode() && !parsed.isNull()) {
+            return parsed;
+        }
+
+        String content = extractModelContent(root).trim();
+        if (content.isEmpty()) {
+            return null;
+        }
+
+        String jsonOnly = unwrapJson(content);
+        try {
+            return objectMapper.readTree(jsonOnly);
+        } catch (Exception ex) {
+            String objectSlice = extractJsonObjectSlice(jsonOnly);
+            if (objectSlice == null) {
+                throw ex;
+            }
+            return objectMapper.readTree(objectSlice);
+        }
+    }
+
+    private String extractJsonObjectSlice(String value) {
+        int start = value.indexOf('{');
+        int end = value.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            return value.substring(start, end + 1);
+        }
+        return null;
     }
 
     private String blankToNull(String value) {
