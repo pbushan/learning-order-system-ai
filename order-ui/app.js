@@ -327,7 +327,8 @@ async function handleIntakeChatSubmit(event) {
         const fallbackMessage = error?.message === "Invalid intake response"
             ? "Intake service returned an unexpected response. Please try again."
             : "I could not reach intake service right now. Please try again shortly.";
-        showBanner("Intake chat request failed. Please try again shortly.", "error");
+        console.error("Intake chat request failed", error);
+        showBanner(fallbackMessage, "error");
         state.intakeMessages.push({
             role: "assistant",
             content: fallbackMessage
