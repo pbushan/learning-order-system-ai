@@ -72,7 +72,7 @@ public class IntakeOpenAiClient {
                 if (!content.isEmpty()) {
                     requestMessages.add(Map.of("role", role, "content", truncateContent(content)));
                 }
-                if (requestMessages.size() >= MAX_MESSAGES + 1) {
+                if (requestMessages.size() >= MAX_MESSAGES) {
                     break;
                 }
             }
@@ -95,10 +95,10 @@ public class IntakeOpenAiClient {
             String responseBody = ex.getResponseBodyAsString();
             log.warn("OpenAI intake request failed with status {}", ex.getStatusCode().value());
             if (ex.getStatusCode().value() == 400 && isJsonModeIncompatibility(responseBody)) {
-                return fallbackResult("OpenAI model configuration is incompatible with JSON response mode. Please update app.intake.model.");
+                return fallbackResult("Intake service configuration is currently unavailable. Please try again shortly.");
             }
             if (ex.getStatusCode().value() == 401 || ex.getStatusCode().value() == 403) {
-                return fallbackResult("OpenAI authentication failed. Please check app.intake.openai.api-key.");
+                return fallbackResult("Intake service is currently unavailable. Please try again shortly.");
             }
             if (ex.getStatusCode().value() == 429) {
                 return fallbackResult("OpenAI is rate-limiting requests right now. Please retry shortly.");
@@ -280,7 +280,19 @@ public class IntakeOpenAiClient {
         if (content.length() <= MAX_CONTENT_CHARS) {
             return content;
         }
-        return content.substring(0, MAX_CONTENT_CHARS);
+        int boundary = findBoundary(content, MAX_CONTENT_CHARS);
+        return content.substring(0, boundary).trim();
+    }
+
+    private int findBoundary(String content, int maxChars) {
+        int minBoundary = Math.max(1, maxChars - 200);
+        for (int i = maxChars; i >= minBoundary; i--) {
+            char ch = content.charAt(i - 1);
+            if (ch == '.' || ch == '!' || ch == '?' || Character.isWhitespace(ch)) {
+                return i;
+            }
+        }
+        return maxChars;
     }
 
     private String blankToEmpty(String value) {
