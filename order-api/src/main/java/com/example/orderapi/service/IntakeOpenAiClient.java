@@ -37,27 +37,34 @@ public class IntakeOpenAiClient {
     private final ObjectMapper objectMapper;
     private final RestClient restClient;
     private final String model;
+    private final boolean configured;
 
     public IntakeOpenAiClient(ObjectMapper objectMapper,
                               @Value("${app.intake.openai.api-key:}") String apiKey,
                               @Value("${app.intake.model:gpt-4.1-mini}") String model) {
-        if (!StringUtils.hasText(apiKey)) {
-            throw new IllegalStateException("Missing OpenAI API key. Set app.intake.openai.api-key or OPENAI_API_KEY.");
-        }
         this.objectMapper = objectMapper;
         this.model = model;
-        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-        requestFactory.setConnectTimeout(5000);
-        requestFactory.setReadTimeout(15000);
-        this.restClient = RestClient.builder()
-                .baseUrl("https://api.openai.com/v1")
-                .requestFactory(requestFactory)
-                .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
-                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .build();
+        if (!StringUtils.hasText(apiKey)) {
+            this.configured = false;
+            this.restClient = null;
+        } else {
+            this.configured = true;
+            SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+            requestFactory.setConnectTimeout(5000);
+            requestFactory.setReadTimeout(15000);
+            this.restClient = RestClient.builder()
+                    .baseUrl("https://api.openai.com/v1")
+                    .requestFactory(requestFactory)
+                    .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
+                    .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                    .build();
+        }
     }
 
     public NormalizedIntakeResult collectIntake(List<ChatMessage> messages) {
+        if (!configured || restClient == null) {
+            throw new IllegalStateException("OpenAI API key is not configured.");
+        }
         List<Map<String, String>> requestMessages = new ArrayList<>();
         requestMessages.add(Map.of("role", "system", "content", SYSTEM_PROMPT));
 
