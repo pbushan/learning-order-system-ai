@@ -20,17 +20,11 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @Service
 public class IntakeOpenAiClient {
 
     private static final Logger log = LoggerFactory.getLogger(IntakeOpenAiClient.class);
-    private static final Pattern FENCED_JSON_PATTERN =
-            Pattern.compile("^```(?:json)?\\s*(.*?)\\s*```$", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
-    private static final Pattern FENCED_JSON_ANYWHERE_PATTERN =
-            Pattern.compile("```(?:json)?\\s*(\\{.*?})\\s*```", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final String SYSTEM_PROMPT = "You are a product intake assistant. Classify the request as bug or feature. "
             + "Ask only minimal clarifying questions. Stop when enough information is collected. "
             + "Return valid JSON only with keys: reply, intakeComplete, structuredData. "
@@ -163,6 +157,9 @@ public class IntakeOpenAiClient {
         if ("system".equals(role)) {
             return "system";
         }
+        if ("developer".equals(role)) {
+            return "developer";
+        }
         if ("tool".equals(role)) {
             return "tool";
         }
@@ -174,13 +171,12 @@ public class IntakeOpenAiClient {
 
     private String unwrapJson(String content) {
         String trimmed = content.trim();
-        Matcher matcher = FENCED_JSON_PATTERN.matcher(trimmed);
-        if (matcher.matches()) {
-            return matcher.group(1).trim();
-        }
-        Matcher inlineFenceMatcher = FENCED_JSON_ANYWHERE_PATTERN.matcher(trimmed);
-        if (inlineFenceMatcher.find()) {
-            return inlineFenceMatcher.group(1).trim();
+        if (trimmed.startsWith("```")) {
+            int firstNewline = trimmed.indexOf('\n');
+            int lastFence = trimmed.lastIndexOf("```");
+            if (firstNewline > -1 && lastFence > firstNewline) {
+                return trimmed.substring(firstNewline + 1, lastFence).trim();
+            }
         }
         return trimmed;
     }
@@ -188,18 +184,7 @@ public class IntakeOpenAiClient {
     private JsonNode extractStructuredJson(JsonNode root) {
         JsonNode messageNode = root.path("choices").path(0).path("message");
         JsonNode contentNode = messageNode.path("content");
-        JsonNode fromContent = parseJsonFromContentNode(contentNode);
-        if (fromContent != null) {
-            return fromContent;
-        }
-
-        JsonNode fromOutputText = parseJsonFromContent(root.path("output_text").asText(""));
-        if (fromOutputText != null) {
-            return fromOutputText;
-        }
-
-        JsonNode altText = root.path("output").path(0).path("content").path(0).path("text");
-        return parseJsonFromContent(altText.asText(""));
+        return parseJsonFromContentNode(contentNode);
     }
 
     private JsonNode parseJsonFromContentNode(JsonNode contentNode) {
@@ -323,10 +308,6 @@ public class IntakeOpenAiClient {
 
     private NormalizedIntakeResult fallbackResult(String reply) {
         StructuredIntakeData fallbackData = new StructuredIntakeData();
-        fallbackData.setTitle("");
-        fallbackData.setDescription("");
-        fallbackData.setStepsToReproduce("");
-        fallbackData.setExpectedBehavior("");
         fallbackData.setAffectedComponents(Collections.emptyList());
         return new NormalizedIntakeResult(
                 reply,
