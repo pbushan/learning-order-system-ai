@@ -20,7 +20,9 @@ const banner = document.getElementById("feedback-banner");
 const refreshButton = document.getElementById("refresh-button");
 const apiStatusDot = document.getElementById("api-status-dot");
 const apiStatusText = document.getElementById("api-status-text");
+const intakeTabButton = document.getElementById("intake-tab");
 const intakeChatForm = document.getElementById("intake-chat-form");
+const intakeChatPanel = document.getElementById("intake-panel");
 const intakeChatHistory = document.getElementById("intake-chat-history");
 const intakeChatInput = document.getElementById("intake-chat-input");
 const intakeChatSend = document.getElementById("intake-chat-send");
@@ -42,7 +44,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (intakeChatForm) {
         intakeChatForm.addEventListener("submit", handleIntakeChatSubmit);
     }
-    validateIntakeTabSetup();
+    if (intakeChatInput) {
+        intakeChatInput.addEventListener("keydown", handleIntakeInputKeydown);
+    }
+    if (!validateIntakeTabSetup()) {
+        disableIntakeChatUI();
+    }
     initializeTabs();
 
     loadDashboard();
@@ -316,6 +323,7 @@ async function handleIntakeChatSubmit(event) {
         const reply = response.reply.trim();
         state.intakeMessages.push({ role: "assistant", content: reply });
     } catch (error) {
+        showBanner("Intake chat request failed. Please try again shortly.", "error");
         state.intakeMessages.push({
             role: "assistant",
             content: "I could not reach intake service right now. Please try again shortly."
@@ -332,29 +340,25 @@ function renderIntakeChatHistory() {
     }
 
     if (!state.intakeMessages.length) {
-        intakeChatHistory.innerHTML = `
-            <article class="intake-chat-message assistant">
-                <p>Hi, tell me about your bug or feature request.</p>
-            </article>
-        `;
+        intakeChatHistory.replaceChildren(createIntakeMessageElement("assistant", "Hi, tell me about your bug or feature request."));
         return;
     }
 
-    intakeChatHistory.innerHTML = state.intakeMessages.map((message) => `
-        <article class="intake-chat-message ${message.role}">
-            <p>${escapeIntakeText(message.content)}</p>
-        </article>
-    `).join("");
+    const fragment = document.createDocumentFragment();
+    state.intakeMessages.forEach((message) => {
+        fragment.appendChild(createIntakeMessageElement(message.role, message.content));
+    });
+    intakeChatHistory.replaceChildren(fragment);
     intakeChatHistory.scrollTop = intakeChatHistory.scrollHeight;
 }
 
-function escapeIntakeText(value) {
-    return String(value)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#39;");
+function createIntakeMessageElement(role, content) {
+    const article = document.createElement("article");
+    article.className = `intake-chat-message ${role === "user" ? "user" : "assistant"}`;
+    const text = document.createElement("p");
+    text.textContent = content;
+    article.appendChild(text);
+    return article;
 }
 
 function setIntakeChatLoading(isLoading) {
@@ -371,13 +375,40 @@ function setIntakeChatLoading(isLoading) {
 }
 
 function validateIntakeTabSetup() {
-    const intakeTab = document.getElementById("intake-tab");
-    const intakePanel = document.getElementById("intake-panel");
-    const tabLinked = intakeTab?.getAttribute("aria-controls") === intakePanel?.id;
-    const dataLinked = intakeTab?.dataset.tabTarget === intakePanel?.dataset.tabPanel;
+    const tabLinked = intakeTabButton?.getAttribute("aria-controls") === intakeChatPanel?.id;
+    const dataLinked = intakeTabButton?.dataset.tabTarget === intakeChatPanel?.dataset.tabPanel;
     if (!tabLinked || !dataLinked) {
         console.warn("Intake tab wiring mismatch detected; intake tab may not behave correctly.");
+        return false;
     }
+    return true;
+}
+
+function disableIntakeChatUI() {
+    if (intakeTabButton) {
+        intakeTabButton.disabled = true;
+        intakeTabButton.setAttribute("aria-disabled", "true");
+    }
+    if (intakeChatPanel) {
+        intakeChatPanel.hidden = true;
+    }
+    if (intakeChatInput) {
+        intakeChatInput.disabled = true;
+    }
+    if (intakeChatSend) {
+        intakeChatSend.disabled = true;
+    }
+}
+
+function handleIntakeInputKeydown(event) {
+    if (event.key !== "Enter" || event.shiftKey) {
+        return;
+    }
+    event.preventDefault();
+    if (!intakeChatForm || state.intakeLoading) {
+        return;
+    }
+    intakeChatForm.requestSubmit();
 }
 
 async function handleCustomerTableClick(event) {
