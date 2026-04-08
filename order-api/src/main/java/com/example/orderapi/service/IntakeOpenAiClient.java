@@ -25,6 +25,8 @@ import java.util.Map;
 public class IntakeOpenAiClient {
 
     private static final Logger log = LoggerFactory.getLogger(IntakeOpenAiClient.class);
+    private static final int MAX_MESSAGES = 20;
+    private static final int MAX_CONTENT_CHARS = 2000;
     private static final String SYSTEM_PROMPT = "You are a product intake assistant. Classify the request as bug or feature. "
             + "Ask only minimal clarifying questions. Stop when enough information is collected. "
             + "Return valid JSON only with keys: reply, intakeComplete, structuredData. "
@@ -68,7 +70,10 @@ public class IntakeOpenAiClient {
                 }
                 String content = message.getContent() != null ? message.getContent().trim() : "";
                 if (!content.isEmpty()) {
-                    requestMessages.add(Map.of("role", role, "content", content));
+                    requestMessages.add(Map.of("role", role, "content", truncateContent(content)));
+                }
+                if (requestMessages.size() >= MAX_MESSAGES + 1) {
+                    break;
                 }
             }
         }
@@ -91,6 +96,12 @@ public class IntakeOpenAiClient {
             log.warn("OpenAI intake request failed with status {}", ex.getStatusCode().value());
             if (ex.getStatusCode().value() == 400 && isJsonModeIncompatibility(responseBody)) {
                 return fallbackResult("OpenAI model configuration is incompatible with JSON response mode. Please update app.intake.model.");
+            }
+            if (ex.getStatusCode().value() == 401 || ex.getStatusCode().value() == 403) {
+                return fallbackResult("OpenAI authentication failed. Please check app.intake.openai.api-key.");
+            }
+            if (ex.getStatusCode().value() == 429) {
+                return fallbackResult("OpenAI is rate-limiting requests right now. Please retry shortly.");
             }
             return fallbackResult("Intake service is temporarily unavailable. Please try again shortly.");
         } catch (Exception ex) {
@@ -238,6 +249,10 @@ public class IntakeOpenAiClient {
             if (StringUtils.hasText(text)) {
                 return parseJsonFromContent(text);
             }
+            String value = contentNode.path("value").asText("");
+            if (StringUtils.hasText(value)) {
+                return parseJsonFromContent(value);
+            }
         }
         return null;
     }
@@ -259,6 +274,13 @@ public class IntakeOpenAiClient {
             return null;
         }
         return value.trim();
+    }
+
+    private String truncateContent(String content) {
+        if (content.length() <= MAX_CONTENT_CHARS) {
+            return content;
+        }
+        return content.substring(0, MAX_CONTENT_CHARS);
     }
 
     private String blankToEmpty(String value) {
