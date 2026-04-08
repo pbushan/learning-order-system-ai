@@ -8,10 +8,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Collections;
@@ -23,16 +25,19 @@ import java.util.Map;
 public class FileAuditLogService {
 
     private static final Logger log = LoggerFactory.getLogger(FileAuditLogService.class);
-    private static final Path ALLOWED_AUDIT_DIR = Paths.get("order-api", "audit").toAbsolutePath().normalize();
-    private static final Path DEFAULT_AUDIT_FILE = ALLOWED_AUDIT_DIR.resolve("intake-chat.jsonl");
 
     private final ObjectMapper objectMapper;
     private final String auditLogPath;
+    private final Path allowedAuditBasePath;
+    private final Path defaultAuditFile;
 
     public FileAuditLogService(ObjectMapper objectMapper,
-                               @Value("${app.intake.audit-log-path:order-api/audit/intake-chat.jsonl}") String auditLogPath) {
+                               @Value("${app.intake.audit-log-path:order-api/audit/intake-chat.jsonl}") String auditLogPath,
+                               @Value("${app.intake.audit-base-path:order-api/audit}") String auditBasePath) {
         this.objectMapper = objectMapper;
         this.auditLogPath = auditLogPath;
+        this.allowedAuditBasePath = Paths.get(auditBasePath).toAbsolutePath().normalize();
+        this.defaultAuditFile = this.allowedAuditBasePath.resolve("intake-chat.jsonl").normalize();
     }
 
     public synchronized void logEntry(String requestId,
@@ -55,14 +60,22 @@ public class FileAuditLogService {
             entry.put("messages", messages != null ? messages : Collections.emptyList());
             entry.put("model", safeString(model));
             entry.put("reply", safeString(reply));
-            entry.put("intakeComplete", intakeComplete != null ? intakeComplete : Boolean.FALSE);
+            entry.put("intakeComplete", intakeComplete != null ? intakeComplete : null);
             entry.put("structuredData", toStructuredDataMap(structuredData));
             entry.put("error", safeString(error));
 
             String jsonLine = objectMapper.writeValueAsString(entry) + System.lineSeparator();
-            Files.writeString(path, jsonLine, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            byte[] bytes = jsonLine.getBytes();
+            try (FileChannel channel = FileChannel.open(path,
+                    java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.WRITE,
+                    java.nio.file.StandardOpenOption.APPEND);
+                 FileLock ignored = channel.lock()) {
+                channel.position(channel.size());
+                channel.write(ByteBuffer.wrap(bytes));
+            }
         } catch (Exception ex) {
-            log.warn("Failed to write intake audit log entry", ex);
+            log.warn("Failed to write intake audit log entry for requestId={}", safeString(requestId), ex);
         }
     }
 
@@ -71,9 +84,9 @@ public class FileAuditLogService {
         Path normalized = configured.isAbsolute()
                 ? configured.normalize()
                 : Paths.get("").toAbsolutePath().resolve(configured).normalize();
-        if (!normalized.startsWith(ALLOWED_AUDIT_DIR)) {
+        if (!normalized.startsWith(allowedAuditBasePath)) {
             log.warn("Rejected audit log path outside allowed directory: {}", auditLogPath);
-            return DEFAULT_AUDIT_FILE;
+            return defaultAuditFile;
         }
         return normalized;
     }
