@@ -332,10 +332,14 @@ function renderIntakeChatHistory() {
 
     intakeChatHistory.innerHTML = state.intakeMessages.map((message) => `
         <article class="intake-chat-message ${message.role}">
-            <p>${escapeHtml(message.content)}</p>
+            <p>${escapeIntakeText(message.content)}</p>
         </article>
     `).join("");
     intakeChatHistory.scrollTop = intakeChatHistory.scrollHeight;
+}
+
+function escapeIntakeText(value) {
+    return escapeHtml(value);
 }
 
 function setIntakeChatLoading(isLoading) {
