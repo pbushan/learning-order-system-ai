@@ -32,7 +32,17 @@ public class IntakeChatController {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                     .body(serviceUnavailableResponse(requestId));
         } catch (IntakeChatService.IntakeProcessingException ex) {
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ex.getFallbackResponse());
+            IntakeChatResponse fallback = ex.getFallbackResponse();
+            if (fallback == null) {
+                fallback = serviceUnavailableResponse(requestId);
+            }
+            if (fallback.getRequestId() == null || fallback.getRequestId().isBlank()) {
+                fallback.setRequestId(requestId);
+            }
+            if (fallback.getStructuredData() == null) {
+                fallback.setStructuredData(serviceUnavailableResponse(requestId).getStructuredData());
+            }
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(fallback);
         }
     }
 

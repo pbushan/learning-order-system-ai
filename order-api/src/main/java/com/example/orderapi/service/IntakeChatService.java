@@ -40,7 +40,10 @@ public class IntakeChatService {
             IntakeChatResponse response = new IntakeChatResponse();
             response.setReply(result.getReply());
             response.setIntakeComplete(result.isIntakeComplete());
-            response.setStructuredData(result.getStructuredData());
+            StructuredIntakeData structuredData = result.getStructuredData() != null
+                    ? result.getStructuredData()
+                    : emptyStructuredData();
+            response.setStructuredData(structuredData);
             response.setRequestId(requestId);
 
             safeAuditLog(
