@@ -282,7 +282,8 @@ public class IntakeOpenAiClient {
         }
         int boundary = findBoundary(content, MAX_CONTENT_CHARS);
         int safeBoundary = safeBoundary(content, boundary);
-        return content.substring(0, safeBoundary);
+        int cappedBoundary = Math.min(safeBoundary, MAX_CONTENT_CHARS);
+        return content.substring(0, cappedBoundary);
     }
 
     int findBoundary(String content, int maxChars) {
