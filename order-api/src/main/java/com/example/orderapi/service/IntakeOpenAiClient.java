@@ -88,7 +88,7 @@ public class IntakeOpenAiClient {
             return parseNormalizedResult(raw);
         } catch (RestClientResponseException ex) {
             String responseBody = ex.getResponseBodyAsString();
-            log.warn("OpenAI intake request failed with status {} body={}", ex.getStatusCode(), safeSnippet(responseBody));
+            log.warn("OpenAI intake request failed with status {}", ex.getStatusCode().value());
             if (ex.getStatusCode().value() == 400 && isJsonModeIncompatibility(responseBody)) {
                 return fallbackResult("OpenAI model configuration is incompatible with JSON response mode. Please update app.intake.model.");
             }
@@ -108,6 +108,7 @@ public class IntakeOpenAiClient {
             JsonNode root = objectMapper.readTree(rawResponse);
             JsonNode intakeJson = extractStructuredJson(root);
             if (intakeJson == null || intakeJson.isNull() || intakeJson.isMissingNode()) {
+                log.warn("OpenAI intake JSON extraction failed for configured chat response shape");
                 return fallbackResult();
             }
 
@@ -132,6 +133,14 @@ public class IntakeOpenAiClient {
 
     private StructuredIntakeData toStructuredData(JsonNode node) {
         StructuredIntakeData data = new StructuredIntakeData();
+        if (node == null || node.isMissingNode() || node.isNull() || !node.isObject()) {
+            data.setTitle("");
+            data.setDescription("");
+            data.setStepsToReproduce("");
+            data.setExpectedBehavior("");
+            data.setAffectedComponents(Collections.emptyList());
+            return data;
+        }
         data.setType(validType(node.path("type").asText(null)));
         data.setTitle(blankToEmpty(node.path("title").asText(null)));
         data.setDescription(blankToEmpty(node.path("description").asText(null)));
@@ -243,14 +252,6 @@ public class IntakeOpenAiClient {
         } catch (Exception ex) {
             return null;
         }
-    }
-
-    private String safeSnippet(String value) {
-        if (!StringUtils.hasText(value)) {
-            return "";
-        }
-        String normalized = value.replaceAll("\\s+", " ").trim();
-        return normalized.length() > 240 ? normalized.substring(0, 240) + "..." : normalized;
     }
 
     private String blankToNull(String value) {
