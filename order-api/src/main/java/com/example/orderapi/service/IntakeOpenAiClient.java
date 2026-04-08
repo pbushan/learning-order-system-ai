@@ -88,6 +88,9 @@ public class IntakeOpenAiClient {
                 requestMessages.addAll(filtered.subList(tailStart, filtered.size()));
             }
         }
+        if (requestMessages.size() > MAX_TOTAL_MESSAGES) {
+            requestMessages = new ArrayList<>(requestMessages.subList(0, MAX_TOTAL_MESSAGES));
+        }
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
@@ -299,10 +302,7 @@ public class IntakeOpenAiClient {
         int boundary = findBoundary(content, cap);
         int preferredBoundary = boundary >= (cap - 20) ? boundary : cap;
         int safeBoundary = safeBoundary(content, preferredBoundary);
-        int cappedBoundary = Math.max(0, Math.min(safeBoundary, cap));
-        if (cappedBoundary == 0) {
-            return "";
-        }
+        int cappedBoundary = Math.max(1, Math.min(safeBoundary, cap));
         return content.substring(0, cappedBoundary);
     }
 
