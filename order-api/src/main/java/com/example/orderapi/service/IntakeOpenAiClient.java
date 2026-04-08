@@ -29,6 +29,8 @@ public class IntakeOpenAiClient {
     private static final Logger log = LoggerFactory.getLogger(IntakeOpenAiClient.class);
     private static final Pattern FENCED_JSON_PATTERN =
             Pattern.compile("^```(?:json)?\\s*(.*?)\\s*```$", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern FENCED_JSON_ANYWHERE_PATTERN =
+            Pattern.compile("```(?:json)?\\s*(\\{.*?})\\s*```", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final String SYSTEM_PROMPT = "You are a product intake assistant. Classify the request as bug or feature. "
             + "Ask only minimal clarifying questions. Stop when enough information is collected. "
             + "Return valid JSON only with keys: reply, intakeComplete, structuredData. "
@@ -176,10 +178,14 @@ public class IntakeOpenAiClient {
         if (matcher.matches()) {
             return matcher.group(1).trim();
         }
+        Matcher inlineFenceMatcher = FENCED_JSON_ANYWHERE_PATTERN.matcher(trimmed);
+        if (inlineFenceMatcher.find()) {
+            return inlineFenceMatcher.group(1).trim();
+        }
         return trimmed;
     }
 
-    private JsonNode extractStructuredJson(JsonNode root) throws Exception {
+    private JsonNode extractStructuredJson(JsonNode root) {
         JsonNode messageNode = root.path("choices").path(0).path("message");
         JsonNode contentNode = messageNode.path("content");
         JsonNode fromContent = parseJsonFromContentNode(contentNode);
@@ -196,7 +202,7 @@ public class IntakeOpenAiClient {
         return parseJsonFromContent(altText.asText(""));
     }
 
-    private JsonNode parseJsonFromContentNode(JsonNode contentNode) throws Exception {
+    private JsonNode parseJsonFromContentNode(JsonNode contentNode) {
         if (contentNode.isTextual()) {
             return parseJsonFromContent(contentNode.asText(""));
         }
@@ -212,10 +218,16 @@ public class IntakeOpenAiClient {
             }
             return parseJsonFromContent(sb.toString());
         }
+        if (contentNode.isObject()) {
+            String text = contentNode.path("text").asText("");
+            if (StringUtils.hasText(text)) {
+                return parseJsonFromContent(text);
+            }
+        }
         return null;
     }
 
-    private JsonNode parseJsonFromContent(String content) throws Exception {
+    private JsonNode parseJsonFromContent(String content) {
         if (!StringUtils.hasText(content)) {
             return null;
         }
@@ -225,9 +237,13 @@ public class IntakeOpenAiClient {
         } catch (Exception ex) {
             String extracted = extractFirstJsonObject(jsonOnly);
             if (extracted == null) {
-                throw ex;
+                return null;
             }
-            return objectMapper.readTree(extracted);
+            try {
+                return objectMapper.readTree(extracted);
+            } catch (Exception ignored) {
+                return null;
+            }
         }
     }
 
@@ -307,6 +323,10 @@ public class IntakeOpenAiClient {
 
     private NormalizedIntakeResult fallbackResult(String reply) {
         StructuredIntakeData fallbackData = new StructuredIntakeData();
+        fallbackData.setTitle("");
+        fallbackData.setDescription("");
+        fallbackData.setStepsToReproduce("");
+        fallbackData.setExpectedBehavior("");
         fallbackData.setAffectedComponents(Collections.emptyList());
         return new NormalizedIntakeResult(
                 reply,
