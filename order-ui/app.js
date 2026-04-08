@@ -24,9 +24,7 @@ const banner = document.getElementById("feedback-banner");
 const refreshButton = document.getElementById("refresh-button");
 const apiStatusDot = document.getElementById("api-status-dot");
 const apiStatusText = document.getElementById("api-status-text");
-const intakeTabButton = document.getElementById("intake-tab");
 const intakeChatForm = document.getElementById("intake-chat-form");
-const intakeChatPanel = document.getElementById("intake-panel");
 const intakeChatHistory = document.getElementById("intake-chat-history");
 const intakeChatInput = document.getElementById("intake-chat-input");
 const intakeChatSend = document.getElementById("intake-chat-send");
@@ -51,7 +49,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (intakeChatInput) {
         intakeChatInput.addEventListener("keydown", handleIntakeInputKeydown);
     }
-    validateIntakeTabSetup();
     setIntakeChatLoading(false);
     renderIntakeChatHistory();
     initializeTabs();
@@ -421,14 +418,6 @@ function setIntakeChatLoading(isLoading) {
     }
     if (intakeChatLoading) {
         intakeChatLoading.classList.toggle("hidden", !isLoading);
-    }
-}
-
-function validateIntakeTabSetup() {
-    const tabLinked = intakeTabButton?.getAttribute("aria-controls") === intakeChatPanel?.id;
-    const dataLinked = intakeTabButton?.dataset.tabTarget === intakeChatPanel?.dataset.tabPanel;
-    if (!tabLinked || !dataLinked) {
-        console.warn("Intake tab wiring mismatch detected; intake tab may not behave correctly.");
     }
 }
 
