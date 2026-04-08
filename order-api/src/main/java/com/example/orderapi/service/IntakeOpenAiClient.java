@@ -68,14 +68,19 @@ public class IntakeOpenAiClient {
         body.put("model", model);
         body.put("messages", requestMessages);
         body.put("temperature", 0.2);
+        body.put("response_format", Map.of("type", "json_object"));
 
-        String raw = restClient.post()
-                .uri("/chat/completions")
-                .body(body)
-                .retrieve()
-                .body(String.class);
-
-        return parseNormalizedResult(raw);
+        try {
+            String raw = restClient.post()
+                    .uri("/chat/completions")
+                    .body(body)
+                    .retrieve()
+                    .body(String.class);
+            return parseNormalizedResult(raw);
+        } catch (Exception ex) {
+            log.warn("OpenAI intake request failed", ex);
+            return fallbackResult();
+        }
     }
 
     private NormalizedIntakeResult parseNormalizedResult(String rawResponse) {
@@ -131,15 +136,19 @@ public class IntakeOpenAiClient {
         if ("assistant".equals(role)) {
             return "assistant";
         }
+        if ("system".equals(role)) {
+            return "system";
+        }
         return "user";
     }
 
     private String unwrapJson(String content) {
         String trimmed = content.trim();
-        if (trimmed.startsWith("```") && trimmed.endsWith("```")) {
+        if (trimmed.startsWith("```")) {
             int firstNewline = trimmed.indexOf('\n');
-            if (firstNewline > -1) {
-                trimmed = trimmed.substring(firstNewline + 1, trimmed.length() - 3).trim();
+            int lastFence = trimmed.lastIndexOf("```");
+            if (firstNewline > -1 && lastFence > firstNewline) {
+                trimmed = trimmed.substring(firstNewline + 1, lastFence).trim();
             }
         }
         return trimmed;
