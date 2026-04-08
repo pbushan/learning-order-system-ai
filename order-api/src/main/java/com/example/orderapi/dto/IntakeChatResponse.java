@@ -1,18 +1,25 @@
 package com.example.orderapi.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 
 public class IntakeChatResponse {
     @JsonProperty("reply")
+    @NotBlank(message = "reply is required")
     private String reply;
 
     @JsonProperty("intakeComplete")
     private boolean intakeComplete;
 
     @JsonProperty("structuredData")
+    @NotNull(message = "structuredData is required")
+    @Valid
     private StructuredIntakeData structuredData;
 
     @JsonProperty("requestId")
+    @NotBlank(message = "requestId is required")
     private String requestId;
 
     public String getReply() {

@@ -1,11 +1,14 @@
 package com.example.orderapi.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 
 import java.util.List;
 
 public class StructuredIntakeData {
     @JsonProperty("type")
+    @Pattern(regexp = "^(bug|feature)$", message = "type must be bug or feature")
     private String type;
 
     @JsonProperty("title")
@@ -21,9 +24,11 @@ public class StructuredIntakeData {
     private String expectedBehavior;
 
     @JsonProperty("priority")
+    @Pattern(regexp = "^(low|medium|high)$", message = "priority must be low, medium, or high")
     private String priority;
 
     @JsonProperty("affectedComponents")
+    @NotNull(message = "affectedComponents is required")
     private List<String> affectedComponents;
 
     public String getType() {
