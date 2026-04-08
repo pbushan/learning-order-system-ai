@@ -1,8 +1,14 @@
 const state = {
     customers: [],
     orders: [],
-    products: []
+    products: [],
+    intakeMessages: [],
+    intakeLoading: false,
+    lastIntakeSentAt: 0
 };
+const MAX_INTAKE_MESSAGES = 30;
+const INTAKE_REQUEST_TIMEOUT_MS = 15000;
+const MIN_INTAKE_SEND_INTERVAL_MS = 800;
 
 const customerForm = document.getElementById("customer-form");
 const orderForm = document.getElementById("order-form");
@@ -18,6 +24,13 @@ const banner = document.getElementById("feedback-banner");
 const refreshButton = document.getElementById("refresh-button");
 const apiStatusDot = document.getElementById("api-status-dot");
 const apiStatusText = document.getElementById("api-status-text");
+const intakeTabButton = document.getElementById("intake-tab");
+const intakeChatForm = document.getElementById("intake-chat-form");
+const intakeChatPanel = document.getElementById("intake-panel");
+const intakeChatHistory = document.getElementById("intake-chat-history");
+const intakeChatInput = document.getElementById("intake-chat-input");
+const intakeChatSend = document.getElementById("intake-chat-send");
+const intakeChatLoading = document.getElementById("intake-chat-loading");
 let tabButtons = [];
 let tabPanels = [];
 
@@ -32,6 +45,15 @@ document.addEventListener("DOMContentLoaded", () => {
     customerTableBody.addEventListener("click", handleCustomerTableClick);
     orderTableBody.addEventListener("click", handleOrderTableClick);
     productTableBody.addEventListener("click", handleProductTableClick);
+    if (intakeChatForm) {
+        intakeChatForm.addEventListener("submit", handleIntakeChatSubmit);
+    }
+    if (intakeChatInput) {
+        intakeChatInput.addEventListener("keydown", handleIntakeInputKeydown);
+    }
+    validateIntakeTabSetup();
+    setIntakeChatLoading(false);
+    renderIntakeChatHistory();
     initializeTabs();
 
     loadDashboard();
@@ -267,6 +289,165 @@ async function handleOrderSubmit(event) {
     } catch (error) {
         showBanner(error.message, "error");
     }
+}
+
+async function handleIntakeChatSubmit(event) {
+    event.preventDefault();
+    if (!intakeChatInput || !intakeChatSend || !intakeChatHistory) {
+        showBanner("Intake chat is unavailable right now.", "error");
+        return;
+    }
+    if (state.intakeLoading) {
+        return;
+    }
+    if (Date.now() - state.lastIntakeSentAt < MIN_INTAKE_SEND_INTERVAL_MS) {
+        showBanner("Please wait a moment before sending another intake message.", "error");
+        return;
+    }
+
+    const content = intakeChatInput.value.trim();
+    if (!content) {
+        return;
+    }
+
+    state.intakeMessages.push({ role: "user", content });
+    trimIntakeMessages();
+    intakeChatInput.value = "";
+    renderIntakeChatHistory();
+    setIntakeChatLoading(true);
+    state.lastIntakeSentAt = Date.now();
+
+    try {
+        const response = await apiRequestWithTimeout("/api/intake/chat", {
+            method: "POST",
+            body: JSON.stringify({
+                messages: state.intakeMessages.map((message) => ({
+                    role: message.role,
+                    content: message.content
+                }))
+            })
+        }, INTAKE_REQUEST_TIMEOUT_MS);
+        if (!response || typeof response.reply !== "string" || !response.reply.trim()) {
+            throw new Error("Invalid intake response");
+        }
+        const reply = response.reply.trim();
+        state.intakeMessages.push({ role: "assistant", content: reply });
+        trimIntakeMessages();
+    } catch (error) {
+        const fallbackMessage = resolveIntakeFallbackMessage(error);
+        console.error("Intake chat request failed", error);
+        showBanner(fallbackMessage, "error");
+        state.intakeMessages.push({
+            role: "assistant",
+            content: fallbackMessage
+        });
+        trimIntakeMessages();
+    } finally {
+        setIntakeChatLoading(false);
+        renderIntakeChatHistory();
+    }
+}
+
+async function apiRequestWithTimeout(path, options, timeoutMs) {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await apiRequest(path, {
+            ...options,
+            signal: controller.signal
+        });
+    } catch (error) {
+        if (error?.name === "AbortError") {
+            throw new Error("Intake request timed out");
+        }
+        throw error;
+    } finally {
+        window.clearTimeout(timeoutId);
+    }
+}
+
+function resolveIntakeFallbackMessage(error) {
+    if (error?.message === "Invalid intake response") {
+        return "Intake service returned an unexpected response. Please try again.";
+    }
+    if (error?.message === "Intake request timed out") {
+        return "Intake service is taking too long to respond. Please try again.";
+    }
+    return "I could not reach intake service right now. Please try again shortly.";
+}
+
+function renderIntakeChatHistory() {
+    if (!intakeChatHistory) {
+        return;
+    }
+
+    if (!state.intakeMessages.length) {
+        replaceElementChildren(intakeChatHistory, [createIntakeMessageElement("assistant", "Hi, tell me about your bug or feature request.")]);
+        return;
+    }
+
+    const messageNodes = state.intakeMessages.map((message) => (
+        createIntakeMessageElement(message.role, message.content)
+    ));
+    replaceElementChildren(intakeChatHistory, messageNodes);
+    intakeChatHistory.scrollTop = intakeChatHistory.scrollHeight;
+}
+
+function createIntakeMessageElement(role, content) {
+    const article = document.createElement("article");
+    article.className = `intake-chat-message ${role === "user" ? "user" : "assistant"}`;
+    const text = document.createElement("p");
+    text.textContent = content;
+    article.appendChild(text);
+    return article;
+}
+
+function replaceElementChildren(element, nodes) {
+    while (element.firstChild) {
+        element.removeChild(element.firstChild);
+    }
+    nodes.forEach((node) => {
+        element.appendChild(node);
+    });
+}
+
+function setIntakeChatLoading(isLoading) {
+    state.intakeLoading = isLoading;
+    if (intakeChatInput) {
+        intakeChatInput.disabled = isLoading;
+    }
+    if (intakeChatSend) {
+        intakeChatSend.disabled = isLoading;
+    }
+    if (intakeChatLoading) {
+        intakeChatLoading.classList.toggle("hidden", !isLoading);
+    }
+}
+
+function validateIntakeTabSetup() {
+    const tabLinked = intakeTabButton?.getAttribute("aria-controls") === intakeChatPanel?.id;
+    const dataLinked = intakeTabButton?.dataset.tabTarget === intakeChatPanel?.dataset.tabPanel;
+    if (!tabLinked || !dataLinked) {
+        console.warn("Intake tab wiring mismatch detected; intake tab may not behave correctly.");
+    }
+}
+
+function trimIntakeMessages() {
+    if (!Array.isArray(state.intakeMessages) || state.intakeMessages.length <= MAX_INTAKE_MESSAGES) {
+        return;
+    }
+    state.intakeMessages = state.intakeMessages.slice(-MAX_INTAKE_MESSAGES);
+}
+
+function handleIntakeInputKeydown(event) {
+    if (event.key !== "Enter" || event.shiftKey) {
+        return;
+    }
+    event.preventDefault();
+    if (!intakeChatForm || state.intakeLoading) {
+        return;
+    }
+    intakeChatForm.requestSubmit();
 }
 
 async function handleCustomerTableClick(event) {

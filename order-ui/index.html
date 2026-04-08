@@ -60,6 +60,9 @@
             <button class="tab-button" id="activity-tab" type="button" role="tab" aria-selected="false" aria-controls="activity-panel" data-tab-target="activity" tabindex="-1">
                 System activity
             </button>
+            <button class="tab-button" id="intake-tab" type="button" role="tab" aria-selected="false" aria-controls="intake-panel" data-tab-target="intake" tabindex="-1">
+                Intake chat
+            </button>
         </nav>
 
         <section class="panel tab-panel" id="customers-panel" role="tabpanel" aria-labelledby="customers-tab" data-tab-panel="customers">
@@ -348,6 +351,30 @@
                     <p class="activity-text">Submitted orders will show shipping decisions here once the API returns them.</p>
                 </article>
             </div>
+        </section>
+
+        <section class="panel tab-panel" id="intake-panel" role="tabpanel" aria-labelledby="intake-tab" data-tab-panel="intake" hidden>
+            <div class="panel-header">
+                <div>
+                    <p class="panel-kicker">Intake</p>
+                    <h2>Intake chat</h2>
+                </div>
+                <p class="panel-note">Capture bug and feature requests with a guided assistant.</p>
+            </div>
+            <div class="intake-chat-history" id="intake-chat-history" aria-live="polite">
+                <article class="intake-chat-message assistant">
+                    <p>Hi, tell me about your bug or feature request.</p>
+                </article>
+            </div>
+            <form class="intake-chat-form" id="intake-chat-form">
+                <label for="intake-chat-input">Message</label>
+                <textarea id="intake-chat-input" rows="4" placeholder="Describe the bug or feature..." required></textarea>
+                <p class="intake-chat-hint">Press Enter to send. Use Shift+Enter for a new line.</p>
+                <div class="intake-chat-actions">
+                    <button class="primary-button" id="intake-chat-send" type="submit">Send</button>
+                    <span class="intake-chat-loading hidden" id="intake-chat-loading">Assistant is replying...</span>
+                </div>
+            </form>
         </section>
     </main>
 </div>
