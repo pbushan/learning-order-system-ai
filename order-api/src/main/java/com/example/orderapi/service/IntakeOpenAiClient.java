@@ -60,9 +60,8 @@ public class IntakeOpenAiClient {
         requestMessages.add(Map.of("role", "system", "content", SYSTEM_PROMPT));
 
         if (messages != null) {
-            int start = Math.max(0, messages.size() - (MAX_MESSAGES - 1));
-            for (int idx = start; idx < messages.size(); idx++) {
-                ChatMessage message = messages.get(idx);
+            List<Map<String, String>> filtered = new ArrayList<>();
+            for (ChatMessage message : messages) {
                 if (message == null) {
                     continue;
                 }
@@ -72,12 +71,11 @@ public class IntakeOpenAiClient {
                 }
                 String content = message.getContent() != null ? message.getContent().trim() : "";
                 if (!content.isEmpty()) {
-                    requestMessages.add(Map.of("role", role, "content", truncateContent(content)));
-                }
-                if (requestMessages.size() >= MAX_MESSAGES) {
-                    break;
+                    filtered.add(Map.of("role", role, "content", truncateContent(content)));
                 }
             }
+            int start = Math.max(0, filtered.size() - (MAX_MESSAGES - 1));
+            requestMessages.addAll(filtered.subList(start, filtered.size()));
         }
 
         Map<String, Object> body = new LinkedHashMap<>();
