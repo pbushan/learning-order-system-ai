@@ -5,6 +5,7 @@ const state = {
     intakeMessages: [],
     intakeLoading: false
 };
+const MAX_INTAKE_MESSAGES = 30;
 
 const customerForm = document.getElementById("customer-form");
 const orderForm = document.getElementById("order-form");
@@ -47,9 +48,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (intakeChatInput) {
         intakeChatInput.addEventListener("keydown", handleIntakeInputKeydown);
     }
-    if (!validateIntakeTabSetup()) {
-        disableIntakeChatUI();
-    }
+    validateIntakeTabSetup();
     initializeTabs();
 
     loadDashboard();
@@ -303,6 +302,7 @@ async function handleIntakeChatSubmit(event) {
     }
 
     state.intakeMessages.push({ role: "user", content });
+    trimIntakeMessages();
     intakeChatInput.value = "";
     renderIntakeChatHistory();
     setIntakeChatLoading(true);
@@ -322,6 +322,7 @@ async function handleIntakeChatSubmit(event) {
         }
         const reply = response.reply.trim();
         state.intakeMessages.push({ role: "assistant", content: reply });
+        trimIntakeMessages();
     } catch (error) {
         const fallbackMessage = error?.message === "Invalid intake response"
             ? "Intake service returned an unexpected response. Please try again."
@@ -331,6 +332,7 @@ async function handleIntakeChatSubmit(event) {
             role: "assistant",
             content: fallbackMessage
         });
+        trimIntakeMessages();
     } finally {
         setIntakeChatLoading(false);
         renderIntakeChatHistory();
@@ -391,25 +393,14 @@ function validateIntakeTabSetup() {
     const dataLinked = intakeTabButton?.dataset.tabTarget === intakeChatPanel?.dataset.tabPanel;
     if (!tabLinked || !dataLinked) {
         console.warn("Intake tab wiring mismatch detected; intake tab may not behave correctly.");
-        return false;
     }
-    return true;
 }
 
-function disableIntakeChatUI() {
-    if (intakeTabButton) {
-        intakeTabButton.disabled = true;
-        intakeTabButton.setAttribute("aria-disabled", "true");
+function trimIntakeMessages() {
+    if (!Array.isArray(state.intakeMessages) || state.intakeMessages.length <= MAX_INTAKE_MESSAGES) {
+        return;
     }
-    if (intakeChatPanel) {
-        intakeChatPanel.hidden = true;
-    }
-    if (intakeChatInput) {
-        intakeChatInput.disabled = true;
-    }
-    if (intakeChatSend) {
-        intakeChatSend.disabled = true;
-    }
+    state.intakeMessages = state.intakeMessages.slice(-MAX_INTAKE_MESSAGES);
 }
 
 function handleIntakeInputKeydown(event) {
