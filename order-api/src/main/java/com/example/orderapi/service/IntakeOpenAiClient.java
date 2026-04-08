@@ -27,6 +27,7 @@ public class IntakeOpenAiClient {
     private static final Logger log = LoggerFactory.getLogger(IntakeOpenAiClient.class);
     static final int MAX_MESSAGES = 20;
     static final int MAX_CONTENT_CHARS = 2000;
+    static final int TRUNCATION_BOUNDARY_WINDOW = 80;
     private static final String SYSTEM_PROMPT = "You are a product intake assistant. Classify the request as bug or feature. "
             + "Ask only minimal clarifying questions. Stop when enough information is collected. "
             + "Return valid JSON only with keys: reply, intakeComplete, structuredData. "
@@ -95,7 +96,7 @@ public class IntakeOpenAiClient {
             String responseBody = ex.getResponseBodyAsString();
             log.warn("OpenAI intake request failed with status {}", ex.getStatusCode().value());
             if (ex.getStatusCode().value() == 400 && isJsonModeIncompatibility(responseBody)) {
-                return fallbackResult("Intake service configuration is currently unavailable. Please try again shortly.");
+                return fallbackResult("Intake service model settings are currently incompatible. Please try again shortly.");
             }
             if (ex.getStatusCode().value() == 401 || ex.getStatusCode().value() == 403) {
                 return fallbackResult("Intake service is currently unavailable. Please try again shortly.");
@@ -288,7 +289,7 @@ public class IntakeOpenAiClient {
 
     int findBoundary(String content, int maxChars) {
         int effectiveMax = Math.max(1, Math.min(maxChars, content.length()));
-        int minBoundary = Math.max(1, effectiveMax - 200);
+        int minBoundary = Math.max(1, effectiveMax - TRUNCATION_BOUNDARY_WINDOW);
         for (int i = effectiveMax; i >= minBoundary; i--) {
             char ch = content.charAt(i - 1);
             if (ch == '\n' || ch == '}' || ch == '.' || ch == '!' || ch == '?' || Character.isWhitespace(ch)) {
