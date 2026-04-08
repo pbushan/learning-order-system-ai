@@ -18,11 +18,15 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class IntakeOpenAiClient {
 
     private static final Logger log = LoggerFactory.getLogger(IntakeOpenAiClient.class);
+    private static final Pattern FENCED_JSON_PATTERN =
+            Pattern.compile("^```(?:json)?\\s*(.*?)\\s*```$", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final String SYSTEM_PROMPT = "You are a product intake assistant. Classify the request as bug or feature. "
             + "Ask only minimal clarifying questions. Stop when enough information is collected. "
             + "Return valid JSON only with keys: reply, intakeComplete, structuredData. "
@@ -86,13 +90,16 @@ public class IntakeOpenAiClient {
     private NormalizedIntakeResult parseNormalizedResult(String rawResponse) {
         try {
             JsonNode root = objectMapper.readTree(rawResponse != null ? rawResponse : "{}");
-            String content = extractModelContent(root).trim();
-            if (content.isEmpty()) {
-                return fallbackResult();
-            }
+            JsonNode intakeJson = root.path("choices").path(0).path("message").path("parsed");
+            if (intakeJson.isMissingNode() || intakeJson.isNull()) {
+                String content = extractModelContent(root).trim();
+                if (content.isEmpty()) {
+                    return fallbackResult();
+                }
 
-            String jsonOnly = unwrapJson(content);
-            JsonNode intakeJson = objectMapper.readTree(jsonOnly);
+                String jsonOnly = unwrapJson(content);
+                intakeJson = objectMapper.readTree(jsonOnly);
+            }
 
             String reply = intakeJson.path("reply").asText("").trim();
             boolean intakeComplete = intakeJson.path("intakeComplete").asBoolean(false);
@@ -154,8 +161,10 @@ public class IntakeOpenAiClient {
 
     private String unwrapJson(String content) {
         String trimmed = content.trim();
-        trimmed = trimmed.replaceFirst("^```[a-zA-Z0-9_-]*\\s*", "");
-        trimmed = trimmed.replaceFirst("\\s*```\\s*$", "");
+        Matcher matcher = FENCED_JSON_PATTERN.matcher(trimmed);
+        if (matcher.matches()) {
+            return matcher.group(1).trim();
+        }
         return trimmed;
     }
 
