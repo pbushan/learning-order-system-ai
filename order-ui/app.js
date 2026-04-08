@@ -3,9 +3,12 @@ const state = {
     orders: [],
     products: [],
     intakeMessages: [],
-    intakeLoading: false
+    intakeLoading: false,
+    lastIntakeSentAt: 0
 };
 const MAX_INTAKE_MESSAGES = 30;
+const INTAKE_REQUEST_TIMEOUT_MS = 15000;
+const MIN_INTAKE_SEND_INTERVAL_MS = 800;
 
 const customerForm = document.getElementById("customer-form");
 const orderForm = document.getElementById("order-form");
@@ -49,6 +52,8 @@ document.addEventListener("DOMContentLoaded", () => {
         intakeChatInput.addEventListener("keydown", handleIntakeInputKeydown);
     }
     validateIntakeTabSetup();
+    setIntakeChatLoading(false);
+    renderIntakeChatHistory();
     initializeTabs();
 
     loadDashboard();
@@ -295,6 +300,10 @@ async function handleIntakeChatSubmit(event) {
     if (state.intakeLoading) {
         return;
     }
+    if (Date.now() - state.lastIntakeSentAt < MIN_INTAKE_SEND_INTERVAL_MS) {
+        showBanner("Please wait a moment before sending another intake message.", "error");
+        return;
+    }
 
     const content = intakeChatInput.value.trim();
     if (!content) {
@@ -306,9 +315,10 @@ async function handleIntakeChatSubmit(event) {
     intakeChatInput.value = "";
     renderIntakeChatHistory();
     setIntakeChatLoading(true);
+    state.lastIntakeSentAt = Date.now();
 
     try {
-        const response = await apiRequest("/api/intake/chat", {
+        const response = await apiRequestWithTimeout("/api/intake/chat", {
             method: "POST",
             body: JSON.stringify({
                 messages: state.intakeMessages.map((message) => ({
@@ -316,7 +326,7 @@ async function handleIntakeChatSubmit(event) {
                     content: message.content
                 }))
             })
-        });
+        }, INTAKE_REQUEST_TIMEOUT_MS);
         if (!response || typeof response.reply !== "string" || !response.reply.trim()) {
             throw new Error("Invalid intake response");
         }
@@ -324,9 +334,7 @@ async function handleIntakeChatSubmit(event) {
         state.intakeMessages.push({ role: "assistant", content: reply });
         trimIntakeMessages();
     } catch (error) {
-        const fallbackMessage = error?.message === "Invalid intake response"
-            ? "Intake service returned an unexpected response. Please try again."
-            : "I could not reach intake service right now. Please try again shortly.";
+        const fallbackMessage = resolveIntakeFallbackMessage(error);
         console.error("Intake chat request failed", error);
         showBanner(fallbackMessage, "error");
         state.intakeMessages.push({
@@ -338,6 +346,34 @@ async function handleIntakeChatSubmit(event) {
         setIntakeChatLoading(false);
         renderIntakeChatHistory();
     }
+}
+
+async function apiRequestWithTimeout(path, options, timeoutMs) {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await apiRequest(path, {
+            ...options,
+            signal: controller.signal
+        });
+    } catch (error) {
+        if (error?.name === "AbortError") {
+            throw new Error("Intake request timed out");
+        }
+        throw error;
+    } finally {
+        window.clearTimeout(timeoutId);
+    }
+}
+
+function resolveIntakeFallbackMessage(error) {
+    if (error?.message === "Invalid intake response") {
+        return "Intake service returned an unexpected response. Please try again.";
+    }
+    if (error?.message === "Intake request timed out") {
+        return "Intake service is taking too long to respond. Please try again.";
+    }
+    return "I could not reach intake service right now. Please try again shortly.";
 }
 
 function renderIntakeChatHistory() {
