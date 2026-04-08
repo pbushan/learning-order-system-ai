@@ -1,7 +1,9 @@
 const state = {
     customers: [],
     orders: [],
-    products: []
+    products: [],
+    intakeMessages: [],
+    intakeLoading: false
 };
 
 const customerForm = document.getElementById("customer-form");
@@ -18,6 +20,11 @@ const banner = document.getElementById("feedback-banner");
 const refreshButton = document.getElementById("refresh-button");
 const apiStatusDot = document.getElementById("api-status-dot");
 const apiStatusText = document.getElementById("api-status-text");
+const intakeChatForm = document.getElementById("intake-chat-form");
+const intakeChatHistory = document.getElementById("intake-chat-history");
+const intakeChatInput = document.getElementById("intake-chat-input");
+const intakeChatSend = document.getElementById("intake-chat-send");
+const intakeChatLoading = document.getElementById("intake-chat-loading");
 let tabButtons = [];
 let tabPanels = [];
 
@@ -32,6 +39,7 @@ document.addEventListener("DOMContentLoaded", () => {
     customerTableBody.addEventListener("click", handleCustomerTableClick);
     orderTableBody.addEventListener("click", handleOrderTableClick);
     productTableBody.addEventListener("click", handleProductTableClick);
+    intakeChatForm.addEventListener("submit", handleIntakeChatSubmit);
     initializeTabs();
 
     loadDashboard();
@@ -267,6 +275,74 @@ async function handleOrderSubmit(event) {
     } catch (error) {
         showBanner(error.message, "error");
     }
+}
+
+async function handleIntakeChatSubmit(event) {
+    event.preventDefault();
+    if (state.intakeLoading) {
+        return;
+    }
+
+    const content = intakeChatInput.value.trim();
+    if (!content) {
+        return;
+    }
+
+    state.intakeMessages.push({ role: "user", content });
+    intakeChatInput.value = "";
+    renderIntakeChatHistory();
+    setIntakeChatLoading(true);
+
+    try {
+        const response = await apiRequest("/api/intake/chat", {
+            method: "POST",
+            body: JSON.stringify({
+                messages: state.intakeMessages.map((message) => ({
+                    role: message.role,
+                    content: message.content
+                }))
+            })
+        });
+        const reply = response?.reply || "I need a little more detail to capture this intake.";
+        state.intakeMessages.push({ role: "assistant", content: reply });
+    } catch (error) {
+        state.intakeMessages.push({
+            role: "assistant",
+            content: "I could not reach intake service right now. Please try again shortly."
+        });
+    } finally {
+        setIntakeChatLoading(false);
+        renderIntakeChatHistory();
+    }
+}
+
+function renderIntakeChatHistory() {
+    if (!intakeChatHistory) {
+        return;
+    }
+
+    if (!state.intakeMessages.length) {
+        intakeChatHistory.innerHTML = `
+            <article class="intake-chat-message assistant">
+                <p>Hi, tell me about your bug or feature request.</p>
+            </article>
+        `;
+        return;
+    }
+
+    intakeChatHistory.innerHTML = state.intakeMessages.map((message) => `
+        <article class="intake-chat-message ${message.role}">
+            <p>${escapeHtml(message.content)}</p>
+        </article>
+    `).join("");
+    intakeChatHistory.scrollTop = intakeChatHistory.scrollHeight;
+}
+
+function setIntakeChatLoading(isLoading) {
+    state.intakeLoading = isLoading;
+    intakeChatInput.disabled = isLoading;
+    intakeChatSend.disabled = isLoading;
+    intakeChatLoading.classList.toggle("hidden", !isLoading);
 }
 
 async function handleCustomerTableClick(event) {
