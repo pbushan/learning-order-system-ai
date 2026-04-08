@@ -1,9 +1,18 @@
 package com.example.orderapi.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 public class IntakeChatResponse {
+    @JsonProperty("reply")
     private String reply;
+
+    @JsonProperty("intakeComplete")
     private boolean intakeComplete;
+
+    @JsonProperty("structuredData")
     private StructuredIntakeData structuredData;
+
+    @JsonProperty("requestId")
     private String requestId;
 
     public String getReply() {

@@ -1,14 +1,29 @@
 package com.example.orderapi.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.List;
 
 public class StructuredIntakeData {
+    @JsonProperty("type")
     private String type;
+
+    @JsonProperty("title")
     private String title;
+
+    @JsonProperty("description")
     private String description;
+
+    @JsonProperty("stepsToReproduce")
     private String stepsToReproduce;
+
+    @JsonProperty("expectedBehavior")
     private String expectedBehavior;
+
+    @JsonProperty("priority")
     private String priority;
+
+    @JsonProperty("affectedComponents")
     private List<String> affectedComponents;
 
     public String getType() {
