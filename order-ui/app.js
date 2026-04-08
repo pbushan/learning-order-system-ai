@@ -350,11 +350,10 @@ function renderIntakeChatHistory() {
         return;
     }
 
-    const fragment = document.createDocumentFragment();
-    state.intakeMessages.forEach((message) => {
-        fragment.appendChild(createIntakeMessageElement(message.role, message.content));
-    });
-    replaceElementChildren(intakeChatHistory, [fragment]);
+    const messageNodes = state.intakeMessages.map((message) => (
+        createIntakeMessageElement(message.role, message.content)
+    ));
+    replaceElementChildren(intakeChatHistory, messageNodes);
     intakeChatHistory.scrollTop = intakeChatHistory.scrollHeight;
 }
 
