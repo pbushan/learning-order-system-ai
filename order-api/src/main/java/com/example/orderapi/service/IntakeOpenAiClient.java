@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
@@ -45,8 +46,12 @@ public class IntakeOpenAiClient {
         }
         this.objectMapper = objectMapper;
         this.model = model;
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(5000);
+        requestFactory.setReadTimeout(15000);
         this.restClient = RestClient.builder()
                 .baseUrl("https://api.openai.com/v1")
+                .requestFactory(requestFactory)
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .build();
@@ -105,8 +110,7 @@ public class IntakeOpenAiClient {
 
             String reply = intakeJson.path("reply").asText("").trim();
             StructuredIntakeData structuredData = toStructuredData(intakeJson.path("structuredData"));
-            boolean intakeComplete = intakeJson.path("intakeComplete").asBoolean(false)
-                    && hasMeaningfulStructuredData(structuredData);
+            boolean intakeComplete = intakeJson.path("intakeComplete").asBoolean(false);
 
             if (reply.isEmpty()) {
                 return new NormalizedIntakeResult(
@@ -193,25 +197,7 @@ public class IntakeOpenAiClient {
             String jsonOnly = unwrapJson(content);
             return objectMapper.readTree(jsonOnly);
         }
-
-        JsonNode parsed = messageNode.path("parsed");
-        if (!parsed.isMissingNode() && !parsed.isNull()) {
-            return parsed;
-        }
         return null;
-    }
-
-    private boolean hasMeaningfulStructuredData(StructuredIntakeData data) {
-        if (data == null) {
-            return false;
-        }
-        return StringUtils.hasText(data.getType())
-                || StringUtils.hasText(data.getTitle())
-                || StringUtils.hasText(data.getDescription())
-                || StringUtils.hasText(data.getStepsToReproduce())
-                || StringUtils.hasText(data.getExpectedBehavior())
-                || StringUtils.hasText(data.getPriority())
-                || (data.getAffectedComponents() != null && !data.getAffectedComponents().isEmpty());
     }
 
     private String blankToNull(String value) {
@@ -243,10 +229,6 @@ public class IntakeOpenAiClient {
 
     private NormalizedIntakeResult fallbackResult(String reply) {
         StructuredIntakeData fallbackData = new StructuredIntakeData();
-        fallbackData.setTitle("");
-        fallbackData.setDescription("");
-        fallbackData.setStepsToReproduce("");
-        fallbackData.setExpectedBehavior("");
         fallbackData.setAffectedComponents(Collections.emptyList());
         return new NormalizedIntakeResult(
                 reply,
