@@ -33,6 +33,8 @@ public class IntakeChatController {
                             "error", ex.getMessage(),
                             "requestId", requestId
                     ));
+        } catch (IntakeChatService.IntakeProcessingException ex) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ex.getFallbackResponse());
         }
     }
 }

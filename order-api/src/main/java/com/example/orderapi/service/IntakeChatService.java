@@ -67,7 +67,7 @@ public class IntakeChatService {
                     fallback.getStructuredData(),
                     ex.getMessage()
             );
-            return fallback;
+            throw new IntakeProcessingException(fallback);
         }
     }
 
@@ -96,6 +96,10 @@ public class IntakeChatService {
 
     private StructuredIntakeData emptyStructuredData() {
         StructuredIntakeData data = new StructuredIntakeData();
+        data.setTitle("");
+        data.setDescription("");
+        data.setStepsToReproduce("");
+        data.setExpectedBehavior("");
         data.setAffectedComponents(Collections.emptyList());
         return data;
     }
@@ -103,6 +107,19 @@ public class IntakeChatService {
     public static class IntakeConfigurationException extends RuntimeException {
         public IntakeConfigurationException(String message) {
             super(message);
+        }
+    }
+
+    public static class IntakeProcessingException extends RuntimeException {
+        private final IntakeChatResponse fallbackResponse;
+
+        public IntakeProcessingException(IntakeChatResponse fallbackResponse) {
+            super("Intake processing failed");
+            this.fallbackResponse = fallbackResponse;
+        }
+
+        public IntakeChatResponse getFallbackResponse() {
+            return fallbackResponse;
         }
     }
 }
