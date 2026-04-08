@@ -8,12 +8,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
-import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Collections;
@@ -65,15 +63,7 @@ public class FileAuditLogService {
             entry.put("error", safeString(error));
 
             String jsonLine = objectMapper.writeValueAsString(entry) + System.lineSeparator();
-            byte[] bytes = jsonLine.getBytes();
-            try (FileChannel channel = FileChannel.open(path,
-                    java.nio.file.StandardOpenOption.CREATE,
-                    java.nio.file.StandardOpenOption.WRITE,
-                    java.nio.file.StandardOpenOption.APPEND);
-                 FileLock ignored = channel.lock()) {
-                channel.position(channel.size());
-                channel.write(ByteBuffer.wrap(bytes));
-            }
+            Files.writeString(path, jsonLine, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (Exception ex) {
             log.warn("Failed to write intake audit log entry for requestId={}", safeString(requestId), ex);
         }
@@ -84,11 +74,20 @@ public class FileAuditLogService {
         Path normalized = configured.isAbsolute()
                 ? configured.normalize()
                 : Paths.get("").toAbsolutePath().resolve(configured).normalize();
-        if (!normalized.startsWith(allowedAuditBasePath)) {
+        if (!isWithinAllowedBase(normalized)) {
             log.warn("Rejected audit log path outside allowed directory: {}", auditLogPath);
             return defaultAuditFile;
         }
         return normalized;
+    }
+
+    private boolean isWithinAllowedBase(Path candidate) {
+        try {
+            Path relative = allowedAuditBasePath.relativize(candidate);
+            return !relative.isAbsolute() && !relative.startsWith("..");
+        } catch (IllegalArgumentException ex) {
+            return false;
+        }
     }
 
     private String safeString(String value) {
