@@ -30,6 +30,7 @@ logs/
 # =========================
 .env
 *.env
+order-api/audit/*.jsonl
 
 # =========================
 # Node (lambda / AI experiments)
