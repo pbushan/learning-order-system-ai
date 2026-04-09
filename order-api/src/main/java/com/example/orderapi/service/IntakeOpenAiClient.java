@@ -210,14 +210,15 @@ public class IntakeOpenAiClient {
         body.put("response_format", Map.of("type", "json_object"));
 
         try {
-            int requestBytes = objectMapper.writeValueAsBytes(body).length;
+            String requestJson = objectMapper.writeValueAsString(body);
+            int requestBytes = requestJson.getBytes(StandardCharsets.UTF_8).length;
             if (requestBytes > MAX_DECOMPOSITION_REQUEST_BYTES) {
                 log.warn("Decomposition request too large for requestId={}, bytes={}", requestId, requestBytes);
                 return fallbackDecompositionResult(requestId);
             }
             String raw = restClient.post()
                     .uri("/chat/completions")
-                    .body(body)
+                    .body(requestJson)
                     .retrieve()
                     .body(String.class);
             return parseDecompositionResult(raw, requestId);
@@ -428,7 +429,7 @@ public class IntakeOpenAiClient {
         }
         if (storiesNode.isArray()) {
             for (JsonNode storyNode : storiesNode) {
-                if (!storyNode.isObject()) {
+                if (!isValidDecompositionStoryNode(storyNode)) {
                     return false;
                 }
             }
