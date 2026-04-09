@@ -1,22 +1,22 @@
 package com.example.orderapi.dto;
 
+import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
+import com.fasterxml.jackson.annotation.Nulls;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class DecompositionResponse {
     @JsonProperty("requestId")
-    @NotBlank(message = "requestId is required")
     private String requestId;
 
     @JsonProperty("decompositionComplete")
     private boolean decompositionComplete;
 
     @JsonProperty("stories")
-    @NotNull(message = "stories is required")
-    private List<DecompositionStory> stories;
+    @JsonSetter(nulls = Nulls.AS_EMPTY)
+    private List<DecompositionStory> stories = new ArrayList<>();
 
     public String getRequestId() {
         return requestId;
