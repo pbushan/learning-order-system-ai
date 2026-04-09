@@ -93,6 +93,31 @@ public class GitHubIssueClientService {
         return summary;
     }
 
+    public void addIssueLabel(long issueNumber, String label) {
+        if (!StringUtils.hasText(token)) {
+            throw new IllegalStateException("GitHub token is not configured. Set app.github.token or GITHUB_TOKEN.");
+        }
+        if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
+            throw new IllegalStateException("GitHub repository is not configured. Set app.github.owner and app.github.repo.");
+        }
+        if (issueNumber <= 0) {
+            throw new IllegalArgumentException("issueNumber must be > 0");
+        }
+        if (!StringUtils.hasText(label)) {
+            throw new IllegalArgumentException("label is required");
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("labels", List.of(label.trim()));
+
+        restClient.post()
+                .uri("/repos/{owner}/{repo}/issues/{issueNumber}/labels", owner.trim(), repo.trim(), issueNumber)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                .body(body)
+                .retrieve()
+                .toBodilessEntity();
+    }
+
     public List<ApprovedGitHubIssue> discoverApprovedIssues() {
         if (!StringUtils.hasText(token)) {
             throw new IllegalStateException("GitHub token is not configured. Set app.github.token or GITHUB_TOKEN.");
