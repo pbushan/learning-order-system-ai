@@ -92,10 +92,10 @@ public class DecompositionService {
             }
             fileAuditLogService.logDecompositionEntry(
                     requestId,
-                    structuredData,
+                    structuredData != null ? structuredData : new StructuredIntakeData(),
                     decompositionModel,
-                    response != null ? response.isDecompositionComplete() : false,
-                    response != null ? response.getStories() : Collections.emptyList(),
+                    response.isDecompositionComplete(),
+                    response.getStories(),
                     error
             );
         } catch (Exception ignored) {
