@@ -12,7 +12,8 @@ public class DecompositionResponse {
     private String requestId;
 
     @JsonProperty("decompositionComplete")
-    private boolean decompositionComplete;
+    @NotNull(message = "decompositionComplete is required")
+    private Boolean decompositionComplete;
 
     @JsonProperty("stories")
     @NotNull(message = "stories is required")
@@ -27,11 +28,11 @@ public class DecompositionResponse {
         this.requestId = requestId;
     }
 
-    public boolean isDecompositionComplete() {
+    public Boolean getDecompositionComplete() {
         return decompositionComplete;
     }
 
-    public void setDecompositionComplete(boolean decompositionComplete) {
+    public void setDecompositionComplete(Boolean decompositionComplete) {
         this.decompositionComplete = decompositionComplete;
     }
 
