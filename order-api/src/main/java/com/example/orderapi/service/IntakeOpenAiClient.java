@@ -34,6 +34,7 @@ public class IntakeOpenAiClient {
     static final int MAX_CONTENT_CHARS = 2000;
     static final int TRUNCATION_BOUNDARY_WINDOW = 80;
     private static final int MAX_DECOMPOSITION_PAYLOAD_BYTES = 12000;
+    private static final int MAX_DECOMPOSITION_RESPONSE_BYTES = 120000;
     private static final int MAX_DECOMPOSITION_FIELD_CHARS = 2000;
     private static final int MAX_DECOMPOSITION_COMPONENTS = 20;
     private static final String SYSTEM_PROMPT = "You are a product intake assistant. Classify the request as bug or feature. "
@@ -270,6 +271,10 @@ public class IntakeOpenAiClient {
                 log.warn("OpenAI decomposition response body was empty");
                 return fallbackDecompositionResult(requestId);
             }
+            if (rawResponse.getBytes(StandardCharsets.UTF_8).length > MAX_DECOMPOSITION_RESPONSE_BYTES) {
+                log.warn("OpenAI decomposition response too large for requestId={}", requestId);
+                return fallbackDecompositionResult(requestId);
+            }
             JsonNode root = objectMapper.readTree(rawResponse);
             JsonNode decompositionJson = extractDecompositionJson(root);
             if (decompositionJson == null || decompositionJson.isNull() || decompositionJson.isMissingNode()) {
@@ -407,8 +412,7 @@ public class IntakeOpenAiClient {
         if (!node.isObject()) {
             return false;
         }
-        return StringUtils.hasText(node.path("storyId").asText(""))
-                && StringUtils.hasText(node.path("title").asText(""))
+        return StringUtils.hasText(node.path("title").asText(""))
                 && StringUtils.hasText(node.path("description").asText(""));
     }
 
@@ -416,12 +420,12 @@ public class IntakeOpenAiClient {
         if (!StringUtils.hasText(requestId)) {
             return false;
         }
-        if (requestId.length() > 128) {
+        if (requestId.length() > 256) {
             return false;
         }
         for (int i = 0; i < requestId.length(); i++) {
             char ch = requestId.charAt(i);
-            if (!(Character.isLetterOrDigit(ch) || ch == '-' || ch == '_' || ch == ':' || ch == '.')) {
+            if (Character.isISOControl(ch)) {
                 return false;
             }
         }
