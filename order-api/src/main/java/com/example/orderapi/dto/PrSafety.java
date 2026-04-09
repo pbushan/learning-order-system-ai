@@ -1,12 +1,15 @@
 package com.example.orderapi.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.validation.constraints.NotBlank;
 
 public class PrSafety {
     @JsonProperty("target")
+    @NotBlank(message = "target is required")
     private String target;
 
     @JsonProperty("notes")
+    @NotBlank(message = "notes is required")
     private String notes;
 
     public String getTarget() {

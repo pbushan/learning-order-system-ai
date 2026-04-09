@@ -3,13 +3,13 @@ package com.example.orderapi.dto;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
-import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotBlank;
 
 import java.util.List;
 
 public class DecompositionResponse {
     @JsonProperty("requestId")
-    @NotNull(message = "requestId is required")
+    @NotBlank(message = "requestId is required")
     private String requestId;
 
     @JsonProperty("decompositionComplete")
