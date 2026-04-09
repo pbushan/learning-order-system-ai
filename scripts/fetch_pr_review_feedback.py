@@ -13,6 +13,8 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from step6_audit_log import log_step6_event
+
 
 def github_get(path: str, token: str) -> Any:
     req = urllib.request.Request(
@@ -79,7 +81,9 @@ def main() -> int:
 
     token = os.getenv("CODEX_GITHUB_TOKEN", "").strip()
     if not token:
-        print("CODEX_GITHUB_TOKEN is required.", file=sys.stderr)
+        error = "CODEX_GITHUB_TOKEN is required."
+        print(error, file=sys.stderr)
+        log_step6_event("review-comments-retrieved", error=error)
         return 1
 
     try:
@@ -93,10 +97,14 @@ def main() -> int:
             token,
         )
     except urllib.error.HTTPError as exc:
-        print(f"GitHub API error: {exc.code} {exc.reason}", file=sys.stderr)
+        error = f"GitHub API error: {exc.code} {exc.reason}"
+        print(error, file=sys.stderr)
+        log_step6_event("review-comments-retrieved", error=error)
         return 1
     except Exception as exc:
-        print(f"Failed to fetch PR review feedback: {exc}", file=sys.stderr)
+        error = f"Failed to fetch PR review feedback: {exc}"
+        print(error, file=sys.stderr)
+        log_step6_event("review-comments-retrieved", error=error)
         return 1
 
     output = {
@@ -104,6 +112,11 @@ def main() -> int:
         "comments": [normalize_comment(c) for c in comments or []],
         "reviews": [normalize_review(r) for r in reviews or []],
     }
+    log_step6_event(
+        "review-comments-retrieved",
+        pr_number=pr_number,
+        metadata={"commentCount": len(output["comments"]), "reviewCount": len(output["reviews"])},
+    )
     print(json.dumps(output, ensure_ascii=True))
     return 0
 

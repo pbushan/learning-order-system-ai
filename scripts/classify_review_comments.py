@@ -8,6 +8,8 @@ import json
 import sys
 from typing import Any
 
+from step6_audit_log import log_step6_event
+
 
 BLOCKING_RULES = [
     ("security-critical risk", ["security", "auth bypass", "injection", "secret leak"]),
@@ -47,18 +49,30 @@ def main() -> int:
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
-        print(f"Invalid input JSON: {exc}", file=sys.stderr)
+        error = f"Invalid input JSON: {exc}"
+        print(error, file=sys.stderr)
+        log_step6_event("review-comments-classified", error=error)
         return 1
 
     comments = payload.get("comments", []) if isinstance(payload, dict) else []
     if not isinstance(comments, list):
-        print("Invalid input JSON: comments must be a list.", file=sys.stderr)
+        error = "Invalid input JSON: comments must be a list."
+        print(error, file=sys.stderr)
+        log_step6_event("review-comments-classified", error=error)
         return 1
 
+    classifications = [classify_comment(c if isinstance(c, dict) else {}) for c in comments]
     output = {
         "prNumber": payload.get("prNumber") if isinstance(payload, dict) else None,
-        "classifications": [classify_comment(c if isinstance(c, dict) else {}) for c in comments],
+        "classifications": classifications,
     }
+    blocking_count = sum(1 for c in classifications if c["classification"] == "blocking-address-now")
+    defer_count = sum(1 for c in classifications if c["classification"] == "non-blocking-defer")
+    log_step6_event(
+        "review-comments-classified",
+        pr_number=output["prNumber"],
+        metadata={"blockingCount": blocking_count, "deferCount": defer_count},
+    )
     print(json.dumps(output, ensure_ascii=True))
     return 0
 
