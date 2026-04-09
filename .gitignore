@@ -36,6 +36,8 @@ order-api/audit/*.jsonl
 # Node (lambda / AI experiments)
 # =========================
 **/node_modules/
+**/__pycache__/
+**/*.pyc
 
 # =========================
 # Build outputs
