@@ -175,7 +175,7 @@ public class IntakeOpenAiClient {
                     .body(String.class);
             return parseDecompositionResult(raw, requestId);
         } catch (Exception ex) {
-            log.warn("OpenAI decomposition request failed: {}", ex.getMessage());
+            log.warn("OpenAI decomposition request failed: {}", ex.getClass().getSimpleName());
             return fallbackDecompositionResult(requestId);
         }
     }
@@ -243,25 +243,25 @@ public class IntakeOpenAiClient {
         return data;
     }
 
-    private DecompositionResponse parseDecompositionResult(String rawResponse, String fallbackRequestId) {
+    private DecompositionResponse parseDecompositionResult(String rawResponse, String requestId) {
         try {
             if (!StringUtils.hasText(rawResponse)) {
                 log.warn("OpenAI decomposition response body was empty");
-                return fallbackDecompositionResult(fallbackRequestId);
+                return fallbackDecompositionResult(requestId);
             }
             JsonNode root = objectMapper.readTree(rawResponse);
             JsonNode decompositionJson = extractDecompositionJson(root);
             if (decompositionJson == null || decompositionJson.isNull() || decompositionJson.isMissingNode()) {
                 log.warn("OpenAI decomposition JSON extraction failed for configured chat response shape");
-                return fallbackDecompositionResult(fallbackRequestId);
+                return fallbackDecompositionResult(requestId);
             }
             if (!isDecompositionPayload(decompositionJson)) {
                 log.warn("OpenAI decomposition JSON does not match expected payload shape");
-                return fallbackDecompositionResult(fallbackRequestId);
+                return fallbackDecompositionResult(requestId);
             }
 
             DecompositionResponse response = new DecompositionResponse();
-            response.setRequestId(fallbackRequestId);
+            response.setRequestId(requestId);
             response.setDecompositionComplete(decompositionJson.path("decompositionComplete").asBoolean(false));
 
             List<DecompositionStory> stories = new ArrayList<>();
@@ -278,7 +278,7 @@ public class IntakeOpenAiClient {
             return response;
         } catch (Exception ex) {
             log.warn("Failed to parse OpenAI decomposition response JSON", ex);
-            return fallbackDecompositionResult(fallbackRequestId);
+            return fallbackDecompositionResult(requestId);
         }
     }
 
