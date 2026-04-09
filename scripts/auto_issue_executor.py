@@ -230,6 +230,11 @@ def create_or_reuse_branch(branch: str, base: str) -> None:
     exists = run_cmd("git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}", check=False).returncode == 0
     if exists:
         raise RuntimeError(f"Local branch already exists: {branch}")
+    remote_exists = (
+        run_cmd("git", "ls-remote", "--exit-code", "--heads", "origin", branch, check=False).returncode == 0
+    )
+    if remote_exists:
+        raise RuntimeError(f"Remote branch already exists: {branch}")
     run_cmd("git", "checkout", "-b", branch, base)
 
 
@@ -394,6 +399,23 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
         if label_applied:
             try:
                 remove_label(owner, repo, token, issue_number, "ai-in-progress")
+            except Exception:
+                pass
+        if pr_number is not None:
+            try:
+                comment_issue(
+                    owner,
+                    repo,
+                    token,
+                    issue_number,
+                    f"Automation stopped after creating PR #{pr_number}. Please continue from that PR.",
+                )
+            except Exception:
+                pass
+        elif branch:
+            try:
+                run_cmd("git", "push", "origin", "--delete", branch, check=False)
+                run_cmd("git", "branch", "-D", branch, check=False)
             except Exception:
                 pass
         try:
