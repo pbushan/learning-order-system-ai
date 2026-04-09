@@ -61,6 +61,8 @@ services:
       APP_LAMBDA_ENDPOINT: http://localstack:4566
       APP_LAMBDA_REGION: us-east-1
       APP_LAMBDA_FUNCTION_NAME: shipping-rule-lambda
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
     ports:
       - "8080:8080"
     depends_on:

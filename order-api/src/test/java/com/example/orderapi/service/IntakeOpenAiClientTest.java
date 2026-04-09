@@ -13,7 +13,7 @@ class IntakeOpenAiClientTest {
 
     @BeforeEach
     void setUp() {
-        client = new IntakeOpenAiClient(new ObjectMapper(), "test-key", "gpt-4.1-mini");
+        client = new IntakeOpenAiClient(new ObjectMapper(), "test-key", "gpt-4.1-mini", "gpt-4.1-mini");
         maxChars = IntakeOpenAiClient.MAX_CONTENT_CHARS;
     }
 
