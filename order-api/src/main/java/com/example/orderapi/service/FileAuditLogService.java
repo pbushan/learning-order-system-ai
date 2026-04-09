@@ -59,7 +59,7 @@ public class FileAuditLogService {
             entry.put("messages", messages != null ? messages : Collections.emptyList());
             entry.put("model", safeString(model));
             entry.put("reply", safeString(reply));
-            entry.put("intakeComplete", intakeComplete);
+            entry.put("intakeComplete", intakeComplete != null ? intakeComplete : null);
             entry.put("structuredData", toStructuredDataMap(structuredData));
             entry.put("error", safeString(error));
 
@@ -89,7 +89,7 @@ public class FileAuditLogService {
             entry.put("operation", "decomposition");
             entry.put("structuredData", toStructuredDataMap(structuredData));
             entry.put("model", safeString(model));
-            entry.put("decompositionComplete", decompositionComplete);
+            entry.put("decompositionComplete", decompositionComplete != null ? decompositionComplete : null);
             entry.put("stories", stories != null ? stories : Collections.emptyList());
             entry.put("error", safeString(error));
 
