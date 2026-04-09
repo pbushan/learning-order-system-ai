@@ -335,12 +335,12 @@ public class IntakeOpenAiClient {
         PrSafety prSafety = new PrSafety();
         if (node == null || node.isMissingNode() || node.isNull() || !node.isObject()) {
             prSafety.setTarget("under-30000-char-patch");
-            prSafety.setNotes("");
+            prSafety.setNotes(null);
             return prSafety;
         }
         String target = blankToNull(node.path("target").asText(null));
         prSafety.setTarget(target != null ? target : "under-30000-char-patch");
-        prSafety.setNotes(blankToEmpty(node.path("notes").asText(null)));
+        prSafety.setNotes(blankToNull(node.path("notes").asText(null)));
         return prSafety;
     }
 
@@ -355,15 +355,15 @@ public class IntakeOpenAiClient {
                 continue;
             }
             JsonNode fromContent = parseJsonFromContentNode(messageNode.path("content"));
-            if (fromContent != null && fromContent.isObject()) {
+            if (fromContent != null && fromContent.isObject() && isDecompositionPayload(fromContent)) {
                 return fromContent;
             }
             JsonNode fromText = parseJsonFromContent(messageNode.path("content").asText(""));
-            if (fromText != null && fromText.isObject()) {
+            if (fromText != null && fromText.isObject() && isDecompositionPayload(fromText)) {
                 return fromText;
             }
             JsonNode parsedNode = messageNode.path("parsed");
-            if (parsedNode != null && parsedNode.isObject()) {
+            if (parsedNode != null && parsedNode.isObject() && isDecompositionPayload(parsedNode)) {
                 return parsedNode;
             }
         }
@@ -382,7 +382,7 @@ public class IntakeOpenAiClient {
             return false;
         }
         JsonNode storiesNode = node.path("stories");
-        return storiesNode.isMissingNode() || storiesNode.isNull() || storiesNode.isArray();
+        return storiesNode.isArray();
     }
 
     private boolean toBoolean(JsonNode node) {
@@ -602,7 +602,7 @@ public class IntakeOpenAiClient {
 
     private DecompositionResponse fallbackDecompositionResult(String requestId) {
         DecompositionResponse fallback = new DecompositionResponse();
-        fallback.setRequestId(blankToEmpty(requestId));
+        fallback.setRequestId(requestId);
         fallback.setDecompositionComplete(false);
         fallback.setStories(Collections.emptyList());
         return fallback;
