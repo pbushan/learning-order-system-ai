@@ -2,9 +2,9 @@ package com.example.orderapi.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 import java.util.List;
 
@@ -22,10 +22,14 @@ public class DecompositionStory {
     private String description;
 
     @JsonProperty("acceptanceCriteria")
-    private List<@NotNull(message = "acceptanceCriteria entries must be non-null") String> acceptanceCriteria;
+    @NotNull(message = "acceptanceCriteria is required")
+    @Size(min = 1, message = "acceptanceCriteria must contain at least one item")
+    private List<@NotBlank(message = "acceptanceCriteria entries must be non-blank") String> acceptanceCriteria;
 
     @JsonProperty("affectedComponents")
-    private List<@NotNull(message = "affectedComponents entries must be non-null") String> affectedComponents;
+    @NotNull(message = "affectedComponents is required")
+    @Size(min = 1, message = "affectedComponents must contain at least one item")
+    private List<@NotBlank(message = "affectedComponents entries must be non-blank") String> affectedComponents;
 
     @JsonProperty("estimatedSize")
     private String estimatedSize;
@@ -89,21 +93,5 @@ public class DecompositionStory {
 
     public void setPrSafety(PrSafety prSafety) {
         this.prSafety = prSafety;
-    }
-
-    @AssertTrue(message = "acceptanceCriteria entries must be non-blank")
-    public boolean isAcceptanceCriteriaEntriesValid() {
-        return acceptanceCriteria != null && !acceptanceCriteria.isEmpty()
-                && acceptanceCriteria.stream().allMatch(this::isNonBlank);
-    }
-
-    @AssertTrue(message = "affectedComponents entries must be non-blank")
-    public boolean isAffectedComponentsEntriesValid() {
-        return affectedComponents != null && !affectedComponents.isEmpty()
-                && affectedComponents.stream().allMatch(this::isNonBlank);
-    }
-
-    private boolean isNonBlank(String value) {
-        return value != null && !value.isBlank();
     }
 }
