@@ -32,6 +32,10 @@ public class DecompositionResponse {
         return decompositionComplete;
     }
 
+    public boolean isDecompositionComplete() {
+        return decompositionComplete;
+    }
+
     public void setDecompositionComplete(boolean decompositionComplete) {
         this.decompositionComplete = decompositionComplete;
     }
