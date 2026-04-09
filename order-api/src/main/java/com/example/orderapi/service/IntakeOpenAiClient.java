@@ -37,6 +37,8 @@ public class IntakeOpenAiClient {
     private static final int MAX_DECOMPOSITION_RESPONSE_BYTES = 120000;
     private static final int MAX_DECOMPOSITION_FIELD_CHARS = 2000;
     private static final int MAX_DECOMPOSITION_COMPONENTS = 20;
+    private static final int MAX_DECOMPOSITION_FALLBACK_FIELD_CHARS = 500;
+    private static final int MAX_DECOMPOSITION_FALLBACK_COMPONENTS = 10;
     private static final String SYSTEM_PROMPT = "You are a product intake assistant. Classify the request as bug or feature. "
             + "Ask only minimal clarifying questions. Stop when enough information is collected. "
             + "Return valid JSON only with keys: reply, intakeComplete, structuredData. "
@@ -169,10 +171,27 @@ public class IntakeOpenAiClient {
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("requestId", requestId);
-        payload.put("structuredData", normalizeStructuredDataForDecomposition(structuredData));
+        payload.put("structuredData",
+                normalizeStructuredDataForDecomposition(
+                        structuredData,
+                        MAX_DECOMPOSITION_FIELD_CHARS,
+                        MAX_DECOMPOSITION_COMPONENTS
+                ));
         try {
             String payloadJson = objectMapper.writeValueAsString(payload);
             int payloadBytes = payloadJson.getBytes(StandardCharsets.UTF_8).length;
+            if (payloadBytes > MAX_DECOMPOSITION_PAYLOAD_BYTES) {
+                Map<String, Object> compactPayload = new LinkedHashMap<>();
+                compactPayload.put("requestId", requestId);
+                compactPayload.put("structuredData",
+                        normalizeStructuredDataForDecomposition(
+                                structuredData,
+                                MAX_DECOMPOSITION_FALLBACK_FIELD_CHARS,
+                                MAX_DECOMPOSITION_FALLBACK_COMPONENTS
+                        ));
+                payloadJson = objectMapper.writeValueAsString(compactPayload);
+                payloadBytes = payloadJson.getBytes(StandardCharsets.UTF_8).length;
+            }
             if (payloadBytes > MAX_DECOMPOSITION_PAYLOAD_BYTES) {
                 log.warn("Decomposition payload too large for requestId={}, bytes={}", requestId, payloadBytes);
                 return fallbackDecompositionResult(requestId);
@@ -310,10 +329,10 @@ public class IntakeOpenAiClient {
 
     private DecompositionStory toDecompositionStory(JsonNode node) {
         DecompositionStory story = new DecompositionStory();
-        story.setStoryId(blankToNull(node.path("storyId").asText(null)));
-        story.setTitle(blankToNull(node.path("title").asText(null)));
-        story.setDescription(blankToNull(node.path("description").asText(null)));
-        story.setEstimatedSize(blankToNull(node.path("estimatedSize").asText(null)));
+        story.setStoryId(truncateForDecomposition(node.path("storyId").asText(null)));
+        story.setTitle(truncateForDecomposition(node.path("title").asText(null)));
+        story.setDescription(truncateForDecomposition(node.path("description").asText(null)));
+        story.setEstimatedSize(truncateForDecomposition(node.path("estimatedSize").asText(null)));
 
         List<String> acceptanceCriteria = new ArrayList<>();
         JsonNode criteriaNode = node.path("acceptanceCriteria");
@@ -321,7 +340,7 @@ public class IntakeOpenAiClient {
             for (JsonNode item : criteriaNode) {
                 String value = blankToNull(item.asText(null));
                 if (value != null) {
-                    acceptanceCriteria.add(value);
+                    acceptanceCriteria.add(truncateForDecomposition(value));
                 }
             }
         }
@@ -333,7 +352,7 @@ public class IntakeOpenAiClient {
             for (JsonNode item : componentsNode) {
                 String value = blankToNull(item.asText(null));
                 if (value != null) {
-                    affectedComponents.add(value);
+                    affectedComponents.add(truncateForDecomposition(value));
                 }
             }
         }
@@ -350,8 +369,8 @@ public class IntakeOpenAiClient {
             return prSafety;
         }
         String target = blankToNull(node.path("target").asText(null));
-        prSafety.setTarget(target != null ? target : "under-30000-char-patch");
-        prSafety.setNotes(blankToNull(node.path("notes").asText(null)));
+        prSafety.setTarget(target != null ? truncateForDecomposition(target) : "under-30000-char-patch");
+        prSafety.setNotes(truncateForDecomposition(node.path("notes").asText(null)));
         return prSafety;
     }
 
@@ -386,10 +405,9 @@ public class IntakeOpenAiClient {
             return false;
         }
         JsonNode completionNode = node.path("decompositionComplete");
-        if (!completionNode.isMissingNode()
-                && !completionNode.isNull()
-                && !completionNode.isBoolean()
-                && !completionNode.isTextual()) {
+        if (completionNode.isMissingNode()
+                || completionNode.isNull()
+                || (!completionNode.isBoolean() && !completionNode.isTextual())) {
             return false;
         }
         JsonNode storiesNode = node.path("stories");
@@ -432,13 +450,15 @@ public class IntakeOpenAiClient {
         return true;
     }
 
-    private Map<String, Object> normalizeStructuredDataForDecomposition(StructuredIntakeData structuredData) {
+    private Map<String, Object> normalizeStructuredDataForDecomposition(StructuredIntakeData structuredData,
+                                                                        int maxFieldChars,
+                                                                        int maxComponents) {
         Map<String, Object> normalized = new LinkedHashMap<>();
         normalized.put("type", blankToNull(structuredData.getType()));
-        normalized.put("title", truncateForDecomposition(structuredData.getTitle()));
-        normalized.put("description", truncateForDecomposition(structuredData.getDescription()));
-        normalized.put("stepsToReproduce", truncateForDecomposition(structuredData.getStepsToReproduce()));
-        normalized.put("expectedBehavior", truncateForDecomposition(structuredData.getExpectedBehavior()));
+        normalized.put("title", truncateForDecomposition(structuredData.getTitle(), maxFieldChars));
+        normalized.put("description", truncateForDecomposition(structuredData.getDescription(), maxFieldChars));
+        normalized.put("stepsToReproduce", truncateForDecomposition(structuredData.getStepsToReproduce(), maxFieldChars));
+        normalized.put("expectedBehavior", truncateForDecomposition(structuredData.getExpectedBehavior(), maxFieldChars));
         normalized.put("priority", blankToNull(structuredData.getPriority()));
 
         List<String> affectedComponents = new ArrayList<>();
@@ -446,8 +466,8 @@ public class IntakeOpenAiClient {
             for (String component : structuredData.getAffectedComponents()) {
                 String value = blankToNull(component);
                 if (value != null) {
-                    affectedComponents.add(truncateForDecomposition(value));
-                    if (affectedComponents.size() >= MAX_DECOMPOSITION_COMPONENTS) {
+                    affectedComponents.add(truncateForDecomposition(value, maxFieldChars));
+                    if (affectedComponents.size() >= maxComponents) {
                         break;
                     }
                 }
@@ -458,14 +478,18 @@ public class IntakeOpenAiClient {
     }
 
     private String truncateForDecomposition(String value) {
+        return truncateForDecomposition(value, MAX_DECOMPOSITION_FIELD_CHARS);
+    }
+
+    private String truncateForDecomposition(String value, int maxChars) {
         if (!StringUtils.hasText(value)) {
             return null;
         }
         String trimmed = value.trim();
-        if (trimmed.length() <= MAX_DECOMPOSITION_FIELD_CHARS) {
+        if (trimmed.length() <= maxChars) {
             return trimmed;
         }
-        int boundary = safeBoundary(trimmed, MAX_DECOMPOSITION_FIELD_CHARS);
+        int boundary = safeBoundary(trimmed, maxChars);
         return trimmed.substring(0, boundary);
     }
 
