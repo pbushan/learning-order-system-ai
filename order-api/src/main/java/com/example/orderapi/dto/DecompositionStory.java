@@ -96,12 +96,14 @@ public class DecompositionStory {
 
     @AssertTrue(message = "acceptanceCriteria entries must be non-blank")
     public boolean isAcceptanceCriteriaEntriesValid() {
-        return acceptanceCriteria != null && acceptanceCriteria.stream().allMatch(this::isNonBlank);
+        return acceptanceCriteria == null || acceptanceCriteria.isEmpty()
+                || acceptanceCriteria.stream().allMatch(this::isNonBlank);
     }
 
     @AssertTrue(message = "affectedComponents entries must be non-blank")
     public boolean isAffectedComponentsEntriesValid() {
-        return affectedComponents != null && affectedComponents.stream().allMatch(this::isNonBlank);
+        return affectedComponents == null || affectedComponents.isEmpty()
+                || affectedComponents.stream().allMatch(this::isNonBlank);
     }
 
     private boolean isNonBlank(String value) {
