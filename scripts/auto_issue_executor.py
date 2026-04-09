@@ -20,6 +20,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+sys.dont_write_bytecode = True
+
 from step5_audit_log import log_step5_event
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -178,6 +180,7 @@ def ensure_clean_and_base(base: str) -> None:
         line
         for line in status_lines
         if "order-api/audit/intake-chat.jsonl" not in line
+        and "__pycache__/" not in line
     ]
     if non_audit_changes:
         raise RuntimeError("Working tree is not clean; aborting automated issue execution.")
