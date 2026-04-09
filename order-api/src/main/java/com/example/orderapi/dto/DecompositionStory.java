@@ -22,10 +22,10 @@ public class DecompositionStory {
     private String description;
 
     @JsonProperty("acceptanceCriteria")
-    private List<String> acceptanceCriteria;
+    private List<@NotNull(message = "acceptanceCriteria entries must be non-null") String> acceptanceCriteria;
 
     @JsonProperty("affectedComponents")
-    private List<String> affectedComponents;
+    private List<@NotNull(message = "affectedComponents entries must be non-null") String> affectedComponents;
 
     @JsonProperty("estimatedSize")
     private String estimatedSize;
