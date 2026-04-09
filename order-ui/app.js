@@ -410,12 +410,19 @@ function updateIntakeResult(response) {
     state.decompositionResult = null;
 }
 
+function hasCompleteIntakeResult(result) {
+    return result?.intakeComplete
+        && typeof result.requestId === "string"
+        && result.requestId.length > 0
+        && !!result.structuredData;
+}
+
 async function handleDecomposeClick() {
     if (state.decompositionLoading) {
         return;
     }
     const intakeResult = state.intakeResult;
-    if (!intakeResult?.requestId || !intakeResult?.structuredData) {
+    if (!hasCompleteIntakeResult(intakeResult)) {
         showBanner("Complete intake first, then run decomposition.", "error");
         return;
     }
@@ -538,10 +545,7 @@ function renderDecompositionUI() {
         state.decompositionElementsWarningShown = true;
     }
 
-    const canDecompose = state.intakeResult?.intakeComplete
-        && typeof state.intakeResult.requestId === "string"
-        && state.intakeResult.requestId.length > 0
-        && !!state.intakeResult.structuredData;
+    const canDecompose = hasCompleteIntakeResult(state.intakeResult);
 
     if (intakeDecomposeActions) {
         intakeDecomposeActions.classList.toggle("hidden", !canDecompose);
