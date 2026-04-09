@@ -3,6 +3,7 @@ package com.example.orderapi.dto;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 
 import java.util.List;
 
@@ -15,6 +16,7 @@ public class DecompositionResponse {
     private boolean decompositionComplete;
 
     @JsonProperty("stories")
+    @NotNull(message = "stories is required")
     @Valid
     private List<DecompositionStory> stories;
 
