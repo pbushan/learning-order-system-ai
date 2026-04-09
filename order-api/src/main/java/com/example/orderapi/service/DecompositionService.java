@@ -94,8 +94,8 @@ public class DecompositionService {
                     requestId,
                     structuredData != null ? structuredData : new StructuredIntakeData(),
                     decompositionModel,
-                    response.isDecompositionComplete(),
-                    response.getStories(),
+                    response != null ? response.isDecompositionComplete() : false,
+                    response != null ? response.getStories() : Collections.emptyList(),
                     error
             );
         } catch (Exception ignored) {
