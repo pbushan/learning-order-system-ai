@@ -92,11 +92,11 @@ public class DecompositionController {
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest()
                     .header("X-Error-Message", ex.getMessage())
-                    .body(githubFailureResponse(request));
+                    .body(githubFailureResponse(request, ex.getMessage()));
         } catch (IllegalStateException ex) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .header("X-Error-Message", ex.getMessage())
-                    .body(githubFailureResponse(request));
+                    .body(githubFailureResponse(request, ex.getMessage()));
         }
     }
 
@@ -123,11 +123,12 @@ public class DecompositionController {
         return normalized;
     }
 
-    private GitHubIssueCreateResponse githubFailureResponse(DecompositionRequest request) {
+    private GitHubIssueCreateResponse githubFailureResponse(DecompositionRequest request, String error) {
         GitHubIssueCreateResponse response = new GitHubIssueCreateResponse();
         response.setRequestId(resolveRequestId(null, request));
         response.setIssuesCreated(false);
         response.setIssues(Collections.emptyList());
+        response.setError(error != null ? error : "");
         return response;
     }
 
@@ -152,7 +153,7 @@ public class DecompositionController {
         );
         return ResponseEntity.status(status)
                 .header("X-Error-Message", errorMessage)
-                .body(githubFailureResponse(request));
+                .body(githubFailureResponse(request, errorMessage));
     }
 
     private void safeGitHubCreationAudit(String requestId,

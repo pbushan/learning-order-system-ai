@@ -17,6 +17,9 @@ public class GitHubIssueCreateResponse {
     @JsonProperty("issues")
     private List<GitHubIssueSummary> issues;
 
+    @JsonProperty("error")
+    private String error;
+
     public String getRequestId() {
         return requestId;
     }
@@ -39,5 +42,13 @@ public class GitHubIssueCreateResponse {
 
     public void setIssues(List<GitHubIssueSummary> issues) {
         this.issues = issues;
+    }
+
+    public String getError() {
+        return error;
+    }
+
+    public void setError(String error) {
+        this.error = error;
     }
 }

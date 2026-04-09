@@ -30,20 +30,21 @@ public class GitHubIssueController {
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest()
                     .header("X-Error-Message", ex.getMessage())
-                    .body(failureResponse(request));
+                    .body(failureResponse(request, ex.getMessage()));
         } catch (IllegalStateException ex) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .header("X-Error-Message", ex.getMessage())
-                    .body(failureResponse(request));
+                    .body(failureResponse(request, ex.getMessage()));
         }
     }
 
-    private GitHubIssueCreateResponse failureResponse(GitHubIssueCreateRequest request) {
+    private GitHubIssueCreateResponse failureResponse(GitHubIssueCreateRequest request, String error) {
         GitHubIssueCreateResponse response = new GitHubIssueCreateResponse();
         String requestId = request != null ? request.getRequestId() : null;
         response.setRequestId(StringUtils.hasText(requestId) ? requestId.trim() : "unknown-request");
         response.setIssuesCreated(false);
         response.setIssues(Collections.emptyList());
+        response.setError(error != null ? error : "");
         return response;
     }
 }
