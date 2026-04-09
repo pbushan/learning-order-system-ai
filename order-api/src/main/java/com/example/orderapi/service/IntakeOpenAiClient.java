@@ -153,7 +153,7 @@ public class IntakeOpenAiClient {
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("requestId", requestId);
-        payload.put("structuredData", structuredData != null ? structuredData : new StructuredIntakeData());
+        payload.put("structuredData", structuredData);
         try {
             requestMessages.add(Map.of("role", "user", "content", objectMapper.writeValueAsString(payload)));
         } catch (Exception ex) {
@@ -255,6 +255,10 @@ public class IntakeOpenAiClient {
                 log.warn("OpenAI decomposition JSON extraction failed for configured chat response shape");
                 return fallbackDecompositionResult(fallbackRequestId);
             }
+            if (!isDecompositionPayload(decompositionJson)) {
+                log.warn("OpenAI decomposition JSON does not match expected payload shape");
+                return fallbackDecompositionResult(fallbackRequestId);
+            }
 
             DecompositionResponse response = new DecompositionResponse();
             String resolvedRequestId = blankToNull(decompositionJson.path("requestId").asText(null));
@@ -324,6 +328,10 @@ public class IntakeOpenAiClient {
         prSafety.setTarget(target != null ? target : "under-30000-char-patch");
         prSafety.setNotes(blankToEmpty(node.path("notes").asText(null)));
         return prSafety;
+    }
+
+    private boolean isDecompositionPayload(JsonNode node) {
+        return node.isObject() && node.has("decompositionComplete") && node.has("stories");
     }
 
     private String normalizeRole(String role) {
