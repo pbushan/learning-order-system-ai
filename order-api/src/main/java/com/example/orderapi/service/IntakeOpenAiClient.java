@@ -34,6 +34,7 @@ public class IntakeOpenAiClient {
     static final int MAX_CONTENT_CHARS = 2000;
     static final int TRUNCATION_BOUNDARY_WINDOW = 80;
     private static final int MAX_DECOMPOSITION_PAYLOAD_BYTES = 12000;
+    private static final int MAX_DECOMPOSITION_REQUEST_BYTES = 20000;
     private static final int MAX_DECOMPOSITION_RESPONSE_BYTES = 120000;
     private static final int MAX_DECOMPOSITION_FIELD_CHARS = 2000;
     private static final int MAX_DECOMPOSITION_COMPONENTS = 20;
@@ -209,6 +210,11 @@ public class IntakeOpenAiClient {
         body.put("response_format", Map.of("type", "json_object"));
 
         try {
+            int requestBytes = objectMapper.writeValueAsBytes(body).length;
+            if (requestBytes > MAX_DECOMPOSITION_REQUEST_BYTES) {
+                log.warn("Decomposition request too large for requestId={}, bytes={}", requestId, requestBytes);
+                return fallbackDecompositionResult(requestId);
+            }
             String raw = restClient.post()
                     .uri("/chat/completions")
                     .body(body)
@@ -384,11 +390,15 @@ public class IntakeOpenAiClient {
             if (!messageNode.isObject()) {
                 continue;
             }
-            JsonNode fromContent = parseJsonFromContentNode(messageNode.path("content"));
+            JsonNode contentNode = messageNode.path("content");
+            if (contentNode.isObject() && isDecompositionPayload(contentNode)) {
+                return contentNode;
+            }
+            JsonNode fromContent = parseJsonFromContentNode(contentNode);
             if (fromContent != null && fromContent.isObject() && isDecompositionPayload(fromContent)) {
                 return fromContent;
             }
-            JsonNode fromText = parseJsonFromContent(messageNode.path("content").asText(""));
+            JsonNode fromText = parseJsonFromContent(contentNode.asText(""));
             if (fromText != null && fromText.isObject() && isDecompositionPayload(fromText)) {
                 return fromText;
             }
@@ -405,22 +415,22 @@ public class IntakeOpenAiClient {
             return false;
         }
         JsonNode completionNode = node.path("decompositionComplete");
-        if (completionNode.isMissingNode()
-                || completionNode.isNull()
-                || (!completionNode.isBoolean() && !completionNode.isTextual())) {
+        if (!completionNode.isMissingNode()
+                && !completionNode.isNull()
+                && !completionNode.isBoolean()
+                && !completionNode.isTextual()
+                && !completionNode.isNumber()) {
             return false;
         }
         JsonNode storiesNode = node.path("stories");
-        if (!storiesNode.isArray()) {
+        if (!storiesNode.isMissingNode() && !storiesNode.isNull() && !storiesNode.isArray()) {
             return false;
         }
-        boolean decompositionComplete = toBoolean(completionNode);
-        if (!decompositionComplete) {
-            return true;
-        }
-        for (JsonNode storyNode : storiesNode) {
-            if (!isValidDecompositionStoryNode(storyNode)) {
-                return false;
+        if (storiesNode.isArray()) {
+            for (JsonNode storyNode : storiesNode) {
+                if (!storyNode.isObject()) {
+                    return false;
+                }
             }
         }
         return true;
@@ -503,6 +513,9 @@ public class IntakeOpenAiClient {
         if (node.isTextual()) {
             String value = blankToNull(node.asText(null));
             return "true".equalsIgnoreCase(value);
+        }
+        if (node.isNumber()) {
+            return node.asInt(0) != 0;
         }
         return false;
     }
