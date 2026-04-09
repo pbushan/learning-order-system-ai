@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.nio.charset.StandardCharsets;
 
 @Service
 public class IntakeOpenAiClient {
@@ -164,8 +165,9 @@ public class IntakeOpenAiClient {
         payload.put("structuredData", structuredData);
         try {
             String payloadJson = objectMapper.writeValueAsString(payload);
-            if (payloadJson.length() > MAX_DECOMPOSITION_PAYLOAD_CHARS) {
-                log.warn("Decomposition payload too large for requestId={}, size={}", requestId, payloadJson.length());
+            int payloadBytes = payloadJson.getBytes(StandardCharsets.UTF_8).length;
+            if (payloadBytes > MAX_DECOMPOSITION_PAYLOAD_CHARS) {
+                log.warn("Decomposition payload too large for requestId={}, bytes={}", requestId, payloadBytes);
                 return fallbackDecompositionResult(requestId);
             }
             requestMessages.add(Map.of("role", "user", "content", payloadJson));
@@ -297,9 +299,9 @@ public class IntakeOpenAiClient {
 
     private DecompositionStory toDecompositionStory(JsonNode node) {
         DecompositionStory story = new DecompositionStory();
-        story.setStoryId(blankToEmpty(node.path("storyId").asText(null)));
-        story.setTitle(blankToEmpty(node.path("title").asText(null)));
-        story.setDescription(blankToEmpty(node.path("description").asText(null)));
+        story.setStoryId(blankToNull(node.path("storyId").asText(null)));
+        story.setTitle(blankToNull(node.path("title").asText(null)));
+        story.setDescription(blankToNull(node.path("description").asText(null)));
         story.setEstimatedSize(blankToNull(node.path("estimatedSize").asText(null)));
 
         List<String> acceptanceCriteria = new ArrayList<>();
@@ -343,37 +345,13 @@ public class IntakeOpenAiClient {
     }
 
     private JsonNode extractDecompositionJson(JsonNode root) {
-        JsonNode extracted = extractStructuredJson(root);
-        if (extracted != null && extracted.isObject()) {
-            return extracted;
-        }
-
-        JsonNode choices = root.path("choices");
-        if (!choices.isArray() || choices.isEmpty()) {
-            return null;
-        }
-        JsonNode messageNode = root.path("choices").path(0).path("message");
-        if (messageNode == null || messageNode.isMissingNode() || messageNode.isNull() || !messageNode.isObject()) {
-            return null;
-        }
-        JsonNode parsedNode = messageNode.path("parsed");
-        if (parsedNode != null && parsedNode.isObject()) {
-            return parsedNode;
-        }
-        JsonNode contentNode = messageNode.path("content");
-        JsonNode parsed = parseJsonFromContentNode(contentNode);
-        if (parsed != null) {
-            return parsed;
-        }
-        JsonNode fromText = parseJsonFromContent(messageNode.path("content").asText(""));
-        if (fromText != null) {
-            return fromText;
-        }
-        return null;
+        return extractStructuredJson(root);
     }
 
     private boolean isDecompositionPayload(JsonNode node) {
-        return node.isObject();
+        return node.isObject()
+                && node.path("decompositionComplete").isBoolean()
+                && node.path("stories").isArray();
     }
 
     private String normalizeRole(String role) {
