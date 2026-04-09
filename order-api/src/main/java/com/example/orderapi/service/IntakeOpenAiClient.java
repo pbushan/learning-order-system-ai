@@ -32,6 +32,7 @@ public class IntakeOpenAiClient {
     static final int MAX_HISTORY_MESSAGES = Math.max(0, MAX_TOTAL_MESSAGES - 1);
     static final int MAX_CONTENT_CHARS = 2000;
     static final int TRUNCATION_BOUNDARY_WINDOW = 80;
+    private static final int MAX_DECOMPOSITION_PAYLOAD_CHARS = 12000;
     private static final String SYSTEM_PROMPT = "You are a product intake assistant. Classify the request as bug or feature. "
             + "Ask only minimal clarifying questions. Stop when enough information is collected. "
             + "Return valid JSON only with keys: reply, intakeComplete, structuredData. "
@@ -144,24 +145,32 @@ public class IntakeOpenAiClient {
     }
 
     public DecompositionResponse decompose(String requestId, StructuredIntakeData structuredData) {
+        String safeRequestId = blankToEmpty(requestId);
         if (!StringUtils.hasText(requestId)) {
-            return fallbackDecompositionResult(requestId);
+            return fallbackDecompositionResult(safeRequestId);
+        }
+        if (structuredData == null) {
+            return fallbackDecompositionResult(safeRequestId);
         }
         if (!configured || restClient == null) {
-            return fallbackDecompositionResult(requestId);
+            return fallbackDecompositionResult(safeRequestId);
         }
 
         List<Map<String, String>> requestMessages = new ArrayList<>();
         requestMessages.add(Map.of("role", "system", "content", DECOMPOSITION_SYSTEM_PROMPT));
 
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("requestId", requestId);
+        payload.put("requestId", safeRequestId);
         payload.put("structuredData", structuredData);
         try {
-            requestMessages.add(Map.of("role", "user", "content", objectMapper.writeValueAsString(payload)));
+            String payloadJson = objectMapper.writeValueAsString(payload);
+            if (payloadJson.length() > MAX_DECOMPOSITION_PAYLOAD_CHARS) {
+                return fallbackDecompositionResult(safeRequestId);
+            }
+            requestMessages.add(Map.of("role", "user", "content", payloadJson));
         } catch (Exception ex) {
             log.warn("Failed to serialize decomposition payload", ex);
-            return fallbackDecompositionResult(requestId);
+            return fallbackDecompositionResult(safeRequestId);
         }
 
         Map<String, Object> body = new LinkedHashMap<>();
@@ -176,10 +185,10 @@ public class IntakeOpenAiClient {
                     .body(body)
                     .retrieve()
                     .body(String.class);
-            return parseDecompositionResult(raw, requestId);
+            return parseDecompositionResult(raw, safeRequestId);
         } catch (Exception ex) {
             log.warn("OpenAI decomposition request failed: {}", ex.getClass().getSimpleName());
-            return fallbackDecompositionResult(requestId);
+            return fallbackDecompositionResult(safeRequestId);
         }
     }
 
@@ -333,7 +342,14 @@ public class IntakeOpenAiClient {
     }
 
     private JsonNode extractDecompositionJson(JsonNode root) {
+        JsonNode choices = root.path("choices");
+        if (!choices.isArray() || choices.isEmpty()) {
+            return null;
+        }
         JsonNode messageNode = root.path("choices").path(0).path("message");
+        if (messageNode == null || messageNode.isMissingNode() || messageNode.isNull() || !messageNode.isObject()) {
+            return null;
+        }
         JsonNode parsedNode = messageNode.path("parsed");
         if (parsedNode != null && parsedNode.isObject()) {
             return parsedNode;
@@ -347,13 +363,19 @@ public class IntakeOpenAiClient {
         if (fromText != null) {
             return fromText;
         }
-        return extractStructuredJson(root);
+        return null;
     }
 
     private boolean isDecompositionPayload(JsonNode node) {
-        return node.isObject()
-                && node.path("decompositionComplete").isBoolean()
-                && node.path("stories").isArray();
+        if (!node.isObject() || !node.path("decompositionComplete").isBoolean() || !node.path("stories").isArray()) {
+            return false;
+        }
+        for (JsonNode storyNode : node.path("stories")) {
+            if (!storyNode.isObject()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private String normalizeRole(String role) {
@@ -559,7 +581,7 @@ public class IntakeOpenAiClient {
 
     private DecompositionResponse fallbackDecompositionResult(String requestId) {
         DecompositionResponse fallback = new DecompositionResponse();
-        fallback.setRequestId(requestId);
+        fallback.setRequestId(blankToEmpty(requestId));
         fallback.setDecompositionComplete(false);
         fallback.setStories(Collections.emptyList());
         return fallback;
