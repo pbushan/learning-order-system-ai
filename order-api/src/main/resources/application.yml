@@ -37,3 +37,7 @@ app:
       model: ${app.intake.model:gpt-4.1-mini}
       max-subtasks: 5
     audit-log-path: order-api/audit/intake-chat.jsonl
+  github:
+    token: ${GITHUB_TOKEN:}
+    owner: pbushan
+    repo: learning-order-system-ai
