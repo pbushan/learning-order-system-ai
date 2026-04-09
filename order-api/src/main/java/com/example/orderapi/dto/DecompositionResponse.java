@@ -28,10 +28,6 @@ public class DecompositionResponse {
         this.requestId = requestId;
     }
 
-    public boolean getDecompositionComplete() {
-        return decompositionComplete;
-    }
-
     public boolean isDecompositionComplete() {
         return decompositionComplete;
     }
