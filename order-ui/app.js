@@ -7,7 +7,9 @@ const state = {
     lastIntakeSentAt: 0,
     intakeResult: null,
     decompositionLoading: false,
-    decompositionResult: null
+    decompositionResult: null,
+    decompositionRequestSeq: 0,
+    decompositionElementsWarningShown: false
 };
 const MAX_INTAKE_MESSAGES = 30;
 const INTAKE_REQUEST_TIMEOUT_MS = 15000;
@@ -322,6 +324,7 @@ async function handleIntakeChatSubmit(event) {
 
     state.intakeResult = null;
     state.decompositionResult = null;
+    state.decompositionRequestSeq += 1;
     state.intakeMessages.push({ role: "user", content });
     trimIntakeMessages();
     intakeChatInput.value = "";
@@ -419,6 +422,8 @@ async function handleDecomposeClick() {
 
     setDecompositionLoading(true);
     state.decompositionResult = null;
+    const requestSeq = state.decompositionRequestSeq + 1;
+    state.decompositionRequestSeq = requestSeq;
     renderDecompositionUI();
 
     try {
@@ -433,6 +438,9 @@ async function handleDecomposeClick() {
         if (!response || !Array.isArray(response.stories)) {
             throw new Error("Invalid decomposition response");
         }
+        if (requestSeq !== state.decompositionRequestSeq) {
+            return;
+        }
 
         state.decompositionResult = {
             requestId: response.requestId || intakeResult.requestId,
@@ -440,6 +448,9 @@ async function handleDecomposeClick() {
             stories: response.stories
         };
     } catch (error) {
+        if (requestSeq !== state.decompositionRequestSeq) {
+            return;
+        }
         console.error("Decomposition request failed", error);
         showBanner(resolveDecompositionFallbackMessage(error), "error");
         state.decompositionResult = {
@@ -522,6 +533,11 @@ function setDecompositionLoading(isLoading) {
 }
 
 function renderDecompositionUI() {
+    if ((!intakeDecomposeActions || !intakeDecomposeButton || !intakeDecomposition || !intakeDecompositionList) && !state.decompositionElementsWarningShown) {
+        console.warn("Decomposition UI elements are missing. Check intake decomposition element IDs.");
+        state.decompositionElementsWarningShown = true;
+    }
+
     const canDecompose = state.intakeResult?.intakeComplete
         && typeof state.intakeResult.requestId === "string"
         && state.intakeResult.requestId.length > 0
