@@ -1,21 +1,17 @@
 package com.example.orderapi.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 
 import java.util.List;
 
 public class DecompositionResponse {
     @JsonProperty("requestId")
-    @NotBlank(message = "requestId is required")
     private String requestId;
 
     @JsonProperty("decompositionComplete")
     private boolean decompositionComplete;
 
     @JsonProperty("stories")
-    @Valid
     private List<DecompositionStory> stories;
 
     public String getRequestId() {
