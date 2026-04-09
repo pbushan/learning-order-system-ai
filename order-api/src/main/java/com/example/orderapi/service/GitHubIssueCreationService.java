@@ -78,9 +78,6 @@ public class GitHubIssueCreationService {
                               List<GitHubIssueSummary> issues,
                               String error) {
         try {
-            if (fileAuditLogService == null) {
-                return;
-            }
             fileAuditLogService.logGitHubIssueCreationEntry(requestId, sourceType, stories, issues, error);
         } catch (Exception ignored) {
             // Do not fail issue creation due to audit logging.
