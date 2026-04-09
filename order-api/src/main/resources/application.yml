@@ -33,4 +33,7 @@ app:
     openai:
       api-key: ${OPENAI_API_KEY:}
     model: gpt-4.1-mini
+    decomposition:
+      model: ${app.intake.model:gpt-4.1-mini}
+      max-subtasks: 5
     audit-log-path: order-api/audit/intake-chat.jsonl
