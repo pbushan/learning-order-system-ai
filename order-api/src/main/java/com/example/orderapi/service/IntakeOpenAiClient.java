@@ -152,19 +152,20 @@ public class IntakeOpenAiClient {
     }
 
     public DecompositionResponse decompose(String requestId, StructuredIntakeData structuredData) {
+        String safeRequestId = safeRequestId(requestId);
         if (!StringUtils.hasText(requestId)) {
             log.warn("Decomposition requestId is blank; returning safe fallback");
-            return fallbackDecompositionResult(requestId);
+            return fallbackDecompositionResult(safeRequestId);
         }
         if (!isValidRequestId(requestId)) {
             log.warn("Decomposition requestId failed validation; returning safe fallback");
-            return fallbackDecompositionResult(requestId);
+            return fallbackDecompositionResult(safeRequestId);
         }
         if (structuredData == null) {
-            return fallbackDecompositionResult(requestId);
+            return fallbackDecompositionResult(safeRequestId);
         }
         if (!configured || restClient == null) {
-            return fallbackDecompositionResult(requestId);
+            return fallbackDecompositionResult(safeRequestId);
         }
 
         List<Map<String, String>> requestMessages = new ArrayList<>();
@@ -191,16 +192,11 @@ public class IntakeOpenAiClient {
                                 MAX_DECOMPOSITION_FALLBACK_COMPONENTS
                         ));
                 payloadJson = objectMapper.writeValueAsString(compactPayload);
-                payloadBytes = payloadJson.getBytes(StandardCharsets.UTF_8).length;
-            }
-            if (payloadBytes > MAX_DECOMPOSITION_PAYLOAD_BYTES) {
-                log.warn("Decomposition payload too large for requestId={}, bytes={}", requestId, payloadBytes);
-                return fallbackDecompositionResult(requestId);
             }
             requestMessages.add(Map.of("role", "user", "content", payloadJson));
         } catch (Exception ex) {
             log.warn("Failed to serialize decomposition payload", ex);
-            return fallbackDecompositionResult(requestId);
+            return fallbackDecompositionResult(safeRequestId);
         }
 
         Map<String, Object> body = new LinkedHashMap<>();
@@ -214,17 +210,17 @@ public class IntakeOpenAiClient {
             int requestBytes = requestJson.getBytes(StandardCharsets.UTF_8).length;
             if (requestBytes > MAX_DECOMPOSITION_REQUEST_BYTES) {
                 log.warn("Decomposition request too large for requestId={}, bytes={}", requestId, requestBytes);
-                return fallbackDecompositionResult(requestId);
+                return fallbackDecompositionResult(safeRequestId);
             }
             String raw = restClient.post()
                     .uri("/chat/completions")
                     .body(requestJson)
                     .retrieve()
                     .body(String.class);
-            return parseDecompositionResult(raw, requestId);
+            return parseDecompositionResult(raw, safeRequestId);
         } catch (Exception ex) {
             log.warn("OpenAI decomposition request failed: {}", ex.getClass().getSimpleName());
-            return fallbackDecompositionResult(requestId);
+            return fallbackDecompositionResult(safeRequestId);
         }
     }
 
@@ -429,20 +425,12 @@ public class IntakeOpenAiClient {
         }
         if (storiesNode.isArray()) {
             for (JsonNode storyNode : storiesNode) {
-                if (!isValidDecompositionStoryNode(storyNode)) {
+                if (!storyNode.isObject()) {
                     return false;
                 }
             }
         }
         return true;
-    }
-
-    private boolean isValidDecompositionStoryNode(JsonNode node) {
-        if (!node.isObject()) {
-            return false;
-        }
-        return StringUtils.hasText(node.path("title").asText(""))
-                && StringUtils.hasText(node.path("description").asText(""));
     }
 
     private boolean isValidRequestId(String requestId) {
@@ -613,8 +601,22 @@ public class IntakeOpenAiClient {
         try {
             return objectMapper.readTree(jsonOnly);
         } catch (Exception ex) {
+            int firstBrace = jsonOnly.indexOf('{');
+            int lastBrace = jsonOnly.lastIndexOf('}');
+            if (firstBrace >= 0 && lastBrace > firstBrace) {
+                String candidate = jsonOnly.substring(firstBrace, lastBrace + 1);
+                try {
+                    return objectMapper.readTree(candidate);
+                } catch (Exception ignored) {
+                    return null;
+                }
+            }
             return null;
         }
+    }
+
+    private String safeRequestId(String requestId) {
+        return StringUtils.hasText(requestId) ? requestId : "unknown-request";
     }
 
     private String blankToNull(String value) {
