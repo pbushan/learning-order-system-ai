@@ -345,22 +345,27 @@ public class IntakeOpenAiClient {
     }
 
     private JsonNode extractDecompositionJson(JsonNode root) {
-        JsonNode messageNode = root.path("choices").path(0).path("message");
-        JsonNode parsedNode = messageNode.path("parsed");
-        if (parsedNode != null && parsedNode.isObject()) {
-            return parsedNode;
+        JsonNode choices = root.path("choices");
+        if (!choices.isArray()) {
+            return null;
         }
-        JsonNode fromContent = parseJsonFromContentNode(messageNode.path("content"));
-        if (fromContent != null && fromContent.isObject()) {
-            return fromContent;
-        }
-        JsonNode fromText = parseJsonFromContent(messageNode.path("content").asText(""));
-        if (fromText != null && fromText.isObject()) {
-            return fromText;
-        }
-        JsonNode extracted = extractStructuredJson(root);
-        if (extracted != null && extracted.isObject()) {
-            return extracted;
+        for (JsonNode choice : choices) {
+            JsonNode messageNode = choice.path("message");
+            if (!messageNode.isObject()) {
+                continue;
+            }
+            JsonNode fromContent = parseJsonFromContentNode(messageNode.path("content"));
+            if (fromContent != null && fromContent.isObject()) {
+                return fromContent;
+            }
+            JsonNode fromText = parseJsonFromContent(messageNode.path("content").asText(""));
+            if (fromText != null && fromText.isObject()) {
+                return fromText;
+            }
+            JsonNode parsedNode = messageNode.path("parsed");
+            if (parsedNode != null && parsedNode.isObject()) {
+                return parsedNode;
+            }
         }
         return null;
     }
