@@ -13,7 +13,9 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class GitHubIssueClientService {
@@ -21,14 +23,17 @@ public class GitHubIssueClientService {
     private final String token;
     private final String owner;
     private final String repo;
+    private final FileAuditLogService fileAuditLogService;
     private final RestClient restClient;
 
     public GitHubIssueClientService(@Value("${app.github.token:}") String token,
                                     @Value("${app.github.owner:}") String owner,
-                                    @Value("${app.github.repo:}") String repo) {
+                                    @Value("${app.github.repo:}") String repo,
+                                    FileAuditLogService fileAuditLogService) {
         this.token = token;
         this.owner = owner;
         this.repo = repo;
+        this.fileAuditLogService = fileAuditLogService;
 
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(5000);
@@ -96,39 +101,65 @@ public class GitHubIssueClientService {
             throw new IllegalStateException("GitHub repository is not configured. Set app.github.owner and app.github.repo.");
         }
 
-        GitHubIssueListItem[] response = restClient.get()
-                .uri(uriBuilder -> uriBuilder
-                        .path("/repos/{owner}/{repo}/issues")
-                        .queryParam("state", "open")
-                        .queryParam("labels", "approved-for-dev")
-                        .queryParam("per_page", "100")
-                        .build(owner.trim(), repo.trim()))
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
-                .retrieve()
-                .body(GitHubIssueListItem[].class);
-
-        if (response == null || response.length == 0) {
-            return List.of();
-        }
-
         List<ApprovedGitHubIssue> issues = new ArrayList<>();
-        for (GitHubIssueListItem item : response) {
-            if (item == null || item.getPullRequest() != null) {
-                continue;
-            }
-            List<String> labels = extractLabelNames(item.getLabels());
-            if (labels.contains("ai-in-progress")) {
-                continue;
+        String error = null;
+
+        try {
+            GitHubIssueListItem[] response = restClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/repos/{owner}/{repo}/issues")
+                            .queryParam("state", "open")
+                            .queryParam("labels", "approved-for-dev")
+                            .queryParam("per_page", "100")
+                            .build(owner.trim(), repo.trim()))
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                    .retrieve()
+                    .body(GitHubIssueListItem[].class);
+
+            if (response == null || response.length == 0) {
+                return List.of();
             }
 
-            ApprovedGitHubIssue normalized = new ApprovedGitHubIssue();
-            normalized.setIssueNumber(item.getNumber());
-            normalized.setTitle(item.getTitle());
-            normalized.setBody(item.getBody());
-            normalized.setLabels(labels);
-            issues.add(normalized);
+            for (GitHubIssueListItem item : response) {
+                if (item == null || item.getPullRequest() != null) {
+                    continue;
+                }
+                List<String> labels = extractLabelNames(item.getLabels());
+                if (labels.contains("ai-in-progress")) {
+                    continue;
+                }
+
+                ApprovedGitHubIssue normalized = new ApprovedGitHubIssue();
+                normalized.setIssueNumber(item.getNumber());
+                normalized.setTitle(item.getTitle());
+                normalized.setBody(item.getBody());
+                normalized.setLabels(labels);
+                issues.add(normalized);
+            }
+            return issues;
+        } catch (RuntimeException ex) {
+            error = ex.getMessage();
+            throw ex;
+        } finally {
+            safeAuditApprovedIssueSelection(issues, error);
         }
-        return issues;
+    }
+
+    private void safeAuditApprovedIssueSelection(List<ApprovedGitHubIssue> issues, String error) {
+        try {
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("issues", issues != null ? issues : List.of());
+            metadata.put("count", issues != null ? issues.size() : 0);
+            fileAuditLogService.logStep5LifecycleEntry(
+                    "approved-issue-selection",
+                    "",
+                    null,
+                    metadata,
+                    error
+            );
+        } catch (Exception ignored) {
+            // Do not fail issue discovery due to audit logging.
+        }
     }
 
     private String buildIssueBody(DecompositionStory story) {
