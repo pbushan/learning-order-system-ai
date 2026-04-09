@@ -24,11 +24,13 @@ public class DecompositionStory {
     @JsonProperty("acceptanceCriteria")
     @NotNull(message = "acceptanceCriteria is required")
     @Size(min = 1, message = "acceptanceCriteria must contain at least one item")
+    @Valid
     private List<@NotBlank(message = "acceptanceCriteria entries must be non-blank") String> acceptanceCriteria;
 
     @JsonProperty("affectedComponents")
     @NotNull(message = "affectedComponents is required")
     @Size(min = 1, message = "affectedComponents must contain at least one item")
+    @Valid
     private List<@NotBlank(message = "affectedComponents entries must be non-blank") String> affectedComponents;
 
     @JsonProperty("estimatedSize")
