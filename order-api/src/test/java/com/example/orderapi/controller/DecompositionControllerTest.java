@@ -82,6 +82,47 @@ class DecompositionControllerTest {
         verify(issueCreationService, never()).createFromDecomposition(any(GitHubIssueCreateRequest.class));
     }
 
+    @Test
+    void completeToGitHub_returnsBadGatewayWhenIssueServiceReturnsNull() {
+        DecompositionService decompositionService = mock(DecompositionService.class);
+        GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
+        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService);
+
+        DecompositionResponse decompositionResponse = new DecompositionResponse();
+        decompositionResponse.setRequestId("req-4");
+        decompositionResponse.setDecompositionComplete(true);
+        decompositionResponse.setStories(List.of(sampleStory()));
+        when(decompositionService.decompose(any(DecompositionRequest.class))).thenReturn(decompositionResponse);
+        when(issueCreationService.createFromDecomposition(any(GitHubIssueCreateRequest.class))).thenReturn(null);
+
+        ResponseEntity<GitHubIssueCreateResponse> response = controller.completeToGitHub(sampleDecompositionRequest("req-4", "feature"));
+
+        assertEquals(HttpStatus.BAD_GATEWAY, response.getStatusCode());
+        assertEquals("req-4", response.getBody().getRequestId());
+        assertFalse(response.getBody().isIssuesCreated());
+    }
+
+    @Test
+    void completeToGitHub_returnsInternalServerErrorWhenIssueServiceThrows() {
+        DecompositionService decompositionService = mock(DecompositionService.class);
+        GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
+        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService);
+
+        DecompositionResponse decompositionResponse = new DecompositionResponse();
+        decompositionResponse.setRequestId("req-5");
+        decompositionResponse.setDecompositionComplete(true);
+        decompositionResponse.setStories(List.of(sampleStory()));
+        when(decompositionService.decompose(any(DecompositionRequest.class))).thenReturn(decompositionResponse);
+        when(issueCreationService.createFromDecomposition(any(GitHubIssueCreateRequest.class)))
+                .thenThrow(new IllegalStateException("token missing"));
+
+        ResponseEntity<GitHubIssueCreateResponse> response = controller.completeToGitHub(sampleDecompositionRequest("req-5", "feature"));
+
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
+        assertEquals("req-5", response.getBody().getRequestId());
+        assertFalse(response.getBody().isIssuesCreated());
+    }
+
     private DecompositionRequest sampleDecompositionRequest(String requestId, String type) {
         StructuredIntakeData data = new StructuredIntakeData();
         data.setType(type);

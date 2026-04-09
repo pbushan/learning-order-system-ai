@@ -49,7 +49,13 @@ public class DecompositionController {
             issueRequest.setRequestId(decomposition.getRequestId());
             issueRequest.setSourceType(resolveSourceType(request));
             issueRequest.setStories(decomposition.getStories());
-            return ResponseEntity.ok(gitHubIssueCreationService.createFromDecomposition(issueRequest));
+            GitHubIssueCreateResponse issueResponse = gitHubIssueCreationService.createFromDecomposition(issueRequest);
+            if (issueResponse == null || issueResponse.getIssues() == null) {
+                return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                        .header("X-Error-Message", "GitHub issue creation returned an invalid response.")
+                        .body(githubFailureResponse(request));
+            }
+            return ResponseEntity.ok(issueResponse);
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest()
                     .header("X-Error-Message", ex.getMessage())
