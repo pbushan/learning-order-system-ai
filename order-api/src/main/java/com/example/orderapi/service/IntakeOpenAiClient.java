@@ -144,6 +144,9 @@ public class IntakeOpenAiClient {
     }
 
     public DecompositionResponse decompose(String requestId, StructuredIntakeData structuredData) {
+        if (!StringUtils.hasText(requestId)) {
+            return fallbackDecompositionResult(requestId);
+        }
         if (!configured || restClient == null) {
             return fallbackDecompositionResult(requestId);
         }
@@ -331,16 +334,26 @@ public class IntakeOpenAiClient {
 
     private JsonNode extractDecompositionJson(JsonNode root) {
         JsonNode messageNode = root.path("choices").path(0).path("message");
+        JsonNode parsedNode = messageNode.path("parsed");
+        if (parsedNode != null && parsedNode.isObject()) {
+            return parsedNode;
+        }
         JsonNode contentNode = messageNode.path("content");
         JsonNode parsed = parseJsonFromContentNode(contentNode);
         if (parsed != null) {
             return parsed;
         }
-        return parseJsonFromContent(messageNode.path("content").asText(""));
+        JsonNode fromText = parseJsonFromContent(messageNode.path("content").asText(""));
+        if (fromText != null) {
+            return fromText;
+        }
+        return extractStructuredJson(root);
     }
 
     private boolean isDecompositionPayload(JsonNode node) {
-        return node.isObject() && node.has("decompositionComplete") && node.has("stories");
+        return node.isObject()
+                && node.path("decompositionComplete").isBoolean()
+                && node.path("stories").isArray();
     }
 
     private String normalizeRole(String role) {
