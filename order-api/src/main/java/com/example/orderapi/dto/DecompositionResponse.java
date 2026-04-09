@@ -21,7 +21,6 @@ public class DecompositionResponse {
 
     @JsonProperty("stories")
     @JsonSetter(nulls = Nulls.AS_EMPTY)
-    @NotNull(message = "stories is required")
     @Valid
     private List<DecompositionStory> stories = new ArrayList<>();
 
@@ -33,7 +32,7 @@ public class DecompositionResponse {
         this.requestId = requestId;
     }
 
-    public Boolean isDecompositionComplete() {
+    public Boolean getDecompositionComplete() {
         return decompositionComplete;
     }
 
