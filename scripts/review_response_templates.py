@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 
+from step6_audit_log import log_step6_event
+
 
 DEFERRAL_TEXT = (
     "Deferring this for now. This repository is a portfolio project and this iteration is "
@@ -43,11 +45,20 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.mode == "addressed":
-        print(addressed_reply(args.summary))
+        response = addressed_reply(args.summary)
+        print(response)
+        log_step6_event("review-comment-addressed", metadata={"summary": args.summary})
     elif args.mode == "deferred":
-        print(deferred_reply())
+        response = deferred_reply()
+        print(response)
+        log_step6_event("review-comment-deferred", metadata={"reason": "portfolio-scope-non-blocking"})
     else:
-        print(ready_to_merge_note(args.fixed, args.deferred))
+        response = ready_to_merge_note(args.fixed, args.deferred)
+        print(response)
+        log_step6_event(
+            "ready-to-merge-note-posted",
+            metadata={"fixed": args.fixed, "deferred": args.deferred},
+        )
     return 0
 
 
