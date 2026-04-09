@@ -7,10 +7,7 @@ const state = {
     lastIntakeSentAt: 0,
     intakeResult: null,
     decompositionLoading: false,
-    decompositionResult: null,
-    githubIssueCreationLoading: false,
     githubIssueCreationResult: null,
-    decompositionRequestSeq: 0,
     decompositionElementsWarningShown: false
 };
 const MAX_INTAKE_MESSAGES = 30;
@@ -36,12 +33,8 @@ const intakeChatHistory = document.getElementById("intake-chat-history");
 const intakeChatInput = document.getElementById("intake-chat-input");
 const intakeChatSend = document.getElementById("intake-chat-send");
 const intakeChatLoading = document.getElementById("intake-chat-loading");
-const intakeDecomposeActions = document.getElementById("intake-decompose-actions");
-const intakeDecomposeButton = document.getElementById("intake-decompose-button");
+const intakeWorkflowStatus = document.getElementById("intake-workflow-status");
 const intakeDecomposeLoading = document.getElementById("intake-decompose-loading");
-const intakeGithubActions = document.getElementById("intake-github-actions");
-const intakeGithubCreateButton = document.getElementById("intake-github-create-button");
-const intakeGithubCreateLoading = document.getElementById("intake-github-create-loading");
 const intakeDecomposition = document.getElementById("intake-decomposition");
 const intakeDecompositionList = document.getElementById("intake-decomposition-list");
 let tabButtons = [];
@@ -64,15 +57,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (intakeChatInput) {
         intakeChatInput.addEventListener("keydown", handleIntakeInputKeydown);
     }
-    if (intakeDecomposeButton) {
-        intakeDecomposeButton.addEventListener("click", handleDecomposeClick);
-    }
-    if (intakeGithubCreateButton) {
-        intakeGithubCreateButton.addEventListener("click", handleCreateGithubIssuesClick);
-    }
     setIntakeChatLoading(false);
     setDecompositionLoading(false);
-    setGithubIssueCreationLoading(false);
     renderIntakeChatHistory();
     renderDecompositionUI();
     initializeTabs();
@@ -332,9 +318,7 @@ async function handleIntakeChatSubmit(event) {
     }
 
     state.intakeResult = null;
-    state.decompositionResult = null;
     state.githubIssueCreationResult = null;
-    state.decompositionRequestSeq += 1;
     state.intakeMessages.push({ role: "user", content });
     trimIntakeMessages();
     intakeChatInput.value = "";
@@ -359,6 +343,9 @@ async function handleIntakeChatSubmit(event) {
         const reply = response.reply.trim();
         state.intakeMessages.push({ role: "assistant", content: reply });
         updateIntakeResult(response);
+        if (hasCompleteIntakeResult(state.intakeResult)) {
+            await runAutomatedIntakeFlow(state.intakeResult);
+        }
         trimIntakeMessages();
     } catch (error) {
         const fallbackMessage = resolveIntakeFallbackMessage(error);
@@ -369,7 +356,6 @@ async function handleIntakeChatSubmit(event) {
             content: fallbackMessage
         });
         state.intakeResult = null;
-        state.decompositionResult = null;
         trimIntakeMessages();
     } finally {
         setIntakeChatLoading(false);
@@ -417,7 +403,6 @@ function updateIntakeResult(response) {
         return;
     }
     state.intakeResult = null;
-    state.decompositionResult = null;
 }
 
 function hasCompleteIntakeResult(result) {
@@ -427,127 +412,36 @@ function hasCompleteIntakeResult(result) {
         && !!result.structuredData;
 }
 
-async function handleDecomposeClick() {
-    if (state.decompositionLoading) {
-        return;
-    }
-    const intakeResult = state.intakeResult;
-    if (!hasCompleteIntakeResult(intakeResult)) {
-        showBanner("Complete intake first, then run decomposition.", "error");
-        return;
-    }
-
+async function runAutomatedIntakeFlow(intakeResult) {
     setDecompositionLoading(true);
-    state.decompositionResult = null;
     state.githubIssueCreationResult = null;
-    const requestSeq = state.decompositionRequestSeq + 1;
-    state.decompositionRequestSeq = requestSeq;
     renderDecompositionUI();
-
     try {
-        const response = await apiRequestWithTimeout("/api/intake/decompose", {
+        const response = await apiRequestWithTimeout("/api/intake/complete-to-github", {
             method: "POST",
             body: JSON.stringify({
                 requestId: intakeResult.requestId,
                 structuredData: intakeResult.structuredData
             })
         }, INTAKE_REQUEST_TIMEOUT_MS);
-
-        if (!response || !Array.isArray(response.stories)) {
-            throw new Error("Invalid decomposition response");
-        }
-        if (requestSeq !== state.decompositionRequestSeq) {
-            return;
-        }
-
-        state.decompositionResult = {
-            requestId: response.requestId || intakeResult.requestId,
-            decompositionComplete: response.decompositionComplete === true,
-            sourceType: normalizeSourceType(intakeResult?.structuredData?.type),
-            stories: response.stories
-        };
-    } catch (error) {
-        if (requestSeq !== state.decompositionRequestSeq) {
-            return;
-        }
-        console.error("Decomposition request failed", error);
-        showBanner(resolveDecompositionFallbackMessage(error), "error");
-        state.decompositionResult = {
-            requestId: intakeResult.requestId,
-            decompositionComplete: false,
-            sourceType: normalizeSourceType(intakeResult?.structuredData?.type),
-            stories: []
-        };
-    } finally {
-        setDecompositionLoading(false);
-        renderDecompositionUI();
-    }
-}
-
-function resolveDecompositionFallbackMessage(error) {
-    if (error?.message === "Invalid decomposition response") {
-        return "Decomposition returned an unexpected response. Please try again.";
-    }
-    if (error?.message === "Intake request timed out") {
-        return "Decomposition timed out. Please try again.";
-    }
-    return "I could not reach decomposition service right now. Please try again shortly.";
-}
-
-function normalizeSourceType(value) {
-    const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
-    return normalized === "bug" || normalized === "feature" ? normalized : "";
-}
-
-function hasGitHubIssueCreationInput(result) {
-    return !!result
-        && result.decompositionComplete === true
-        && typeof result.requestId === "string"
-        && result.requestId.trim().length > 0
-        && typeof result.sourceType === "string"
-        && (result.sourceType === "bug" || result.sourceType === "feature")
-        && Array.isArray(result.stories)
-        && result.stories.length > 0;
-}
-
-async function handleCreateGithubIssuesClick() {
-    if (state.githubIssueCreationLoading) {
-        return;
-    }
-    const decompositionResult = state.decompositionResult;
-    if (!hasGitHubIssueCreationInput(decompositionResult)) {
-        showBanner("Run decomposition first, then create GitHub issues.", "error");
-        return;
-    }
-
-    setGithubIssueCreationLoading(true);
-    state.githubIssueCreationResult = null;
-    renderDecompositionUI();
-
-    try {
-        const response = await apiRequestWithTimeout("/api/github/issues/create-from-decomposition", {
-            method: "POST",
-            body: JSON.stringify({
-                requestId: decompositionResult.requestId,
-                sourceType: decompositionResult.sourceType,
-                stories: decompositionResult.stories
-            })
-        }, INTAKE_REQUEST_TIMEOUT_MS);
         if (!response || !Array.isArray(response.issues)) {
             throw new Error("Invalid GitHub issue creation response");
         }
-
         state.githubIssueCreationResult = {
+            requestId: response.requestId || intakeResult.requestId,
+            issuesCreated: response.issuesCreated === true,
             issues: response.issues
         };
     } catch (error) {
-        console.error("GitHub issue creation failed", error);
+        console.error("Automated intake flow failed", error);
         showBanner(resolveGithubIssueCreationFallbackMessage(error), "error");
         state.githubIssueCreationResult = {
+            requestId: intakeResult.requestId,
+            issuesCreated: false,
             issues: []
         };
     } finally {
-        setGithubIssueCreationLoading(false);
+        setDecompositionLoading(false);
         renderDecompositionUI();
     }
 }
@@ -612,40 +506,21 @@ function setIntakeChatLoading(isLoading) {
 
 function setDecompositionLoading(isLoading) {
     state.decompositionLoading = isLoading;
-    if (intakeDecomposeButton) {
-        intakeDecomposeButton.disabled = isLoading;
-    }
     if (intakeDecomposeLoading) {
         intakeDecomposeLoading.classList.toggle("hidden", !isLoading);
     }
-}
-
-function setGithubIssueCreationLoading(isLoading) {
-    state.githubIssueCreationLoading = isLoading;
-    if (intakeGithubCreateButton) {
-        intakeGithubCreateButton.disabled = isLoading;
-    }
-    if (intakeGithubCreateLoading) {
-        intakeGithubCreateLoading.classList.toggle("hidden", !isLoading);
+    if (intakeWorkflowStatus) {
+        intakeWorkflowStatus.classList.toggle("hidden", !isLoading);
     }
 }
 
 function renderDecompositionUI() {
-    if ((!intakeDecomposeActions || !intakeDecomposeButton || !intakeDecomposition || !intakeDecompositionList || !intakeGithubActions) && !state.decompositionElementsWarningShown) {
-        console.warn("Decomposition UI elements are missing. Check intake decomposition element IDs.");
+    if ((!intakeDecomposition || !intakeDecompositionList) && !state.decompositionElementsWarningShown) {
+        console.warn("Intake result UI elements are missing. Check intake decomposition element IDs.");
         state.decompositionElementsWarningShown = true;
     }
-
-    const canDecompose = hasCompleteIntakeResult(state.intakeResult);
-
-    if (intakeDecomposeActions) {
-        intakeDecomposeActions.classList.toggle("hidden", !canDecompose);
-    }
-    if (intakeGithubActions) {
-        intakeGithubActions.classList.toggle("hidden", !hasGitHubIssueCreationInput(state.decompositionResult));
-    }
     if (intakeDecomposition) {
-        intakeDecomposition.classList.toggle("hidden", !state.decompositionResult);
+        intakeDecomposition.classList.toggle("hidden", !state.decompositionLoading && !state.githubIssueCreationResult);
     }
     if (!intakeDecompositionList) {
         return;
@@ -655,73 +530,24 @@ function renderDecompositionUI() {
         intakeDecompositionList.removeChild(intakeDecompositionList.firstChild);
     }
 
-    if (!state.decompositionResult) {
+    if (state.decompositionLoading) {
+        const processing = document.createElement("p");
+        processing.className = "intake-decomposition-empty";
+        processing.textContent = "Intake completed. Creating GitHub issue(s) from decomposed stories...";
+        intakeDecompositionList.appendChild(processing);
         return;
     }
-    if (!Array.isArray(state.decompositionResult.stories) || !state.decompositionResult.stories.length) {
+
+    if (!state.githubIssueCreationResult) {
+        return;
+    }
+    if (!Array.isArray(state.githubIssueCreationResult.issues) || !state.githubIssueCreationResult.issues.length) {
         const empty = document.createElement("p");
         empty.className = "intake-decomposition-empty";
-        empty.textContent = "No stories returned yet.";
+        empty.textContent = "Intake completed, but no GitHub issues were created.";
         intakeDecompositionList.appendChild(empty);
-        return;
     }
-
-    state.decompositionResult.stories.forEach((story, index) => {
-        const card = document.createElement("article");
-        card.className = "intake-story-card";
-
-        const title = document.createElement("h4");
-        title.textContent = story?.title || `Story ${index + 1}`;
-        card.appendChild(title);
-
-        const description = document.createElement("p");
-        description.textContent = story?.description || "No description";
-        card.appendChild(description);
-
-        card.appendChild(createStoryList("Acceptance Criteria", story?.acceptanceCriteria));
-        card.appendChild(createStoryList("Affected Components", story?.affectedComponents));
-
-        const size = document.createElement("p");
-        size.className = "intake-story-meta";
-        size.textContent = `Estimated size: ${story?.estimatedSize || "n/a"}`;
-        card.appendChild(size);
-
-        const safety = document.createElement("p");
-        safety.className = "intake-story-meta";
-        safety.textContent = `PR safety notes: ${story?.prSafety?.notes || "n/a"}`;
-        card.appendChild(safety);
-
-        intakeDecompositionList.appendChild(card);
-    });
-
-    if (state.githubIssueCreationResult) {
-        intakeDecompositionList.appendChild(createGithubIssueResultsElement(state.githubIssueCreationResult));
-    }
-}
-
-function createStoryList(label, values) {
-    const wrapper = document.createElement("div");
-    wrapper.className = "intake-story-list";
-    const heading = document.createElement("p");
-    heading.className = "intake-story-list-label";
-    heading.textContent = label;
-    wrapper.appendChild(heading);
-
-    const list = document.createElement("ul");
-    const items = Array.isArray(values) ? values.filter((item) => typeof item === "string" && item.trim()) : [];
-    if (!items.length) {
-        const empty = document.createElement("li");
-        empty.textContent = "n/a";
-        list.appendChild(empty);
-    } else {
-        items.forEach((item) => {
-            const li = document.createElement("li");
-            li.textContent = item;
-            list.appendChild(li);
-        });
-    }
-    wrapper.appendChild(list);
-    return wrapper;
+    intakeDecompositionList.appendChild(createGithubIssueResultsElement(state.githubIssueCreationResult));
 }
 
 function createGithubIssueResultsElement(result) {
