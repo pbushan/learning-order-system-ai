@@ -2,7 +2,6 @@ package com.example.orderapi.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 
 import java.util.List;
@@ -41,13 +40,5 @@ public class DecompositionResponse {
 
     public void setStories(List<DecompositionStory> stories) {
         this.stories = stories;
-    }
-
-    @AssertTrue(message = "stories must be present and non-empty when decompositionComplete is true")
-    public boolean isStoriesConsistentWithCompletion() {
-        if (!decompositionComplete) {
-            return true;
-        }
-        return stories != null && !stories.isEmpty();
     }
 }
