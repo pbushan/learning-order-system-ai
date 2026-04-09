@@ -33,7 +33,7 @@ public class IntakeOpenAiClient {
     static final int MAX_HISTORY_MESSAGES = Math.max(0, MAX_TOTAL_MESSAGES - 1);
     static final int MAX_CONTENT_CHARS = 2000;
     static final int TRUNCATION_BOUNDARY_WINDOW = 80;
-    private static final int MAX_DECOMPOSITION_PAYLOAD_CHARS = 12000;
+    private static final int MAX_DECOMPOSITION_PAYLOAD_BYTES = 12000;
     private static final String SYSTEM_PROMPT = "You are a product intake assistant. Classify the request as bug or feature. "
             + "Ask only minimal clarifying questions. Stop when enough information is collected. "
             + "Return valid JSON only with keys: reply, intakeComplete, structuredData. "
@@ -166,7 +166,7 @@ public class IntakeOpenAiClient {
         try {
             String payloadJson = objectMapper.writeValueAsString(payload);
             int payloadBytes = payloadJson.getBytes(StandardCharsets.UTF_8).length;
-            if (payloadBytes > MAX_DECOMPOSITION_PAYLOAD_CHARS) {
+            if (payloadBytes > MAX_DECOMPOSITION_PAYLOAD_BYTES) {
                 log.warn("Decomposition payload too large for requestId={}, bytes={}", requestId, payloadBytes);
                 return fallbackDecompositionResult(requestId);
             }
@@ -277,7 +277,7 @@ public class IntakeOpenAiClient {
 
             DecompositionResponse response = new DecompositionResponse();
             response.setRequestId(requestId);
-            response.setDecompositionComplete(decompositionJson.path("decompositionComplete").asBoolean(false));
+            response.setDecompositionComplete(toBoolean(decompositionJson.path("decompositionComplete")));
 
             List<DecompositionStory> stories = new ArrayList<>();
             JsonNode storiesNode = decompositionJson.path("stories");
@@ -345,13 +345,53 @@ public class IntakeOpenAiClient {
     }
 
     private JsonNode extractDecompositionJson(JsonNode root) {
-        return extractStructuredJson(root);
+        JsonNode messageNode = root.path("choices").path(0).path("message");
+        JsonNode parsedNode = messageNode.path("parsed");
+        if (parsedNode != null && parsedNode.isObject()) {
+            return parsedNode;
+        }
+        JsonNode fromContent = parseJsonFromContentNode(messageNode.path("content"));
+        if (fromContent != null && fromContent.isObject()) {
+            return fromContent;
+        }
+        JsonNode fromText = parseJsonFromContent(messageNode.path("content").asText(""));
+        if (fromText != null && fromText.isObject()) {
+            return fromText;
+        }
+        JsonNode extracted = extractStructuredJson(root);
+        if (extracted != null && extracted.isObject()) {
+            return extracted;
+        }
+        return null;
     }
 
     private boolean isDecompositionPayload(JsonNode node) {
-        return node.isObject()
-                && node.path("decompositionComplete").isBoolean()
-                && node.path("stories").isArray();
+        if (!node.isObject()) {
+            return false;
+        }
+        JsonNode completionNode = node.path("decompositionComplete");
+        if (!completionNode.isMissingNode()
+                && !completionNode.isNull()
+                && !completionNode.isBoolean()
+                && !completionNode.isTextual()) {
+            return false;
+        }
+        JsonNode storiesNode = node.path("stories");
+        return storiesNode.isMissingNode() || storiesNode.isNull() || storiesNode.isArray();
+    }
+
+    private boolean toBoolean(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return false;
+        }
+        if (node.isBoolean()) {
+            return node.asBoolean(false);
+        }
+        if (node.isTextual()) {
+            String value = blankToNull(node.asText(null));
+            return "true".equalsIgnoreCase(value);
+        }
+        return false;
     }
 
     private String normalizeRole(String role) {
@@ -557,7 +597,7 @@ public class IntakeOpenAiClient {
 
     private DecompositionResponse fallbackDecompositionResult(String requestId) {
         DecompositionResponse fallback = new DecompositionResponse();
-        fallback.setRequestId(requestId);
+        fallback.setRequestId(blankToEmpty(requestId));
         fallback.setDecompositionComplete(false);
         fallback.setStories(Collections.emptyList());
         return fallback;
