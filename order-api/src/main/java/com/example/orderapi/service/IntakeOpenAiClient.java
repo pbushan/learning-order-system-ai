@@ -145,7 +145,7 @@ public class IntakeOpenAiClient {
 
     public DecompositionResponse decompose(String requestId, StructuredIntakeData structuredData) {
         if (!configured || restClient == null) {
-            throw new IllegalStateException("OpenAI API key is not configured.");
+            return fallbackDecompositionResult(requestId);
         }
 
         List<Map<String, String>> requestMessages = new ArrayList<>();
@@ -250,7 +250,7 @@ public class IntakeOpenAiClient {
                 return fallbackDecompositionResult(fallbackRequestId);
             }
             JsonNode root = objectMapper.readTree(rawResponse);
-            JsonNode decompositionJson = extractStructuredJson(root);
+            JsonNode decompositionJson = extractDecompositionJson(root);
             if (decompositionJson == null || decompositionJson.isNull() || decompositionJson.isMissingNode()) {
                 log.warn("OpenAI decomposition JSON extraction failed for configured chat response shape");
                 return fallbackDecompositionResult(fallbackRequestId);
@@ -261,8 +261,7 @@ public class IntakeOpenAiClient {
             }
 
             DecompositionResponse response = new DecompositionResponse();
-            String resolvedRequestId = blankToNull(decompositionJson.path("requestId").asText(null));
-            response.setRequestId(resolvedRequestId != null ? resolvedRequestId : fallbackRequestId);
+            response.setRequestId(fallbackRequestId);
             response.setDecompositionComplete(decompositionJson.path("decompositionComplete").asBoolean(false));
 
             List<DecompositionStory> stories = new ArrayList<>();
@@ -328,6 +327,16 @@ public class IntakeOpenAiClient {
         prSafety.setTarget(target != null ? target : "under-30000-char-patch");
         prSafety.setNotes(blankToEmpty(node.path("notes").asText(null)));
         return prSafety;
+    }
+
+    private JsonNode extractDecompositionJson(JsonNode root) {
+        JsonNode messageNode = root.path("choices").path(0).path("message");
+        JsonNode contentNode = messageNode.path("content");
+        JsonNode parsed = parseJsonFromContentNode(contentNode);
+        if (parsed != null) {
+            return parsed;
+        }
+        return parseJsonFromContent(messageNode.path("content").asText(""));
     }
 
     private boolean isDecompositionPayload(JsonNode node) {
