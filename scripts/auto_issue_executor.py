@@ -1,0 +1,365 @@
+#!/usr/bin/env python3
+"""Minimal Step 5 issue execution loop for portfolio workflow.
+
+Flow:
+approved issue -> ai-in-progress -> patch -> branch/commit/push -> PR -> merge -> cleanup
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+from step5_audit_log import log_step5_event
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def log(msg: str) -> None:
+    print(msg, flush=True)
+
+
+def run_cmd(*args: str, check: bool = True, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        list(args),
+        cwd=str(cwd or REPO_ROOT),
+        text=True,
+        capture_output=True,
+        check=check,
+    )
+
+
+def token_from_env() -> str:
+    return (os.getenv("CODEX_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN") or "").strip()
+
+
+def github_request(method: str, owner: str, repo: str, path: str, token: str, body: Any | None = None) -> Any:
+    data = None
+    if body is not None:
+        data = json.dumps(body, ensure_ascii=True).encode("utf-8")
+    req = urllib.request.Request(
+        url=f"https://api.github.com/repos/{owner}/{repo}{path}",
+        method=method,
+        data=data,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "step5-auto-issue-executor",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        raw = resp.read().decode("utf-8")
+        return json.loads(raw) if raw else {}
+
+
+def discover_eligible_issues(owner: str, repo: str, token: str) -> list[dict[str, Any]]:
+    query = urllib.parse.urlencode({"state": "open", "labels": "approved-for-dev", "per_page": "100"})
+    issues = github_request("GET", owner, repo, f"/issues?{query}", token)
+    result: list[dict[str, Any]] = []
+    for issue in issues or []:
+        if issue.get("pull_request") is not None:
+            continue
+        labels = [str((lbl or {}).get("name", "")).strip() for lbl in issue.get("labels", [])]
+        if "ai-in-progress" in labels:
+            log(f"Skipping issue #{issue.get('number')} (already ai-in-progress).")
+            log_step5_event("approved-issue-skipped", issue_number=issue.get("number"), metadata={"reason": "already-in-progress"})
+            continue
+        result.append(
+            {
+                "issueNumber": int(issue.get("number")),
+                "title": issue.get("title") or "",
+                "body": issue.get("body") or "",
+                "labels": labels,
+                "htmlUrl": issue.get("html_url") or "",
+            }
+        )
+    return result
+
+
+def add_label(owner: str, repo: str, token: str, issue_number: int, label: str) -> None:
+    github_request("POST", owner, repo, f"/issues/{issue_number}/labels", token, {"labels": [label]})
+
+
+def remove_label(owner: str, repo: str, token: str, issue_number: int, label: str) -> None:
+    try:
+        github_request("DELETE", owner, repo, f"/issues/{issue_number}/labels/{urllib.parse.quote(label)}", token)
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+
+
+def comment_issue(owner: str, repo: str, token: str, issue_number: int, message: str) -> None:
+    github_request("POST", owner, repo, f"/issues/{issue_number}/comments", token, {"body": message})
+
+
+def close_issue(owner: str, repo: str, token: str, issue_number: int) -> None:
+    github_request("PATCH", owner, repo, f"/issues/{issue_number}", token, {"state": "closed"})
+
+
+def parse_rename_instruction(text: str) -> tuple[str, str] | None:
+    patterns = [
+        r"from\s+'([^']+)'\s+to\s+'([^']+)'",
+        r'from\s+"([^"]+)"\s+to\s+"([^"]+)"',
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, text, flags=re.IGNORECASE)
+        if m:
+            return m.group(1).strip(), m.group(2).strip()
+    return None
+
+
+def apply_issue_change(issue: dict[str, Any]) -> list[str]:
+    text = f"{issue.get('title', '')}\n{issue.get('body', '')}"
+    rename = parse_rename_instruction(text)
+    if not rename:
+        raise RuntimeError("No supported rename instruction found in issue title/body.")
+
+    old_value, new_value = rename
+    if old_value == new_value:
+        raise RuntimeError("Rename instruction has identical source and destination values.")
+
+    rg = run_cmd("rg", "-l", "--fixed-strings", old_value, "order-ui", check=False)
+    files = [line.strip() for line in rg.stdout.splitlines() if line.strip()]
+    if not files:
+        raise RuntimeError(f"No files found containing '{old_value}'.")
+
+    changed: list[str] = []
+    for rel in files:
+        path = REPO_ROOT / rel
+        original = path.read_text(encoding="utf-8")
+        updated = original.replace(old_value, new_value)
+        if updated != original:
+            path.write_text(updated, encoding="utf-8")
+            changed.append(rel)
+
+    if not changed:
+        raise RuntimeError("No file content changed after replacement.")
+
+    return changed
+
+
+def build_work_packet(issue: dict[str, Any]) -> dict[str, Any]:
+    proc = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "scripts" / "build_work_packet.py")],
+        input=json.dumps(issue, ensure_ascii=True),
+        text=True,
+        capture_output=True,
+        cwd=str(REPO_ROOT),
+        check=True,
+    )
+    return json.loads(proc.stdout)
+
+
+def build_pr_scaffold(packet: dict[str, Any]) -> dict[str, Any]:
+    proc = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "scripts" / "prepare_pr_scaffold.py")],
+        input=json.dumps(packet, ensure_ascii=True),
+        text=True,
+        capture_output=True,
+        cwd=str(REPO_ROOT),
+        check=True,
+    )
+    return json.loads(proc.stdout)
+
+
+def ensure_clean_and_base(base: str) -> None:
+    status = run_cmd("git", "status", "--porcelain").stdout.strip()
+    if status:
+        raise RuntimeError("Working tree is not clean; aborting automated issue execution.")
+    run_cmd("git", "fetch", "--all", "--prune")
+    run_cmd("git", "checkout", base)
+    run_cmd("git", "pull", "--ff-only")
+
+
+def create_or_reuse_branch(branch: str, base: str) -> None:
+    exists = run_cmd("git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}", check=False).returncode == 0
+    if exists:
+        run_cmd("git", "checkout", branch)
+    else:
+        run_cmd("git", "checkout", "-b", branch, base)
+
+
+def commit_and_push(branch: str, issue_number: int) -> str:
+    run_cmd("git", "add", "-A")
+    if run_cmd("git", "diff", "--cached", "--quiet", check=False).returncode == 0:
+        raise RuntimeError("No staged changes to commit.")
+    message = f"Issue #{issue_number}: apply approved update"
+    run_cmd("git", "commit", "-m", message)
+    run_cmd("git", "push", "-u", "origin", branch)
+    return message
+
+
+def resolve_open_pr(owner: str, repo: str, token: str, branch: str) -> int | None:
+    query = urllib.parse.urlencode({"state": "open", "head": f"{owner}:{branch}", "per_page": "1"})
+    prs = github_request("GET", owner, repo, f"/pulls?{query}", token)
+    if prs:
+        return int(prs[0]["number"])
+    return None
+
+
+def create_pr(owner: str, repo: str, token: str, branch: str, scaffold: dict[str, Any]) -> tuple[int, str]:
+    existing = resolve_open_pr(owner, repo, token, branch)
+    if existing is not None:
+        pr = github_request("GET", owner, repo, f"/pulls/{existing}", token)
+        return int(pr["number"]), pr.get("html_url", "")
+
+    body = {
+        "title": scaffold["prTitle"],
+        "head": branch,
+        "base": "main",
+        "body": scaffold["prBody"],
+    }
+    pr = github_request("POST", owner, repo, "/pulls", token, body)
+    return int(pr["number"]), pr.get("html_url", "")
+
+
+def post_ready_note(owner: str, repo: str, token: str, pr_number: int) -> None:
+    message = "All P2+ comments addressed. Ready for merge."
+    github_request("POST", owner, repo, f"/issues/{pr_number}/comments", token, {"body": message})
+
+
+def merge_pr(owner: str, repo: str, token: str, pr_number: int) -> None:
+    body = {"merge_method": "squash"}
+    github_request("PUT", owner, repo, f"/pulls/{pr_number}/merge", token, body)
+
+
+def cleanup_branch(branch: str) -> None:
+    run_cmd("git", "checkout", "main")
+    run_cmd("git", "pull", "--ff-only")
+    run_cmd("git", "push", "origin", "--delete", branch, check=False)
+    run_cmd("git", "branch", "-d", branch, check=False)
+    run_cmd("git", "fetch", "--all", "--prune")
+
+
+def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto_merge: bool) -> dict[str, Any]:
+    issue_number = int(issue["issueNumber"])
+    log(f"Issue #{issue_number}: picked for execution")
+    log_step5_event("approved-issue-picked", issue_number=issue_number, metadata={"title": issue.get("title", "")})
+
+    add_label(owner, repo, token, issue_number, "ai-in-progress")
+    log(f"Issue #{issue_number}: applied label ai-in-progress")
+    log_step5_event("approved-issue-marked-in-progress", issue_number=issue_number)
+
+    log(f"Issue #{issue_number}: building work packet")
+    packet = build_work_packet(issue)
+
+    log(f"Issue #{issue_number}: preparing PR scaffold")
+    scaffold = build_pr_scaffold(packet)
+    branch = scaffold["branchName"]
+
+    ensure_clean_and_base("main")
+    log(f"Issue #{issue_number}: creating branch {branch}")
+    create_or_reuse_branch(branch, "main")
+
+    log(f"Issue #{issue_number}: applying implementation")
+    changed_files = apply_issue_change(issue)
+    log_step5_event("issue-implementation-applied", issue_number=issue_number, metadata={"changedFiles": changed_files})
+
+    log(f"Issue #{issue_number}: committing and pushing")
+    commit_and_push(branch, issue_number)
+
+    log(f"Issue #{issue_number}: creating pull request")
+    pr_number, pr_url = create_pr(owner, repo, token, branch, scaffold)
+    log_step5_event("issue-pr-created", issue_number=issue_number, metadata={"prNumber": pr_number, "prUrl": pr_url})
+
+    result = {
+        "issueNumber": issue_number,
+        "branch": branch,
+        "prNumber": pr_number,
+        "prUrl": pr_url,
+        "changedFiles": changed_files,
+        "merged": False,
+    }
+
+    if auto_merge:
+        log(f"Issue #{issue_number}: posting ready-to-merge note")
+        post_ready_note(owner, repo, token, pr_number)
+
+        log(f"Issue #{issue_number}: merging PR #{pr_number}")
+        merge_pr(owner, repo, token, pr_number)
+        result["merged"] = True
+        log_step5_event("issue-pr-merged", issue_number=issue_number, metadata={"prNumber": pr_number})
+
+        log(f"Issue #{issue_number}: cleanup and reconciliation")
+        cleanup_branch(branch)
+        remove_label(owner, repo, token, issue_number, "ai-in-progress")
+        close_issue(owner, repo, token, issue_number)
+        log_step5_event("issue-post-merge-cleanup-completed", issue_number=issue_number, metadata={"branch": branch})
+
+    return result
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run minimal Step 5 issue execution loop.")
+    parser.add_argument("--owner", required=True)
+    parser.add_argument("--repo", required=True)
+    parser.add_argument("--issue", type=int, default=None, help="Optional specific issue number.")
+    parser.add_argument("--once", action="store_true", help="Run a single scan iteration and exit.")
+    parser.add_argument("--interval-seconds", type=int, default=20)
+    parser.add_argument("--auto-merge", action="store_true", help="Merge PR and cleanup when created.")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    token = token_from_env()
+    if not token:
+        print("Missing CODEX_GITHUB_TOKEN or GITHUB_TOKEN.", file=sys.stderr)
+        return 1
+
+    while True:
+        try:
+            log("Polling approved issues...")
+            issues = discover_eligible_issues(args.owner, args.repo, token)
+            if args.issue is not None:
+                issues = [i for i in issues if int(i["issueNumber"]) == args.issue]
+            log(f"Approved eligible issues found: {len(issues)}")
+            log_step5_event("approved-issue-poll-ran", metadata={"approvedIssuesFound": len(issues)})
+
+            for issue in issues:
+                issue_number = int(issue["issueNumber"])
+                try:
+                    result = process_issue(args.owner, args.repo, token, issue, args.auto_merge)
+                    log(json.dumps({"result": result}, ensure_ascii=True))
+                except Exception as exc:  # minimal explicit failure visibility
+                    error = str(exc)
+                    log(f"Issue #{issue_number}: FAILED - {error}")
+                    log_step5_event("approved-issue-execution-failed", issue_number=issue_number, error=error)
+                    try:
+                        comment_issue(
+                            args.owner,
+                            args.repo,
+                            token,
+                            issue_number,
+                            f"Automation attempt failed: {error}",
+                        )
+                    except Exception:
+                        pass
+
+            if args.once:
+                return 0
+
+            time.sleep(max(5, int(args.interval_seconds)))
+        except KeyboardInterrupt:
+            return 0
+        except Exception as exc:
+            error = str(exc)
+            log(f"Poll loop failed: {error}")
+            log_step5_event("approved-issue-poll-failed", error=error)
+            if args.once:
+                return 1
+            time.sleep(max(5, int(args.interval_seconds)))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
