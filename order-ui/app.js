@@ -8,9 +8,9 @@ const state = {
     intakeResult: null,
     decompositionLoading: false,
     decompositionResult: null,
-    decompositionRequestSeq: 0,
-    decompositionElementsWarningShown: false
+    decompositionRequestSeq: 0
 };
+let decompositionElementsWarningShown = false;
 const MAX_INTAKE_MESSAGES = 30;
 const INTAKE_REQUEST_TIMEOUT_MS = 15000;
 const MIN_INTAKE_SEND_INTERVAL_MS = 800;
@@ -533,9 +533,9 @@ function setDecompositionLoading(isLoading) {
 }
 
 function renderDecompositionUI() {
-    if ((!intakeDecomposeActions || !intakeDecomposeButton || !intakeDecomposition || !intakeDecompositionList) && !state.decompositionElementsWarningShown) {
+    if ((!intakeDecomposeActions || !intakeDecomposeButton || !intakeDecomposition || !intakeDecompositionList) && !decompositionElementsWarningShown) {
         console.warn("Decomposition UI elements are missing. Check intake decomposition element IDs.");
-        state.decompositionElementsWarningShown = true;
+        decompositionElementsWarningShown = true;
     }
 
     const canDecompose = state.intakeResult?.intakeComplete
