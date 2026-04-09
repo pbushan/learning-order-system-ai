@@ -1,6 +1,7 @@
 package com.example.orderapi.service;
 
 import com.example.orderapi.dto.ChatMessage;
+import com.example.orderapi.dto.DecompositionStory;
 import com.example.orderapi.dto.StructuredIntakeData;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -66,6 +67,36 @@ public class FileAuditLogService {
             Files.writeString(path, jsonLine, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (Exception ex) {
             log.warn("Failed to write intake audit log entry for requestId={}", safeString(requestId), ex);
+        }
+    }
+
+    public synchronized void logDecompositionEntry(String requestId,
+                                                   StructuredIntakeData structuredData,
+                                                   String model,
+                                                   Boolean decompositionComplete,
+                                                   List<DecompositionStory> stories,
+                                                   String error) {
+        try {
+            Path path = resolveAuditPath();
+            Path parent = path.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("timestamp", OffsetDateTime.now(ZoneOffset.UTC).toString());
+            entry.put("requestId", safeString(requestId));
+            entry.put("operation", "decomposition");
+            entry.put("structuredData", toStructuredDataMap(structuredData));
+            entry.put("model", safeString(model));
+            entry.put("decompositionComplete", decompositionComplete != null ? decompositionComplete : null);
+            entry.put("stories", stories != null ? stories : Collections.emptyList());
+            entry.put("error", safeString(error));
+
+            String jsonLine = objectMapper.writeValueAsString(entry) + System.lineSeparator();
+            Files.writeString(path, jsonLine, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (Exception ex) {
+            log.warn("Failed to write decomposition audit log entry for requestId={}", safeString(requestId), ex);
         }
     }
 
