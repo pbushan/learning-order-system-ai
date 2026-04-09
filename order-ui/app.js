@@ -191,6 +191,7 @@ async function apiRequest(path, options = {}) {
     }
 
     const text = await response.text();
+    const rawText = typeof text === "string" ? text.trim() : "";
     let data = null;
     if (text) {
         try {
@@ -202,7 +203,7 @@ async function apiRequest(path, options = {}) {
 
     if (!response.ok) {
         const headerMessage = response.headers.get("X-Error-Message");
-        const message = data?.error || headerMessage || `Request failed with status ${response.status}`;
+        const message = data?.error || headerMessage || rawText || `Request failed with status ${response.status}`;
         throw new Error(message);
     }
 
@@ -564,7 +565,7 @@ function renderDecompositionUI() {
             const failure = document.createElement("p");
             failure.className = "intake-decomposition-empty";
             failure.textContent = `GitHub issue creation failed: ${state.githubIssueCreationError}`;
-            intakeDecompositionList.appendChild(failure);
+            replaceElementChildren(intakeDecompositionList, [failure]);
         }
         return;
     }
