@@ -1,5 +1,6 @@
 package com.example.orderapi.service;
 
+import com.example.orderapi.dto.ApprovedGitHubIssue;
 import com.example.orderapi.dto.DecompositionStory;
 import com.example.orderapi.dto.GitHubIssueSummary;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -85,6 +86,49 @@ public class GitHubIssueClientService {
         summary.setTitle(response.getTitle());
         summary.setLabels(extractLabelNames(response.getLabels()));
         return summary;
+    }
+
+    public List<ApprovedGitHubIssue> discoverApprovedIssues() {
+        if (!StringUtils.hasText(token)) {
+            throw new IllegalStateException("GitHub token is not configured. Set app.github.token or GITHUB_TOKEN.");
+        }
+        if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
+            throw new IllegalStateException("GitHub repository is not configured. Set app.github.owner and app.github.repo.");
+        }
+
+        GitHubIssueListItem[] response = restClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/repos/{owner}/{repo}/issues")
+                        .queryParam("state", "open")
+                        .queryParam("labels", "approved-for-dev")
+                        .queryParam("per_page", "100")
+                        .build(owner.trim(), repo.trim()))
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                .retrieve()
+                .body(GitHubIssueListItem[].class);
+
+        if (response == null || response.length == 0) {
+            return List.of();
+        }
+
+        List<ApprovedGitHubIssue> issues = new ArrayList<>();
+        for (GitHubIssueListItem item : response) {
+            if (item == null || item.getPullRequest() != null) {
+                continue;
+            }
+            List<String> labels = extractLabelNames(item.getLabels());
+            if (labels.contains("ai-in-progress")) {
+                continue;
+            }
+
+            ApprovedGitHubIssue normalized = new ApprovedGitHubIssue();
+            normalized.setIssueNumber(item.getNumber());
+            normalized.setTitle(item.getTitle());
+            normalized.setBody(item.getBody());
+            normalized.setLabels(labels);
+            issues.add(normalized);
+        }
+        return issues;
     }
 
     private String buildIssueBody(DecompositionStory story) {
@@ -222,6 +266,63 @@ public class GitHubIssueClientService {
 
         public void setLabels(List<GitHubLabelResponse> labels) {
             this.labels = labels;
+        }
+    }
+
+    static class GitHubIssueListItem {
+        @JsonProperty("number")
+        private long number;
+
+        @JsonProperty("title")
+        private String title;
+
+        @JsonProperty("body")
+        private String body;
+
+        @JsonProperty("labels")
+        private List<GitHubLabelResponse> labels;
+
+        @JsonProperty("pull_request")
+        private Object pullRequest;
+
+        public long getNumber() {
+            return number;
+        }
+
+        public void setNumber(long number) {
+            this.number = number;
+        }
+
+        public String getTitle() {
+            return title;
+        }
+
+        public void setTitle(String title) {
+            this.title = title;
+        }
+
+        public String getBody() {
+            return body;
+        }
+
+        public void setBody(String body) {
+            this.body = body;
+        }
+
+        public List<GitHubLabelResponse> getLabels() {
+            return labels;
+        }
+
+        public void setLabels(List<GitHubLabelResponse> labels) {
+            this.labels = labels;
+        }
+
+        public Object getPullRequest() {
+            return pullRequest;
+        }
+
+        public void setPullRequest(Object pullRequest) {
+            this.pullRequest = pullRequest;
         }
     }
 
