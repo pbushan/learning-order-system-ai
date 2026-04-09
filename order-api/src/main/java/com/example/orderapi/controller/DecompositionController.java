@@ -2,9 +2,11 @@ package com.example.orderapi.controller;
 
 import com.example.orderapi.dto.DecompositionRequest;
 import com.example.orderapi.dto.DecompositionResponse;
+import com.example.orderapi.dto.DecompositionStory;
 import com.example.orderapi.dto.GitHubIssueCreateRequest;
 import com.example.orderapi.dto.GitHubIssueCreateResponse;
 import com.example.orderapi.service.DecompositionService;
+import com.example.orderapi.service.FileAuditLogService;
 import com.example.orderapi.service.GitHubIssueCreationService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -12,6 +14,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.util.StringUtils;
 
 import java.util.Collections;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/intake")
@@ -19,11 +22,14 @@ public class DecompositionController {
 
     private final DecompositionService decompositionService;
     private final GitHubIssueCreationService gitHubIssueCreationService;
+    private final FileAuditLogService fileAuditLogService;
 
     public DecompositionController(DecompositionService decompositionService,
-                                   GitHubIssueCreationService gitHubIssueCreationService) {
+                                   GitHubIssueCreationService gitHubIssueCreationService,
+                                   FileAuditLogService fileAuditLogService) {
         this.decompositionService = decompositionService;
         this.gitHubIssueCreationService = gitHubIssueCreationService;
+        this.fileAuditLogService = fileAuditLogService;
     }
 
     @PostMapping("/decompose")
@@ -39,31 +45,60 @@ public class DecompositionController {
     public ResponseEntity<GitHubIssueCreateResponse> completeToGitHub(@RequestBody DecompositionRequest request) {
         try {
             DecompositionResponse decomposition = decompositionService.decompose(request);
+            if (!decomposition.isDecompositionComplete()) {
+                return failureWithAudit(
+                        HttpStatus.BAD_GATEWAY,
+                        "Decomposition did not complete successfully.",
+                        request,
+                        decomposition,
+                        null
+                );
+            }
             if (decomposition.getStories() == null || decomposition.getStories().isEmpty()) {
-                return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                        .header("X-Error-Message", "Decomposition did not produce stories.")
-                        .body(githubFailureResponse(request));
+                return failureWithAudit(
+                        HttpStatus.BAD_GATEWAY,
+                        "Decomposition did not produce stories.",
+                        request,
+                        decomposition,
+                        null
+                );
             }
 
+            String sourceType = resolveSourceType(request);
             GitHubIssueCreateRequest issueRequest = new GitHubIssueCreateRequest();
             issueRequest.setRequestId(resolveRequestId(decomposition.getRequestId(), request));
-            issueRequest.setSourceType(resolveSourceType(request));
+            issueRequest.setSourceType(sourceType);
             issueRequest.setStories(decomposition.getStories());
             GitHubIssueCreateResponse issueResponse = gitHubIssueCreationService.createFromDecomposition(issueRequest);
             if (issueResponse == null || issueResponse.getIssues() == null) {
-                return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                        .header("X-Error-Message", "GitHub issue creation returned an invalid response.")
-                        .body(githubFailureResponse(request));
+                return failureWithAudit(
+                        HttpStatus.BAD_GATEWAY,
+                        "GitHub issue creation returned an invalid response.",
+                        request,
+                        decomposition,
+                        sourceType
+                );
+            }
+            if (!issueResponse.isIssuesCreated() || issueResponse.getIssues().isEmpty()) {
+                return failureWithAudit(
+                        HttpStatus.BAD_GATEWAY,
+                        "GitHub issue creation returned no issues.",
+                        request,
+                        decomposition,
+                        sourceType
+                );
             }
             return ResponseEntity.ok(issueResponse);
         } catch (IllegalArgumentException ex) {
+            String requestId = resolveRequestId(null, request);
             return ResponseEntity.badRequest()
                     .header("X-Error-Message", ex.getMessage())
-                    .body(githubFailureResponse(request));
+                    .body(githubFailureResponse(requestId, ex.getMessage()));
         } catch (IllegalStateException ex) {
+            String requestId = resolveRequestId(null, request);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .header("X-Error-Message", ex.getMessage())
-                    .body(githubFailureResponse(request));
+                    .body(githubFailureResponse(requestId, ex.getMessage()));
         }
     }
 
@@ -90,11 +125,12 @@ public class DecompositionController {
         return normalized;
     }
 
-    private GitHubIssueCreateResponse githubFailureResponse(DecompositionRequest request) {
+    private GitHubIssueCreateResponse githubFailureResponse(String requestId, String error) {
         GitHubIssueCreateResponse response = new GitHubIssueCreateResponse();
-        response.setRequestId(resolveRequestId(null, request));
+        response.setRequestId(requestId);
         response.setIssuesCreated(false);
         response.setIssues(Collections.emptyList());
+        response.setError(error != null ? error : "");
         return response;
     }
 
@@ -104,5 +140,39 @@ public class DecompositionController {
         }
         String requestId = request != null ? request.getRequestId() : null;
         return (requestId != null && !requestId.isBlank()) ? requestId.trim() : "unknown-request";
+    }
+
+    private ResponseEntity<GitHubIssueCreateResponse> failureWithAudit(HttpStatus status,
+                                                                        String errorMessage,
+                                                                        DecompositionRequest request,
+                                                                        DecompositionResponse decomposition,
+                                                                        String sourceType) {
+        String requestId = resolveRequestId(decomposition != null ? decomposition.getRequestId() : null, request);
+        safeGitHubCreationAudit(
+                requestId,
+                sourceType,
+                decomposition != null ? decomposition.getStories() : Collections.emptyList(),
+                errorMessage
+        );
+        return ResponseEntity.status(status)
+                .header("X-Error-Message", errorMessage)
+                .body(githubFailureResponse(requestId, errorMessage));
+    }
+
+    private void safeGitHubCreationAudit(String requestId,
+                                         String sourceType,
+                                         List<DecompositionStory> stories,
+                                         String error) {
+        try {
+            fileAuditLogService.logGitHubIssueCreationEntry(
+                    requestId,
+                    sourceType,
+                    stories != null ? stories : Collections.emptyList(),
+                    Collections.emptyList(),
+                    error
+            );
+        } catch (Exception ignored) {
+            // Logging must never fail the response path.
+        }
     }
 }
