@@ -1,0 +1,87 @@
+package com.example.orderapi.dto;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+import java.util.List;
+
+public class DecompositionStory {
+    public DecompositionStory() {
+    }
+
+    @JsonProperty("storyId")
+    private String storyId;
+
+    @JsonProperty("title")
+    private String title;
+
+    @JsonProperty("description")
+    private String description;
+
+    @JsonProperty("acceptanceCriteria")
+    private List<String> acceptanceCriteria;
+
+    @JsonProperty("affectedComponents")
+    private List<String> affectedComponents;
+
+    @JsonProperty("estimatedSize")
+    private String estimatedSize;
+
+    @JsonProperty("prSafety")
+    private PrSafety prSafety;
+
+    public String getStoryId() {
+        return storyId;
+    }
+
+    public void setStoryId(String storyId) {
+        this.storyId = storyId;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public void setTitle(String title) {
+        this.title = title;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }
+
+    public List<String> getAcceptanceCriteria() {
+        return acceptanceCriteria;
+    }
+
+    public void setAcceptanceCriteria(List<String> acceptanceCriteria) {
+        this.acceptanceCriteria = acceptanceCriteria;
+    }
+
+    public List<String> getAffectedComponents() {
+        return affectedComponents;
+    }
+
+    public void setAffectedComponents(List<String> affectedComponents) {
+        this.affectedComponents = affectedComponents;
+    }
+
+    public String getEstimatedSize() {
+        return estimatedSize;
+    }
+
+    public void setEstimatedSize(String estimatedSize) {
+        this.estimatedSize = estimatedSize;
+    }
+
+    public PrSafety getPrSafety() {
+        return prSafety;
+    }
+
+    public void setPrSafety(PrSafety prSafety) {
+        this.prSafety = prSafety;
+    }
+}
