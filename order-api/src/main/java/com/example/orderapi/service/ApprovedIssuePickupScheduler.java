@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
@@ -19,6 +20,7 @@ public class ApprovedIssuePickupScheduler {
     private final GitHubIssueClientService gitHubIssueClientService;
     private final FileAuditLogService fileAuditLogService;
     private final AtomicBoolean pollInProgress = new AtomicBoolean(false);
+    private final Map<Long, Long> recentlyPickedAtMs = new ConcurrentHashMap<>();
 
     public ApprovedIssuePickupScheduler(GitHubIssueClientService gitHubIssueClientService,
                                         FileAuditLogService fileAuditLogService) {
@@ -56,9 +58,15 @@ public class ApprovedIssuePickupScheduler {
                 }
 
                 long issueNumber = issue.getIssueNumber();
+                if (wasRecentlyPicked(issueNumber)) {
+                    log.info("Skipping issue #{} because it was picked recently.", issueNumber);
+                    safeAudit("approved-issue-skipped", issueNumber, Map.of("reason", "recently-picked"), "");
+                    continue;
+                }
 
                 try {
                     gitHubIssueClientService.addIssueLabel(issueNumber, "ai-in-progress");
+                    recentlyPickedAtMs.put(issueNumber, System.currentTimeMillis());
                     Map<String, Object> metadata = new LinkedHashMap<>();
                     metadata.put("title", issue.getTitle());
                     metadata.put("labels", issue.getLabels() != null ? issue.getLabels() : List.of());
@@ -67,7 +75,10 @@ public class ApprovedIssuePickupScheduler {
                     safeAudit("approved-issue-picked", issueNumber, metadata, "");
                 } catch (Exception ex) {
                     log.warn("Failed to mark issue #{} as ai-in-progress: {}", issueNumber, ex.getMessage());
-                    safeAudit("approved-issue-pick-failed", issueNumber, Map.of(), ex.getMessage());
+                    Map<String, Object> metadata = new LinkedHashMap<>();
+                    metadata.put("title", issue.getTitle());
+                    metadata.put("labels", issue.getLabels() != null ? issue.getLabels() : List.of());
+                    safeAudit("approved-issue-pick-failed", issueNumber, metadata, ex.getMessage());
                 }
             }
         } finally {
@@ -77,10 +88,18 @@ public class ApprovedIssuePickupScheduler {
 
     private void safeAudit(String operation, Long issueNumber, Map<String, Object> metadata, String error) {
         try {
-            String requestId = issueNumber != null ? "issue-" + issueNumber : "";
+            String requestId = issueNumber != null ? "issue-" + issueNumber : "step5-poll";
             fileAuditLogService.logStep5LifecycleEntry(operation, requestId, issueNumber, metadata, error);
         } catch (Exception ignored) {
             // Audit failures must never fail scheduler flow.
         }
+    }
+
+    private boolean wasRecentlyPicked(long issueNumber) {
+        long now = System.currentTimeMillis();
+        long ttlMs = 120_000L;
+        recentlyPickedAtMs.entrySet().removeIf(entry -> (now - entry.getValue()) > ttlMs);
+        Long pickedAt = recentlyPickedAtMs.get(issueNumber);
+        return pickedAt != null && (now - pickedAt) <= ttlMs;
     }
 }

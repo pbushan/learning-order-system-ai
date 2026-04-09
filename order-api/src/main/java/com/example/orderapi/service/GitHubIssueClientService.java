@@ -119,8 +119,11 @@ public class GitHubIssueClientService {
                     .retrieve()
                     .toBodilessEntity();
         } catch (RestClientResponseException ex) {
-            if (ex.getStatusCode().value() == 422) {
-                // Treat label-already-present shape as idempotent success for pickup.
+            String responseBody = ex.getResponseBodyAsString();
+            if (ex.getStatusCode().value() == 422
+                    && responseBody != null
+                    && (responseBody.contains("already_exists") || responseBody.toLowerCase().contains("already exists"))) {
+                // Treat label-already-present responses as idempotent success for pickup.
                 return;
             }
             throw ex;
