@@ -47,6 +47,18 @@ def run_cmd_with_gh_auth_fallback(*args: str) -> subprocess.CompletedProcess[str
     if proc.returncode == 0:
         return proc
 
+    # Retry with current environment first; only then fall back to stored gh auth.
+    proc_with_env = subprocess.run(
+        cmd,
+        cwd=str(REPO_ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+        env=os.environ.copy(),
+    )
+    if proc_with_env.returncode == 0:
+        return proc_with_env
+
     env = os.environ.copy()
     env.pop("GITHUB_TOKEN", None)
     env.pop("CODEX_GITHUB_TOKEN", None)
@@ -95,9 +107,15 @@ def discover_eligible_issues(owner: str, repo: str, token: str) -> list[dict[str
             log(f"Skipping issue #{issue.get('number')} (already ai-in-progress).")
             log_step5_event("approved-issue-skipped", issue_number=issue.get("number"), metadata={"reason": "already-in-progress"})
             continue
+        try:
+            issue_number = int(issue.get("number"))
+        except (TypeError, ValueError):
+            log("Skipping malformed issue payload with missing/invalid number.")
+            log_step5_event("approved-issue-skipped", metadata={"reason": "invalid-issue-number"})
+            continue
         result.append(
             {
-                "issueNumber": int(issue.get("number")),
+                "issueNumber": issue_number,
                 "title": issue.get("title") or "",
                 "body": issue.get("body") or "",
                 "labels": labels,
@@ -149,10 +167,10 @@ def apply_issue_change(issue: dict[str, Any]) -> list[str]:
     if old_value == new_value:
         raise RuntimeError("Rename instruction has identical source and destination values.")
 
-    rg = run_cmd("rg", "-l", "--fixed-strings", old_value, "order-ui", check=False)
-    files = [line.strip() for line in rg.stdout.splitlines() if line.strip()]
-    if not files:
-        raise RuntimeError(f"No files found containing '{old_value}'.")
+    # Keep this intentionally narrow for portfolio safety.
+    files = ["order-ui/index.html"]
+    if not (REPO_ROOT / files[0]).exists():
+        raise RuntimeError("Expected UI file not found: order-ui/index.html")
 
     changed: list[str] = []
     for rel in files:
@@ -211,9 +229,8 @@ def ensure_clean_and_base(base: str) -> None:
 def create_or_reuse_branch(branch: str, base: str) -> None:
     exists = run_cmd("git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}", check=False).returncode == 0
     if exists:
-        run_cmd("git", "checkout", branch)
-    else:
-        run_cmd("git", "checkout", "-b", branch, base)
+        run_cmd("git", "branch", "-D", branch, check=False)
+    run_cmd("git", "checkout", "-b", branch, base)
 
 
 def commit_and_push(branch: str, issue_number: int, changed_files: list[str]) -> str:
@@ -311,60 +328,76 @@ def cleanup_branch(branch: str) -> None:
 
 def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto_merge: bool) -> dict[str, Any]:
     issue_number = int(issue["issueNumber"])
+    branch = ""
+    label_applied = False
+    pr_number: int | None = None
     log(f"Issue #{issue_number}: picked for execution")
     log_step5_event("approved-issue-picked", issue_number=issue_number, metadata={"title": issue.get("title", "")})
 
-    add_label(owner, repo, token, issue_number, "ai-in-progress")
-    log(f"Issue #{issue_number}: applied label ai-in-progress")
-    log_step5_event("approved-issue-marked-in-progress", issue_number=issue_number)
+    try:
+        add_label(owner, repo, token, issue_number, "ai-in-progress")
+        label_applied = True
+        log(f"Issue #{issue_number}: applied label ai-in-progress")
+        log_step5_event("approved-issue-marked-in-progress", issue_number=issue_number)
 
-    log(f"Issue #{issue_number}: building work packet")
-    packet = build_work_packet(issue)
+        log(f"Issue #{issue_number}: building work packet")
+        packet = build_work_packet(issue)
 
-    log(f"Issue #{issue_number}: preparing PR scaffold")
-    scaffold = build_pr_scaffold(packet)
-    branch = scaffold["branchName"]
+        log(f"Issue #{issue_number}: preparing PR scaffold")
+        scaffold = build_pr_scaffold(packet)
+        branch = scaffold["branchName"]
 
-    ensure_clean_and_base("main")
-    log(f"Issue #{issue_number}: creating branch {branch}")
-    create_or_reuse_branch(branch, "main")
+        ensure_clean_and_base("main")
+        log(f"Issue #{issue_number}: creating branch {branch}")
+        create_or_reuse_branch(branch, "main")
 
-    log(f"Issue #{issue_number}: applying implementation")
-    changed_files = apply_issue_change(issue)
-    log_step5_event("issue-implementation-applied", issue_number=issue_number, metadata={"changedFiles": changed_files})
+        log(f"Issue #{issue_number}: applying implementation")
+        changed_files = apply_issue_change(issue)
+        log_step5_event("issue-implementation-applied", issue_number=issue_number, metadata={"changedFiles": changed_files})
 
-    log(f"Issue #{issue_number}: committing and pushing")
-    commit_and_push(branch, issue_number, changed_files)
+        log(f"Issue #{issue_number}: committing and pushing")
+        commit_and_push(branch, issue_number, changed_files)
 
-    log(f"Issue #{issue_number}: creating pull request")
-    pr_number, pr_url = create_pr(owner, repo, token, branch, scaffold)
-    log_step5_event("issue-pr-created", issue_number=issue_number, metadata={"prNumber": pr_number, "prUrl": pr_url})
+        log(f"Issue #{issue_number}: creating pull request")
+        pr_number, pr_url = create_pr(owner, repo, token, branch, scaffold)
+        log_step5_event("issue-pr-created", issue_number=issue_number, metadata={"prNumber": pr_number, "prUrl": pr_url})
 
-    result = {
-        "issueNumber": issue_number,
-        "branch": branch,
-        "prNumber": pr_number,
-        "prUrl": pr_url,
-        "changedFiles": changed_files,
-        "merged": False,
-    }
+        result = {
+            "issueNumber": issue_number,
+            "branch": branch,
+            "prNumber": pr_number,
+            "prUrl": pr_url,
+            "changedFiles": changed_files,
+            "merged": False,
+        }
 
-    if auto_merge:
-        log(f"Issue #{issue_number}: posting ready-to-merge note")
-        post_ready_note(owner, repo, token, pr_number)
+        if auto_merge:
+            log(f"Issue #{issue_number}: posting ready-to-merge note")
+            post_ready_note(owner, repo, token, pr_number)
 
-        log(f"Issue #{issue_number}: merging PR #{pr_number}")
-        merge_pr(owner, repo, token, pr_number)
-        result["merged"] = True
-        log_step5_event("issue-pr-merged", issue_number=issue_number, metadata={"prNumber": pr_number})
+            log(f"Issue #{issue_number}: merging PR #{pr_number}")
+            merge_pr(owner, repo, token, pr_number)
+            result["merged"] = True
+            log_step5_event("issue-pr-merged", issue_number=issue_number, metadata={"prNumber": pr_number})
 
-        log(f"Issue #{issue_number}: cleanup and reconciliation")
-        cleanup_branch(branch)
-        remove_label(owner, repo, token, issue_number, "ai-in-progress")
-        close_issue(owner, repo, token, issue_number)
-        log_step5_event("issue-post-merge-cleanup-completed", issue_number=issue_number, metadata={"branch": branch})
+            log(f"Issue #{issue_number}: cleanup and reconciliation")
+            cleanup_branch(branch)
+            remove_label(owner, repo, token, issue_number, "ai-in-progress")
+            close_issue(owner, repo, token, issue_number)
+            log_step5_event("issue-post-merge-cleanup-completed", issue_number=issue_number, metadata={"branch": branch})
 
-    return result
+        return result
+    except Exception:
+        if label_applied and pr_number is None:
+            try:
+                remove_label(owner, repo, token, issue_number, "ai-in-progress")
+            except Exception:
+                pass
+        try:
+            run_cmd("git", "checkout", "main", check=False)
+        except Exception:
+            pass
+        raise
 
 
 def parse_args() -> argparse.Namespace:
