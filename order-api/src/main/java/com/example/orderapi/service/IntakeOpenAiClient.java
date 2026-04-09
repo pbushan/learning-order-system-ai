@@ -187,6 +187,7 @@ public class IntakeOpenAiClient {
                     MAX_DECOMPOSITION_FALLBACK_COMPONENTS,
                     5
             };
+            int selectedVariant = -1;
             for (int i = 0; i < fieldLimits.length; i++) {
                 Map<String, Object> payloadVariant = new LinkedHashMap<>();
                 payloadVariant.put("requestId", normalizedRequestId);
@@ -199,12 +200,16 @@ public class IntakeOpenAiClient {
                 payloadJson = objectMapper.writeValueAsString(payloadVariant);
                 payloadBytes = payloadJson.getBytes(StandardCharsets.UTF_8).length;
                 if (payloadBytes <= MAX_DECOMPOSITION_PAYLOAD_BYTES) {
+                    selectedVariant = i;
                     break;
                 }
             }
             if (payloadBytes > MAX_DECOMPOSITION_PAYLOAD_BYTES) {
                 log.warn("Decomposition payload too large for requestId={}, bytes={}", normalizedRequestId, payloadBytes);
                 return fallbackDecompositionResult(safeRequestId);
+            }
+            if (selectedVariant > 0) {
+                log.info("Decomposition payload was downscaled for requestId={} using variant={}", normalizedRequestId, selectedVariant);
             }
             requestMessages.add(Map.of("role", "user", "content", payloadJson));
         } catch (Exception ex) {
@@ -447,6 +452,18 @@ public class IntakeOpenAiClient {
                 if (!storyNode.isObject()) {
                     return false;
                 }
+                JsonNode criteriaNode = storyNode.path("acceptanceCriteria");
+                if (!criteriaNode.isMissingNode() && !criteriaNode.isNull() && !criteriaNode.isArray()) {
+                    return false;
+                }
+                JsonNode componentsNode = storyNode.path("affectedComponents");
+                if (!componentsNode.isMissingNode() && !componentsNode.isNull() && !componentsNode.isArray()) {
+                    return false;
+                }
+                JsonNode prSafetyNode = storyNode.path("prSafety");
+                if (!prSafetyNode.isMissingNode() && !prSafetyNode.isNull() && !prSafetyNode.isObject()) {
+                    return false;
+                }
             }
         }
         return true;
@@ -631,7 +648,7 @@ public class IntakeOpenAiClient {
         String jsonOnly = unwrapJson(content);
         try {
             JsonNode parsed = objectMapper.readTree(jsonOnly);
-            return parsed != null && parsed.isObject() ? parsed : null;
+            return parsed;
         } catch (Exception ex) {
             int firstBrace = jsonOnly.indexOf('{');
             int lastBrace = jsonOnly.lastIndexOf('}');
@@ -639,7 +656,7 @@ public class IntakeOpenAiClient {
                 String candidate = jsonOnly.substring(firstBrace, lastBrace + 1);
                 try {
                     JsonNode parsed = objectMapper.readTree(candidate);
-                    return parsed != null && parsed.isObject() ? parsed : null;
+                    return parsed;
                 } catch (Exception ignored) {
                     // continue to balanced-object extraction fallback
                 }
@@ -648,7 +665,7 @@ public class IntakeOpenAiClient {
             if (firstObject != null) {
                 try {
                     JsonNode parsed = objectMapper.readTree(firstObject);
-                    return parsed != null && parsed.isObject() ? parsed : null;
+                    return parsed;
                 } catch (Exception ignored) {
                     return null;
                 }
