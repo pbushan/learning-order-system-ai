@@ -30,7 +30,6 @@ public class DecompositionStory {
     private String estimatedSize;
 
     @JsonProperty("prSafety")
-    @NotNull(message = "prSafety is required")
     @Valid
     private PrSafety prSafety;
 
