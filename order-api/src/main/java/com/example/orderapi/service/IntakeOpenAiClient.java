@@ -1,6 +1,9 @@
 package com.example.orderapi.service;
 
 import com.example.orderapi.dto.ChatMessage;
+import com.example.orderapi.dto.DecompositionResponse;
+import com.example.orderapi.dto.DecompositionStory;
+import com.example.orderapi.dto.PrSafety;
 import com.example.orderapi.dto.StructuredIntakeData;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,6 +23,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.nio.charset.StandardCharsets;
 
 @Service
 public class IntakeOpenAiClient {
@@ -29,21 +33,37 @@ public class IntakeOpenAiClient {
     static final int MAX_HISTORY_MESSAGES = Math.max(0, MAX_TOTAL_MESSAGES - 1);
     static final int MAX_CONTENT_CHARS = 2000;
     static final int TRUNCATION_BOUNDARY_WINDOW = 80;
+    private static final int MAX_DECOMPOSITION_PAYLOAD_BYTES = 12000;
+    private static final int MAX_DECOMPOSITION_REQUEST_BYTES = 20000;
+    private static final int MAX_DECOMPOSITION_RESPONSE_BYTES = 120000;
+    private static final int MAX_DECOMPOSITION_FIELD_CHARS = 2000;
+    private static final int MAX_DECOMPOSITION_COMPONENTS = 20;
+    private static final int MAX_DECOMPOSITION_FALLBACK_FIELD_CHARS = 500;
+    private static final int MAX_DECOMPOSITION_FALLBACK_COMPONENTS = 10;
     private static final String SYSTEM_PROMPT = "You are a product intake assistant. Classify the request as bug or feature. "
             + "Ask only minimal clarifying questions. Stop when enough information is collected. "
             + "Return valid JSON only with keys: reply, intakeComplete, structuredData. "
             + "structuredData keys: type, title, description, stepsToReproduce, expectedBehavior, priority, affectedComponents.";
+    private static final String DECOMPOSITION_SYSTEM_PROMPT = "You are an engineering task decomposition assistant. "
+            + "Break one bug or feature into the smallest useful implementation stories. "
+            + "Optimize for PR safety and reviewability, prefer independently testable stories, "
+            + "prefer stories likely under 30000-char patches, avoid broad/vague tasks. "
+            + "Include acceptanceCriteria, affectedComponents, estimatedSize, and prSafety notes. "
+            + "Return valid JSON only with keys: requestId, decompositionComplete, stories.";
 
     private final ObjectMapper objectMapper;
     private final RestClient restClient;
     private final String model;
+    private final String decompositionModel;
     private final boolean configured;
 
     public IntakeOpenAiClient(ObjectMapper objectMapper,
                               @Value("${app.intake.openai.api-key:}") String apiKey,
-                              @Value("${app.intake.model:gpt-4.1-mini}") String model) {
+                              @Value("${app.intake.model:gpt-4.1-mini}") String model,
+                              @Value("${app.intake.decomposition.model:${app.intake.model:gpt-4.1-mini}}") String decompositionModel) {
         this.objectMapper = objectMapper;
         this.model = model;
+        this.decompositionModel = decompositionModel;
         if (!StringUtils.hasText(apiKey)) {
             this.configured = false;
             this.restClient = null;
@@ -131,6 +151,97 @@ public class IntakeOpenAiClient {
         }
     }
 
+    public DecompositionResponse decompose(String requestId, StructuredIntakeData structuredData) {
+        String normalizedRequestId = requestId != null ? requestId.trim() : null;
+        String safeRequestId = safeRequestId(normalizedRequestId);
+        if (!StringUtils.hasText(normalizedRequestId)) {
+            log.warn("Decomposition requestId is blank; returning safe fallback");
+            return fallbackDecompositionResult(safeRequestId);
+        }
+        if (!isValidRequestId(normalizedRequestId)) {
+            log.warn("Decomposition requestId failed validation; returning safe fallback");
+            return fallbackDecompositionResult(safeRequestId);
+        }
+        if (structuredData == null) {
+            return fallbackDecompositionResult(safeRequestId);
+        }
+        if (!configured || restClient == null) {
+            return fallbackDecompositionResult(safeRequestId);
+        }
+
+        List<Map<String, String>> requestMessages = new ArrayList<>();
+        requestMessages.add(Map.of("role", "system", "content", DECOMPOSITION_SYSTEM_PROMPT));
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("requestId", normalizedRequestId);
+        try {
+            String payloadJson = null;
+            int payloadBytes = Integer.MAX_VALUE;
+            int[] fieldLimits = {
+                    MAX_DECOMPOSITION_FIELD_CHARS,
+                    MAX_DECOMPOSITION_FALLBACK_FIELD_CHARS,
+                    250
+            };
+            int[] componentLimits = {
+                    MAX_DECOMPOSITION_COMPONENTS,
+                    MAX_DECOMPOSITION_FALLBACK_COMPONENTS,
+                    5
+            };
+            int selectedVariant = -1;
+            for (int i = 0; i < fieldLimits.length; i++) {
+                Map<String, Object> payloadVariant = new LinkedHashMap<>();
+                payloadVariant.put("requestId", normalizedRequestId);
+                payloadVariant.put("structuredData",
+                        normalizeStructuredDataForDecomposition(
+                                structuredData,
+                                fieldLimits[i],
+                                componentLimits[i]
+                        ));
+                payloadJson = objectMapper.writeValueAsString(payloadVariant);
+                payloadBytes = payloadJson.getBytes(StandardCharsets.UTF_8).length;
+                if (payloadBytes <= MAX_DECOMPOSITION_PAYLOAD_BYTES) {
+                    selectedVariant = i;
+                    break;
+                }
+            }
+            if (payloadBytes > MAX_DECOMPOSITION_PAYLOAD_BYTES) {
+                log.warn("Decomposition payload too large for requestId={}, bytes={}", normalizedRequestId, payloadBytes);
+                return fallbackDecompositionResult(safeRequestId);
+            }
+            if (selectedVariant > 0) {
+                log.info("Decomposition payload was downscaled for requestId={} using variant={}", normalizedRequestId, selectedVariant);
+            }
+            requestMessages.add(Map.of("role", "user", "content", payloadJson));
+        } catch (Exception ex) {
+            log.warn("Failed to serialize decomposition payload", ex);
+            return fallbackDecompositionResult(safeRequestId);
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", decompositionModel);
+        body.put("messages", requestMessages);
+        body.put("temperature", 0.1);
+        body.put("response_format", Map.of("type", "json_object"));
+
+        try {
+            String requestJson = objectMapper.writeValueAsString(body);
+            int requestBytes = requestJson.getBytes(StandardCharsets.UTF_8).length;
+            if (requestBytes > MAX_DECOMPOSITION_REQUEST_BYTES) {
+                log.warn("Decomposition request too large for requestId={}, bytes={}", normalizedRequestId, requestBytes);
+                return fallbackDecompositionResult(safeRequestId);
+            }
+            String raw = restClient.post()
+                    .uri("/chat/completions")
+                    .body(requestJson)
+                    .retrieve()
+                    .body(String.class);
+            return parseDecompositionResult(raw, safeRequestId);
+        } catch (Exception ex) {
+            log.warn("OpenAI decomposition request failed: {}", ex.getClass().getSimpleName());
+            return fallbackDecompositionResult(safeRequestId);
+        }
+    }
+
     private NormalizedIntakeResult parseNormalizedResult(String rawResponse) {
         try {
             if (!StringUtils.hasText(rawResponse)) {
@@ -192,6 +303,262 @@ public class IntakeOpenAiClient {
         }
         data.setAffectedComponents(affectedComponents);
         return data;
+    }
+
+    private DecompositionResponse parseDecompositionResult(String rawResponse, String requestId) {
+        try {
+            if (!StringUtils.hasText(rawResponse)) {
+                log.warn("OpenAI decomposition response body was empty");
+                return fallbackDecompositionResult(requestId);
+            }
+            if (rawResponse.getBytes(StandardCharsets.UTF_8).length > MAX_DECOMPOSITION_RESPONSE_BYTES) {
+                log.warn("OpenAI decomposition response too large for requestId={}", requestId);
+                return fallbackDecompositionResult(requestId);
+            }
+            JsonNode root = objectMapper.readTree(rawResponse);
+            JsonNode decompositionJson = extractDecompositionJson(root);
+            if (decompositionJson == null || decompositionJson.isNull() || decompositionJson.isMissingNode()) {
+                log.warn("OpenAI decomposition JSON extraction failed for configured chat response shape");
+                return fallbackDecompositionResult(requestId);
+            }
+            if (!isDecompositionPayload(decompositionJson)) {
+                log.warn("OpenAI decomposition JSON does not match expected payload shape");
+                return fallbackDecompositionResult(requestId);
+            }
+
+            DecompositionResponse response = new DecompositionResponse();
+            response.setRequestId(requestId);
+            response.setDecompositionComplete(toBoolean(decompositionJson.path("decompositionComplete")));
+
+            List<DecompositionStory> stories = new ArrayList<>();
+            JsonNode storiesNode = decompositionJson.path("stories");
+            if (storiesNode.isArray()) {
+                for (JsonNode item : storiesNode) {
+                    if (item == null || !item.isObject()) {
+                        continue;
+                    }
+                    stories.add(toDecompositionStory(item));
+                }
+            }
+            response.setStories(stories);
+            return response;
+        } catch (Exception ex) {
+            log.warn("Failed to parse OpenAI decomposition response JSON", ex);
+            return fallbackDecompositionResult(requestId);
+        }
+    }
+
+    private DecompositionStory toDecompositionStory(JsonNode node) {
+        DecompositionStory story = new DecompositionStory();
+        story.setStoryId(truncateForDecomposition(node.path("storyId").asText(null)));
+        story.setTitle(truncateForDecomposition(node.path("title").asText(null)));
+        story.setDescription(truncateForDecomposition(node.path("description").asText(null)));
+        story.setEstimatedSize(truncateForDecomposition(node.path("estimatedSize").asText(null)));
+
+        List<String> acceptanceCriteria = new ArrayList<>();
+        JsonNode criteriaNode = node.path("acceptanceCriteria");
+        if (criteriaNode.isArray()) {
+            for (JsonNode item : criteriaNode) {
+                String value = blankToNull(item.asText(null));
+                if (value != null) {
+                    acceptanceCriteria.add(truncateForDecomposition(value));
+                }
+            }
+        }
+        story.setAcceptanceCriteria(acceptanceCriteria);
+
+        List<String> affectedComponents = new ArrayList<>();
+        JsonNode componentsNode = node.path("affectedComponents");
+        if (componentsNode.isArray()) {
+            for (JsonNode item : componentsNode) {
+                String value = blankToNull(item.asText(null));
+                if (value != null) {
+                    affectedComponents.add(truncateForDecomposition(value));
+                }
+            }
+        }
+        story.setAffectedComponents(affectedComponents);
+        story.setPrSafety(toPrSafety(node.path("prSafety")));
+        return story;
+    }
+
+    private PrSafety toPrSafety(JsonNode node) {
+        PrSafety prSafety = new PrSafety();
+        if (node == null || node.isMissingNode() || node.isNull() || !node.isObject()) {
+            prSafety.setTarget("under-30000-char-patch");
+            prSafety.setNotes(null);
+            return prSafety;
+        }
+        String target = blankToNull(node.path("target").asText(null));
+        prSafety.setTarget(target != null ? truncateForDecomposition(target) : "under-30000-char-patch");
+        prSafety.setNotes(truncateForDecomposition(node.path("notes").asText(null)));
+        return prSafety;
+    }
+
+    private JsonNode extractDecompositionJson(JsonNode root) {
+        JsonNode choices = root.path("choices");
+        if (!choices.isArray()) {
+            return null;
+        }
+        for (JsonNode choice : choices) {
+            JsonNode messageNode = choice.path("message");
+            if (!messageNode.isObject()) {
+                continue;
+            }
+            JsonNode contentNode = messageNode.path("content");
+            if (contentNode.isObject() && isDecompositionPayload(contentNode)) {
+                return contentNode;
+            }
+            JsonNode fromContent = parseJsonFromContentNode(contentNode);
+            if (fromContent != null && fromContent.isObject() && isDecompositionPayload(fromContent)) {
+                return fromContent;
+            }
+            JsonNode fromText = parseJsonFromContent(contentNode.asText(""));
+            if (fromText != null && fromText.isObject() && isDecompositionPayload(fromText)) {
+                return fromText;
+            }
+            JsonNode parsedNode = messageNode.path("parsed");
+            if (parsedNode != null && parsedNode.isObject() && isDecompositionPayload(parsedNode)) {
+                return parsedNode;
+            }
+        }
+        return null;
+    }
+
+    private boolean isDecompositionPayload(JsonNode node) {
+        if (!node.isObject()) {
+            return false;
+        }
+        JsonNode completionNode = node.path("decompositionComplete");
+        if (!completionNode.isMissingNode()
+                && !completionNode.isNull()
+                && !completionNode.isBoolean()
+                && !completionNode.isNumber()
+                && !completionNode.isTextual()) {
+            return false;
+        }
+        JsonNode storiesNode = node.path("stories");
+        if (!storiesNode.isMissingNode() && !storiesNode.isNull() && !storiesNode.isArray()) {
+            return false;
+        }
+        boolean completionTrue = toBoolean(completionNode);
+        if (completionTrue && !storiesNode.isArray()) {
+            return false;
+        }
+        if (storiesNode.isArray()) {
+            if (completionTrue && storiesNode.isEmpty()) {
+                return false;
+            }
+            for (JsonNode storyNode : storiesNode) {
+                if (storyNode == null || storyNode.isNull()) {
+                    continue;
+                }
+                if (!storyNode.isObject()) {
+                    return false;
+                }
+                JsonNode criteriaNode = storyNode.path("acceptanceCriteria");
+                if (!criteriaNode.isMissingNode() && !criteriaNode.isNull() && !criteriaNode.isArray()) {
+                    return false;
+                }
+                JsonNode componentsNode = storyNode.path("affectedComponents");
+                if (!componentsNode.isMissingNode() && !componentsNode.isNull() && !componentsNode.isArray()) {
+                    return false;
+                }
+                JsonNode prSafetyNode = storyNode.path("prSafety");
+                if (!prSafetyNode.isMissingNode() && !prSafetyNode.isNull() && !prSafetyNode.isObject()) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private boolean isValidRequestId(String requestId) {
+        if (!StringUtils.hasText(requestId)) {
+            return false;
+        }
+        if (requestId.length() > 256) {
+            return false;
+        }
+        for (int i = 0; i < requestId.length(); i++) {
+            char ch = requestId.charAt(i);
+            if (!Character.isLetterOrDigit(ch) && ch != '-' && ch != '_' && ch != ':' && ch != '.') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private Map<String, Object> normalizeStructuredDataForDecomposition(StructuredIntakeData structuredData,
+                                                                        int maxFieldChars,
+                                                                        int maxComponents) {
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        putIfNotNull(normalized, "type", blankToNull(structuredData.getType()));
+        putIfNotNull(normalized, "title", truncateForDecomposition(structuredData.getTitle(), maxFieldChars));
+        putIfNotNull(normalized, "description", truncateForDecomposition(structuredData.getDescription(), maxFieldChars));
+        putIfNotNull(normalized, "stepsToReproduce", truncateForDecomposition(structuredData.getStepsToReproduce(), maxFieldChars));
+        putIfNotNull(normalized, "expectedBehavior", truncateForDecomposition(structuredData.getExpectedBehavior(), maxFieldChars));
+        putIfNotNull(normalized, "priority", blankToNull(structuredData.getPriority()));
+
+        List<String> affectedComponents = new ArrayList<>();
+        if (structuredData.getAffectedComponents() != null) {
+            for (String component : structuredData.getAffectedComponents()) {
+                String value = blankToNull(component);
+                if (value != null) {
+                    affectedComponents.add(truncateForDecomposition(value, maxFieldChars));
+                    if (affectedComponents.size() >= maxComponents) {
+                        break;
+                    }
+                }
+            }
+        }
+        if (!affectedComponents.isEmpty()) {
+            normalized.put("affectedComponents", affectedComponents);
+        }
+        return normalized;
+    }
+
+    private void putIfNotNull(Map<String, Object> target, String key, Object value) {
+        if (value != null) {
+            target.put(key, value);
+        }
+    }
+
+    private String truncateForDecomposition(String value) {
+        return truncateForDecomposition(value, MAX_DECOMPOSITION_FIELD_CHARS);
+    }
+
+    private String truncateForDecomposition(String value, int maxChars) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String trimmed = value.trim();
+        if (trimmed.length() <= maxChars) {
+            return trimmed;
+        }
+        int boundary = safeBoundary(trimmed, maxChars);
+        int clampedBoundary = Math.max(1, Math.min(boundary, trimmed.length()));
+        return trimmed.substring(0, clampedBoundary);
+    }
+
+    private boolean toBoolean(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return false;
+        }
+        if (node.isBoolean()) {
+            return node.asBoolean(false);
+        }
+        if (node.isTextual()) {
+            String value = blankToNull(node.asText(null));
+            if (value == null) {
+                return false;
+            }
+            return Boolean.parseBoolean(value);
+        }
+        if (node.isNumber()) {
+            return node.asInt(0) != 0;
+        }
+        return false;
     }
 
     private String normalizeRole(String role) {
@@ -284,10 +651,26 @@ public class IntakeOpenAiClient {
         }
         String jsonOnly = unwrapJson(content);
         try {
-            return objectMapper.readTree(jsonOnly);
+            JsonNode parsed = objectMapper.readTree(jsonOnly);
+            return parsed;
         } catch (Exception ex) {
+            int firstBrace = jsonOnly.indexOf('{');
+            int lastBrace = jsonOnly.lastIndexOf('}');
+            if (firstBrace >= 0 && lastBrace > firstBrace) {
+                String candidate = jsonOnly.substring(firstBrace, lastBrace + 1);
+                try {
+                    JsonNode parsed = objectMapper.readTree(candidate);
+                    return parsed;
+                } catch (Exception ignored) {
+                    return null;
+                }
+            }
             return null;
         }
+    }
+
+    private String safeRequestId(String requestId) {
+        return StringUtils.hasText(requestId) ? requestId.trim() : "unknown-request";
     }
 
     private String blankToNull(String value) {
@@ -393,6 +776,14 @@ public class IntakeOpenAiClient {
                 false,
                 fallbackData
         );
+    }
+
+    private DecompositionResponse fallbackDecompositionResult(String requestId) {
+        DecompositionResponse fallback = new DecompositionResponse();
+        fallback.setRequestId(StringUtils.hasText(requestId) ? requestId : "unknown-request");
+        fallback.setDecompositionComplete(false);
+        fallback.setStories(Collections.emptyList());
+        return fallback;
     }
 
     public static class NormalizedIntakeResult {
