@@ -441,10 +441,14 @@ public class IntakeOpenAiClient {
         if (!storiesNode.isMissingNode() && !storiesNode.isNull() && !storiesNode.isArray()) {
             return false;
         }
-        if (toBoolean(completionNode) && !storiesNode.isArray()) {
+        boolean completionTrue = toBoolean(completionNode);
+        if (completionTrue && !storiesNode.isArray()) {
             return false;
         }
         if (storiesNode.isArray()) {
+            if (completionTrue && storiesNode.isEmpty()) {
+                return false;
+            }
             for (JsonNode storyNode : storiesNode) {
                 if (storyNode == null || storyNode.isNull()) {
                     continue;
@@ -658,57 +662,11 @@ public class IntakeOpenAiClient {
                     JsonNode parsed = objectMapper.readTree(candidate);
                     return parsed;
                 } catch (Exception ignored) {
-                    // continue to balanced-object extraction fallback
-                }
-            }
-            String firstObject = extractFirstJsonObject(jsonOnly);
-            if (firstObject != null) {
-                try {
-                    JsonNode parsed = objectMapper.readTree(firstObject);
-                    return parsed;
-                } catch (Exception ignored) {
                     return null;
                 }
             }
             return null;
         }
-    }
-
-    private String extractFirstJsonObject(String content) {
-        int start = -1;
-        int depth = 0;
-        boolean inString = false;
-        boolean escaped = false;
-        for (int i = 0; i < content.length(); i++) {
-            char ch = content.charAt(i);
-            if (escaped) {
-                escaped = false;
-                continue;
-            }
-            if (ch == '\\') {
-                escaped = true;
-                continue;
-            }
-            if (ch == '"') {
-                inString = !inString;
-                continue;
-            }
-            if (inString) {
-                continue;
-            }
-            if (ch == '{') {
-                if (depth == 0) {
-                    start = i;
-                }
-                depth++;
-            } else if (ch == '}' && depth > 0) {
-                depth--;
-                if (depth == 0 && start >= 0) {
-                    return content.substring(start, i + 1);
-                }
-            }
-        }
-        return null;
     }
 
     private String safeRequestId(String requestId) {
