@@ -11,6 +11,7 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -91,6 +92,42 @@ public class GitHubIssueClientService {
         summary.setTitle(response.getTitle());
         summary.setLabels(extractLabelNames(response.getLabels()));
         return summary;
+    }
+
+    public void addIssueLabel(long issueNumber, String label) {
+        if (!StringUtils.hasText(token)) {
+            throw new IllegalStateException("GitHub token is not configured. Set app.github.token or GITHUB_TOKEN.");
+        }
+        if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
+            throw new IllegalStateException("GitHub repository is not configured. Set app.github.owner and app.github.repo.");
+        }
+        if (issueNumber <= 0) {
+            throw new IllegalArgumentException("issueNumber must be > 0");
+        }
+        if (!StringUtils.hasText(label)) {
+            throw new IllegalArgumentException("label is required");
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("labels", List.of(label.trim()));
+
+        try {
+            restClient.post()
+                    .uri("/repos/{owner}/{repo}/issues/{issueNumber}/labels", owner.trim(), repo.trim(), issueNumber)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                    .body(body)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientResponseException ex) {
+            String responseBody = ex.getResponseBodyAsString();
+            if (ex.getStatusCode().value() == 422
+                    && responseBody != null
+                    && (responseBody.contains("already_exists") || responseBody.toLowerCase().contains("already exists"))) {
+                // Treat label-already-present responses as idempotent success for pickup.
+                return;
+            }
+            throw ex;
+        }
     }
 
     public List<ApprovedGitHubIssue> discoverApprovedIssues() {
