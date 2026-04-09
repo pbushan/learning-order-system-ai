@@ -188,13 +188,15 @@ public class IntakeOpenAiClient {
                     5
             };
             for (int i = 0; i < fieldLimits.length; i++) {
-                payload.put("structuredData",
+                Map<String, Object> payloadVariant = new LinkedHashMap<>();
+                payloadVariant.put("requestId", normalizedRequestId);
+                payloadVariant.put("structuredData",
                         normalizeStructuredDataForDecomposition(
                                 structuredData,
                                 fieldLimits[i],
                                 componentLimits[i]
                         ));
-                payloadJson = objectMapper.writeValueAsString(payload);
+                payloadJson = objectMapper.writeValueAsString(payloadVariant);
                 payloadBytes = payloadJson.getBytes(StandardCharsets.UTF_8).length;
                 if (payloadBytes <= MAX_DECOMPOSITION_PAYLOAD_BYTES) {
                     break;
@@ -628,14 +630,16 @@ public class IntakeOpenAiClient {
         }
         String jsonOnly = unwrapJson(content);
         try {
-            return objectMapper.readTree(jsonOnly);
+            JsonNode parsed = objectMapper.readTree(jsonOnly);
+            return parsed != null && parsed.isObject() ? parsed : null;
         } catch (Exception ex) {
             int firstBrace = jsonOnly.indexOf('{');
             int lastBrace = jsonOnly.lastIndexOf('}');
             if (firstBrace >= 0 && lastBrace > firstBrace) {
                 String candidate = jsonOnly.substring(firstBrace, lastBrace + 1);
                 try {
-                    return objectMapper.readTree(candidate);
+                    JsonNode parsed = objectMapper.readTree(candidate);
+                    return parsed != null && parsed.isObject() ? parsed : null;
                 } catch (Exception ignored) {
                     // continue to balanced-object extraction fallback
                 }
@@ -643,7 +647,8 @@ public class IntakeOpenAiClient {
             String firstObject = extractFirstJsonObject(jsonOnly);
             if (firstObject != null) {
                 try {
-                    return objectMapper.readTree(firstObject);
+                    JsonNode parsed = objectMapper.readTree(firstObject);
+                    return parsed != null && parsed.isObject() ? parsed : null;
                 } catch (Exception ignored) {
                     return null;
                 }
@@ -800,7 +805,7 @@ public class IntakeOpenAiClient {
 
     private DecompositionResponse fallbackDecompositionResult(String requestId) {
         DecompositionResponse fallback = new DecompositionResponse();
-        fallback.setRequestId(requestId);
+        fallback.setRequestId(StringUtils.hasText(requestId) ? requestId : "unknown-request");
         fallback.setDecompositionComplete(false);
         fallback.setStories(Collections.emptyList());
         return fallback;
