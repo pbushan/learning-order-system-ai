@@ -3,6 +3,8 @@ package com.example.orderapi.service;
 import com.example.orderapi.dto.DecompositionRequest;
 import com.example.orderapi.dto.DecompositionResponse;
 import com.example.orderapi.dto.StructuredIntakeData;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -10,6 +12,8 @@ import java.util.Collections;
 
 @Service
 public class DecompositionService {
+
+    private static final Logger log = LoggerFactory.getLogger(DecompositionService.class);
 
     private final IntakeOpenAiClient intakeOpenAiClient;
 
@@ -25,6 +29,7 @@ public class DecompositionService {
             DecompositionResponse response = intakeOpenAiClient.decompose(requestId, structuredData);
             return normalizeResponse(response, requestId);
         } catch (Exception ex) {
+            log.warn("Decomposition call failed for requestId={}: {}", requestId, ex.getClass().getSimpleName());
             return fallback(requestId);
         }
     }
