@@ -2,7 +2,6 @@ package com.example.orderapi.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -94,19 +93,5 @@ public class DecompositionStory {
 
     public void setPrSafety(PrSafety prSafety) {
         this.prSafety = prSafety;
-    }
-
-    @AssertTrue(message = "acceptanceCriteria entries must be non-blank")
-    public boolean isAcceptanceCriteriaEntriesValid() {
-        return acceptanceCriteria != null && acceptanceCriteria.stream().allMatch(this::isNonBlank);
-    }
-
-    @AssertTrue(message = "affectedComponents entries must be non-blank")
-    public boolean isAffectedComponentsEntriesValid() {
-        return affectedComponents != null && affectedComponents.stream().allMatch(this::isNonBlank);
-    }
-
-    private boolean isNonBlank(String value) {
-        return value != null && !value.isBlank();
     }
 }
