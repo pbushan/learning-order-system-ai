@@ -12,6 +12,12 @@ from typing import Any
 from step5_audit_log import log_step5_event
 
 
+def fail(error: str) -> int:
+    print(error, file=sys.stderr)
+    log_step5_event("work-packet-created", error=error)
+    return 1
+
+
 def normalize_slug(text: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return slug[:40] or "work"
@@ -81,42 +87,24 @@ def main() -> int:
     try:
         issue = json.loads(raw)
     except json.JSONDecodeError as exc:
-        error = f"Invalid issue JSON: {exc}"
-        print(error, file=sys.stderr)
-        log_step5_event("work-packet-created", error=error)
-        return 1
+        return fail(f"Invalid issue JSON: {exc}")
 
     if not isinstance(issue, dict):
-        error = "Invalid issue JSON: expected an object."
-        print(error, file=sys.stderr)
-        log_step5_event("work-packet-created", error=error)
-        return 1
+        return fail("Invalid issue JSON: expected an object.")
 
     if "issueNumber" not in issue or "title" not in issue:
-        error = "Invalid issue JSON: requires issueNumber and title."
-        print(error, file=sys.stderr)
-        log_step5_event("work-packet-created", error=error)
-        return 1
+        return fail("Invalid issue JSON: requires issueNumber and title.")
 
     if not str(issue.get("title", "")).strip():
-        error = "Invalid issue JSON: title must be non-empty."
-        print(error, file=sys.stderr)
-        log_step5_event("work-packet-created", error=error)
-        return 1
+        return fail("Invalid issue JSON: title must be non-empty.")
 
     try:
         issue_number = int(issue["issueNumber"])
     except (TypeError, ValueError):
-        error = "Invalid issue JSON: issueNumber must be numeric."
-        print(error, file=sys.stderr)
-        log_step5_event("work-packet-created", error=error)
-        return 1
+        return fail("Invalid issue JSON: issueNumber must be numeric.")
 
     if issue_number <= 0:
-        error = "Invalid issue JSON: issueNumber must be > 0."
-        print(error, file=sys.stderr)
-        log_step5_event("work-packet-created", error=error)
-        return 1
+        return fail("Invalid issue JSON: issueNumber must be > 0.")
 
     issue["issueNumber"] = issue_number
     packet = build_work_packet(issue)

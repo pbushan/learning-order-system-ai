@@ -12,6 +12,12 @@ from typing import Any
 from step5_audit_log import log_step5_event
 
 
+def fail(error: str) -> int:
+    print(error, file=sys.stderr)
+    log_step5_event("pr-scaffold-prepared", error=error)
+    return 1
+
+
 def normalize_slug(text: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return slug[:40] or "work"
@@ -71,40 +77,22 @@ def main() -> int:
     try:
         packet = json.loads(raw)
     except json.JSONDecodeError as exc:
-        error = f"Invalid work packet JSON: {exc}"
-        print(error, file=sys.stderr)
-        log_step5_event("pr-scaffold-prepared", error=error)
-        return 1
+        return fail(f"Invalid work packet JSON: {exc}")
 
     if not isinstance(packet, dict):
-        error = "Invalid work packet JSON: expected an object."
-        print(error, file=sys.stderr)
-        log_step5_event("pr-scaffold-prepared", error=error)
-        return 1
+        return fail("Invalid work packet JSON: expected an object.")
     if "issueNumber" not in packet or "title" not in packet:
-        error = "Invalid work packet JSON: requires issueNumber and title."
-        print(error, file=sys.stderr)
-        log_step5_event("pr-scaffold-prepared", error=error)
-        return 1
+        return fail("Invalid work packet JSON: requires issueNumber and title.")
 
     try:
         issue_number = int(packet["issueNumber"])
     except (TypeError, ValueError):
-        error = "Invalid work packet JSON: issueNumber must be numeric."
-        print(error, file=sys.stderr)
-        log_step5_event("pr-scaffold-prepared", error=error)
-        return 1
+        return fail("Invalid work packet JSON: issueNumber must be numeric.")
     if issue_number <= 0:
-        error = "Invalid work packet JSON: issueNumber must be > 0."
-        print(error, file=sys.stderr)
-        log_step5_event("pr-scaffold-prepared", error=error)
-        return 1
+        return fail("Invalid work packet JSON: issueNumber must be > 0.")
 
     if not str(packet["title"]).strip():
-        error = "Invalid work packet JSON: title must be non-empty."
-        print(error, file=sys.stderr)
-        log_step5_event("pr-scaffold-prepared", error=error)
-        return 1
+        return fail("Invalid work packet JSON: title must be non-empty.")
 
     packet["issueNumber"] = issue_number
     scaffold = build_scaffold(packet)
