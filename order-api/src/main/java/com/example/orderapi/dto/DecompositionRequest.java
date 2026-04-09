@@ -1,7 +1,6 @@
 package com.example.orderapi.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 
 public class DecompositionRequest {
@@ -11,7 +10,6 @@ public class DecompositionRequest {
 
     @JsonProperty("structuredData")
     @NotNull(message = "structuredData is required")
-    @Valid
     private StructuredIntakeData structuredData;
 
     public String getRequestId() {
