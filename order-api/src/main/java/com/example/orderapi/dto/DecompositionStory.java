@@ -4,7 +4,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 
 import java.util.List;
@@ -23,11 +22,9 @@ public class DecompositionStory {
     private String description;
 
     @JsonProperty("acceptanceCriteria")
-    @NotEmpty(message = "acceptanceCriteria is required")
     private List<String> acceptanceCriteria;
 
     @JsonProperty("affectedComponents")
-    @NotEmpty(message = "affectedComponents is required")
     private List<String> affectedComponents;
 
     @JsonProperty("estimatedSize")
@@ -96,14 +93,14 @@ public class DecompositionStory {
 
     @AssertTrue(message = "acceptanceCriteria entries must be non-blank")
     public boolean isAcceptanceCriteriaEntriesValid() {
-        return acceptanceCriteria == null || acceptanceCriteria.isEmpty()
-                || acceptanceCriteria.stream().allMatch(this::isNonBlank);
+        return acceptanceCriteria != null && !acceptanceCriteria.isEmpty()
+                && acceptanceCriteria.stream().allMatch(this::isNonBlank);
     }
 
     @AssertTrue(message = "affectedComponents entries must be non-blank")
     public boolean isAffectedComponentsEntriesValid() {
-        return affectedComponents == null || affectedComponents.isEmpty()
-                || affectedComponents.stream().allMatch(this::isNonBlank);
+        return affectedComponents != null && !affectedComponents.isEmpty()
+                && affectedComponents.stream().allMatch(this::isNonBlank);
     }
 
     private boolean isNonBlank(String value) {
