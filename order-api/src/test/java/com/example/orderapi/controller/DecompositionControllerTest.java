@@ -43,6 +43,33 @@ class DecompositionControllerTest {
     }
 
     @Test
+    void completeToGitHub_usesRequestIdFallbackWhenDecompositionRequestIdMissing() {
+        DecompositionService decompositionService = mock(DecompositionService.class);
+        GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
+        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService);
+
+        DecompositionResponse decompositionResponse = new DecompositionResponse();
+        decompositionResponse.setRequestId(null);
+        decompositionResponse.setDecompositionComplete(true);
+        decompositionResponse.setStories(List.of(sampleStory()));
+        when(decompositionService.decompose(any(DecompositionRequest.class))).thenReturn(decompositionResponse);
+
+        when(issueCreationService.createFromDecomposition(any(GitHubIssueCreateRequest.class))).thenAnswer(invocation -> {
+            GitHubIssueCreateRequest req = invocation.getArgument(0);
+            GitHubIssueCreateResponse resp = new GitHubIssueCreateResponse();
+            resp.setRequestId(req.getRequestId());
+            resp.setIssuesCreated(true);
+            resp.setIssues(List.of(sampleIssue()));
+            return resp;
+        });
+
+        ResponseEntity<GitHubIssueCreateResponse> response = controller.completeToGitHub(sampleDecompositionRequest("req-fallback", "feature"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals("req-fallback", response.getBody().getRequestId());
+    }
+
+    @Test
     void completeToGitHub_returnsBadRequestWhenSourceTypeMissing() {
         DecompositionService decompositionService = mock(DecompositionService.class);
         GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);

@@ -46,7 +46,7 @@ public class DecompositionController {
             }
 
             GitHubIssueCreateRequest issueRequest = new GitHubIssueCreateRequest();
-            issueRequest.setRequestId(decomposition.getRequestId());
+            issueRequest.setRequestId(resolveRequestId(decomposition.getRequestId(), request));
             issueRequest.setSourceType(resolveSourceType(request));
             issueRequest.setStories(decomposition.getStories());
             GitHubIssueCreateResponse issueResponse = gitHubIssueCreationService.createFromDecomposition(issueRequest);
@@ -92,10 +92,17 @@ public class DecompositionController {
 
     private GitHubIssueCreateResponse githubFailureResponse(DecompositionRequest request) {
         GitHubIssueCreateResponse response = new GitHubIssueCreateResponse();
-        String requestId = request != null ? request.getRequestId() : null;
-        response.setRequestId((requestId != null && !requestId.isBlank()) ? requestId.trim() : "unknown-request");
+        response.setRequestId(resolveRequestId(null, request));
         response.setIssuesCreated(false);
         response.setIssues(Collections.emptyList());
         return response;
+    }
+
+    private String resolveRequestId(String preferredRequestId, DecompositionRequest request) {
+        if (preferredRequestId != null && !preferredRequestId.isBlank()) {
+            return preferredRequestId.trim();
+        }
+        String requestId = request != null ? request.getRequestId() : null;
+        return (requestId != null && !requestId.isBlank()) ? requestId.trim() : "unknown-request";
     }
 }
