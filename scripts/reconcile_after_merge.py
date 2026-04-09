@@ -38,6 +38,10 @@ def is_ancestor(ancestor_ref: str, descendant_ref: str) -> bool:
     ).returncode == 0
 
 
+def local_branch_merged_into_base(branch: str, base: str) -> bool:
+    return branch_exists_local(branch) and branch_exists_local(base) and is_ancestor(branch, base)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Reconcile local/remote state after merge.")
     parser.add_argument("--branch", required=True, help="Working branch to clean up.")
@@ -48,16 +52,13 @@ def main() -> int:
     result = {"branch": args.branch, "base": args.base, "remote": args.remote, "merged": False, "cleaned": False}
     try:
         run("git", "fetch", "--all", "--prune")
-        if remote_branch_exists(args.remote, args.base):
-            run("git", "checkout", "-B", args.base, f"{args.remote}/{args.base}")
-        else:
-            run("git", "checkout", args.base)
+        if not remote_branch_exists(args.remote, args.base):
+            raise RuntimeError(f"Remote base branch not found: {args.remote}/{args.base}")
+        run("git", "checkout", "-B", args.base, f"{args.remote}/{args.base}")
         run("git", "pull", "--ff-only")
 
         remote_branch_ref = f"refs/remotes/{args.remote}/{args.branch}"
         remote_base_ref = f"refs/remotes/{args.remote}/{args.base}"
-        local_branch_ref = f"refs/heads/{args.branch}"
-        local_base_ref = f"refs/heads/{args.base}"
 
         if (
             remote_branch_exists(args.remote, args.branch)
@@ -68,13 +69,7 @@ def main() -> int:
             if args.branch != args.base:
                 run("git", "push", args.remote, "--delete", args.branch, check=False)
 
-        local_branch_is_merged = (
-            branch_exists_local(args.branch)
-            and branch_exists_local(args.base)
-            and is_ancestor(local_branch_ref, local_base_ref)
-        )
-
-        if args.branch != args.base and branch_exists_local(args.branch) and (result["merged"] or local_branch_is_merged):
+        if args.branch != args.base and local_branch_merged_into_base(args.branch, args.base):
             if current_branch() == args.branch:
                 run("git", "checkout", args.base)
             deleted = run("git", "branch", "-d", args.branch, check=False).returncode == 0
@@ -88,8 +83,10 @@ def main() -> int:
         )
         print(json.dumps(result, ensure_ascii=True))
         return 0
-    except subprocess.CalledProcessError as exc:
-        error = exc.stderr.strip() or exc.stdout.strip() or str(exc)
+    except (subprocess.CalledProcessError, RuntimeError) as exc:
+        error = (
+            (exc.stderr.strip() or exc.stdout.strip()) if isinstance(exc, subprocess.CalledProcessError) else str(exc)
+        )
         log_step6_event(
             "post-merge-reconciliation-completed",
             metadata={"branch": args.branch, "base": args.base},

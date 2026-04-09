@@ -16,6 +16,12 @@ from typing import Any
 from step6_audit_log import log_step6_event
 
 
+def fail(message: str) -> int:
+    print(message, file=sys.stderr)
+    log_step6_event("review-comments-retrieved", error=message)
+    return 1
+
+
 def github_get(path: str, token: str) -> Any:
     req = urllib.request.Request(
         url=f"https://api.github.com{path}",
@@ -81,10 +87,7 @@ def main() -> int:
 
     token = os.getenv("CODEX_GITHUB_TOKEN", "").strip()
     if not token:
-        error = "CODEX_GITHUB_TOKEN is required."
-        print(error, file=sys.stderr)
-        log_step6_event("review-comments-retrieved", error=error)
-        return 1
+        return fail("CODEX_GITHUB_TOKEN is required.")
 
     try:
         pr_number = resolve_pr_number(args.owner, args.repo, token, args.pr_number)
@@ -97,15 +100,9 @@ def main() -> int:
             token,
         )
     except urllib.error.HTTPError as exc:
-        error = f"GitHub API error: {exc.code} {exc.reason}"
-        print(error, file=sys.stderr)
-        log_step6_event("review-comments-retrieved", error=error)
-        return 1
+        return fail(f"GitHub API error: {exc.code} {exc.reason}")
     except Exception as exc:
-        error = f"Failed to fetch PR review feedback: {exc}"
-        print(error, file=sys.stderr)
-        log_step6_event("review-comments-retrieved", error=error)
-        return 1
+        return fail(f"Failed to fetch PR review feedback: {exc}")
 
     output = {
         "prNumber": pr_number,

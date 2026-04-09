@@ -11,6 +11,12 @@ from typing import Any
 from step6_audit_log import log_step6_event
 
 
+def fail(message: str) -> int:
+    print(message, file=sys.stderr)
+    log_step6_event("review-comments-classified", error=message)
+    return 1
+
+
 BLOCKING_RULES = [
     ("security-critical risk", ["security", "auth bypass", "injection", "secret leak"]),
     ("data corruption risk", ["data corruption", "corrupt", "data loss", "destructive"]),
@@ -49,17 +55,11 @@ def main() -> int:
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
-        error = f"Invalid input JSON: {exc}"
-        print(error, file=sys.stderr)
-        log_step6_event("review-comments-classified", error=error)
-        return 1
+        return fail(f"Invalid input JSON: {exc}")
 
     comments = payload.get("comments", []) if isinstance(payload, dict) else []
     if not isinstance(comments, list):
-        error = "Invalid input JSON: comments must be a list."
-        print(error, file=sys.stderr)
-        log_step6_event("review-comments-classified", error=error)
-        return 1
+        return fail("Invalid input JSON: comments must be a list.")
 
     classifications = [classify_comment(c if isinstance(c, dict) else {}) for c in comments]
     output = {
