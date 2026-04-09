@@ -2,6 +2,7 @@ package com.example.orderapi.controller;
 
 import com.example.orderapi.dto.*;
 import com.example.orderapi.service.DecompositionService;
+import com.example.orderapi.service.FileAuditLogService;
 import com.example.orderapi.service.GitHubIssueCreationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -12,6 +13,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.argThat;
 import static org.mockito.Mockito.*;
 
 class DecompositionControllerTest {
@@ -20,7 +22,8 @@ class DecompositionControllerTest {
     void completeToGitHub_createsIssuesWhenDecompositionHasStories() {
         DecompositionService decompositionService = mock(DecompositionService.class);
         GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
-        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService);
+        FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
+        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService, fileAuditLogService);
 
         DecompositionResponse decompositionResponse = new DecompositionResponse();
         decompositionResponse.setRequestId("req-1");
@@ -46,7 +49,8 @@ class DecompositionControllerTest {
     void completeToGitHub_usesRequestIdFallbackWhenDecompositionRequestIdMissing() {
         DecompositionService decompositionService = mock(DecompositionService.class);
         GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
-        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService);
+        FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
+        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService, fileAuditLogService);
 
         DecompositionResponse decompositionResponse = new DecompositionResponse();
         decompositionResponse.setRequestId(null);
@@ -73,7 +77,8 @@ class DecompositionControllerTest {
     void completeToGitHub_returnsBadRequestWhenSourceTypeMissing() {
         DecompositionService decompositionService = mock(DecompositionService.class);
         GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
-        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService);
+        FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
+        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService, fileAuditLogService);
 
         DecompositionResponse decompositionResponse = new DecompositionResponse();
         decompositionResponse.setRequestId("req-2");
@@ -93,7 +98,8 @@ class DecompositionControllerTest {
     void completeToGitHub_returnsBadGatewayWhenNoStoriesReturned() {
         DecompositionService decompositionService = mock(DecompositionService.class);
         GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
-        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService);
+        FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
+        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService, fileAuditLogService);
 
         DecompositionResponse decompositionResponse = new DecompositionResponse();
         decompositionResponse.setRequestId("req-3");
@@ -113,7 +119,8 @@ class DecompositionControllerTest {
     void completeToGitHub_returnsBadGatewayWhenIssueServiceReturnsNull() {
         DecompositionService decompositionService = mock(DecompositionService.class);
         GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
-        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService);
+        FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
+        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService, fileAuditLogService);
 
         DecompositionResponse decompositionResponse = new DecompositionResponse();
         decompositionResponse.setRequestId("req-4");
@@ -133,7 +140,8 @@ class DecompositionControllerTest {
     void completeToGitHub_returnsInternalServerErrorWhenIssueServiceThrows() {
         DecompositionService decompositionService = mock(DecompositionService.class);
         GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
-        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService);
+        FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
+        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService, fileAuditLogService);
 
         DecompositionResponse decompositionResponse = new DecompositionResponse();
         decompositionResponse.setRequestId("req-5");
@@ -148,6 +156,33 @@ class DecompositionControllerTest {
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
         assertEquals("req-5", response.getBody().getRequestId());
         assertFalse(response.getBody().isIssuesCreated());
+    }
+
+    @Test
+    void completeToGitHub_propagatesBugSourceTypeToIssueCreation() {
+        DecompositionService decompositionService = mock(DecompositionService.class);
+        GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
+        FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
+        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService, fileAuditLogService);
+
+        DecompositionResponse decompositionResponse = new DecompositionResponse();
+        decompositionResponse.setRequestId("req-bug");
+        decompositionResponse.setDecompositionComplete(true);
+        decompositionResponse.setStories(List.of(sampleStory()));
+        when(decompositionService.decompose(any(DecompositionRequest.class))).thenReturn(decompositionResponse);
+
+        GitHubIssueCreateResponse createResponse = new GitHubIssueCreateResponse();
+        createResponse.setRequestId("req-bug");
+        createResponse.setIssuesCreated(true);
+        createResponse.setIssues(List.of(sampleIssue()));
+        when(issueCreationService.createFromDecomposition(any(GitHubIssueCreateRequest.class))).thenReturn(createResponse);
+
+        ResponseEntity<GitHubIssueCreateResponse> response = controller.completeToGitHub(sampleDecompositionRequest("req-bug", "bug"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        verify(issueCreationService).createFromDecomposition(
+                argThat(request -> "bug".equals(request.getSourceType()))
+        );
     }
 
     private DecompositionRequest sampleDecompositionRequest(String requestId, String type) {

@@ -7,11 +7,13 @@ const state = {
     lastIntakeSentAt: 0,
     intakeResult: null,
     decompositionLoading: false,
+    githubIssueCreationError: "",
     githubIssueCreationResult: null,
     decompositionElementsWarningShown: false
 };
 const MAX_INTAKE_MESSAGES = 30;
 const INTAKE_REQUEST_TIMEOUT_MS = 15000;
+const INTAKE_ORCHESTRATION_TIMEOUT_MS = 45000;
 const MIN_INTAKE_SEND_INTERVAL_MS = 800;
 
 const customerForm = document.getElementById("customer-form");
@@ -189,10 +191,18 @@ async function apiRequest(path, options = {}) {
     }
 
     const text = await response.text();
-    const data = text ? JSON.parse(text) : null;
+    let data = null;
+    if (text) {
+        try {
+            data = JSON.parse(text);
+        } catch (error) {
+            data = null;
+        }
+    }
 
     if (!response.ok) {
-        const message = data?.error || `Request failed with status ${response.status}`;
+        const headerMessage = response.headers.get("X-Error-Message");
+        const message = data?.error || headerMessage || `Request failed with status ${response.status}`;
         throw new Error(message);
     }
 
@@ -318,6 +328,7 @@ async function handleIntakeChatSubmit(event) {
     }
 
     state.intakeResult = null;
+    state.githubIssueCreationError = "";
     state.githubIssueCreationResult = null;
     state.intakeMessages.push({ role: "user", content });
     trimIntakeMessages();
@@ -414,6 +425,7 @@ function hasCompleteIntakeResult(result) {
 
 async function runAutomatedIntakeFlow(intakeResult) {
     setDecompositionLoading(true);
+    state.githubIssueCreationError = "";
     state.githubIssueCreationResult = null;
     renderDecompositionUI();
     try {
@@ -423,23 +435,24 @@ async function runAutomatedIntakeFlow(intakeResult) {
                 requestId: intakeResult.requestId,
                 structuredData: intakeResult.structuredData
             })
-        }, INTAKE_REQUEST_TIMEOUT_MS);
+        }, INTAKE_ORCHESTRATION_TIMEOUT_MS);
         if (!response || !Array.isArray(response.issues)) {
             throw new Error("Invalid GitHub issue creation response");
         }
+        if (response.issuesCreated !== true || response.issues.length === 0) {
+            throw new Error("GitHub issue creation did not complete successfully.");
+        }
         state.githubIssueCreationResult = {
             requestId: response.requestId || intakeResult.requestId,
-            issuesCreated: response.issuesCreated === true,
+            issuesCreated: true,
             issues: response.issues
         };
     } catch (error) {
         console.error("Automated intake flow failed", error);
-        showBanner(resolveGithubIssueCreationFallbackMessage(error), "error");
-        state.githubIssueCreationResult = {
-            requestId: intakeResult.requestId,
-            issuesCreated: false,
-            issues: []
-        };
+        const message = resolveGithubIssueCreationFallbackMessage(error);
+        showBanner(message, "error");
+        state.githubIssueCreationError = message;
+        state.githubIssueCreationResult = null;
     } finally {
         setDecompositionLoading(false);
         renderDecompositionUI();
@@ -450,8 +463,14 @@ function resolveGithubIssueCreationFallbackMessage(error) {
     if (error?.message === "Invalid GitHub issue creation response") {
         return "GitHub issue creation returned an unexpected response. Please try again.";
     }
+    if (error?.message === "GitHub issue creation did not complete successfully.") {
+        return error.message;
+    }
     if (error?.message === "Intake request timed out") {
         return "GitHub issue creation timed out. Please try again.";
+    }
+    if (typeof error?.message === "string" && error.message.trim()) {
+        return error.message.trim();
     }
     return "I could not create GitHub issues right now. Please try again shortly.";
 }
@@ -520,7 +539,10 @@ function renderDecompositionUI() {
         state.decompositionElementsWarningShown = true;
     }
     if (intakeDecomposition) {
-        intakeDecomposition.classList.toggle("hidden", !state.decompositionLoading && !state.githubIssueCreationResult);
+        intakeDecomposition.classList.toggle(
+            "hidden",
+            !state.decompositionLoading && !state.githubIssueCreationResult && !state.githubIssueCreationError
+        );
     }
     if (!intakeDecompositionList) {
         return;
@@ -539,6 +561,12 @@ function renderDecompositionUI() {
     }
 
     if (!state.githubIssueCreationResult) {
+        if (state.githubIssueCreationError) {
+            const failure = document.createElement("p");
+            failure.className = "intake-decomposition-empty";
+            failure.textContent = `GitHub issue creation failed: ${state.githubIssueCreationError}`;
+            intakeDecompositionList.appendChild(failure);
+        }
         return;
     }
     if (!Array.isArray(state.githubIssueCreationResult.issues) || !state.githubIssueCreationResult.issues.length) {
