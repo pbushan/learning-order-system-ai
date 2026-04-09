@@ -14,9 +14,12 @@ import java.util.List;
 public class GitHubIssueCreationService {
 
     private final GitHubIssueClientService gitHubIssueClientService;
+    private final FileAuditLogService fileAuditLogService;
 
-    public GitHubIssueCreationService(GitHubIssueClientService gitHubIssueClientService) {
+    public GitHubIssueCreationService(GitHubIssueClientService gitHubIssueClientService,
+                                      FileAuditLogService fileAuditLogService) {
         this.gitHubIssueClientService = gitHubIssueClientService;
+        this.fileAuditLogService = fileAuditLogService;
     }
 
     public GitHubIssueCreateResponse createFromDecomposition(GitHubIssueCreateRequest request) {
@@ -24,19 +27,26 @@ public class GitHubIssueCreationService {
 
         String requestId = request.getRequestId().trim();
         String sourceType = request.getSourceType().trim();
+        List<DecompositionStory> stories = request.getStories();
         List<GitHubIssueSummary> issues = new ArrayList<>();
 
-        for (DecompositionStory story : request.getStories()) {
-            GitHubIssueSummary issue = gitHubIssueClientService.createIssueForStory(sourceType, story);
-            issue.setStoryId(story.getStoryId());
-            issues.add(issue);
-        }
+        try {
+            for (DecompositionStory story : stories) {
+                GitHubIssueSummary issue = gitHubIssueClientService.createIssueForStory(sourceType, story);
+                issue.setStoryId(story.getStoryId());
+                issues.add(issue);
+            }
+            GitHubIssueCreateResponse response = new GitHubIssueCreateResponse();
+            response.setRequestId(requestId);
+            response.setIssuesCreated(!issues.isEmpty());
+            response.setIssues(issues);
 
-        GitHubIssueCreateResponse response = new GitHubIssueCreateResponse();
-        response.setRequestId(requestId);
-        response.setIssuesCreated(!issues.isEmpty());
-        response.setIssues(issues);
-        return response;
+            safeAuditLog(requestId, sourceType, stories, issues, null);
+            return response;
+        } catch (Exception ex) {
+            safeAuditLog(requestId, sourceType, stories, issues, ex.getMessage());
+            throw ex;
+        }
     }
 
     private void validateRequest(GitHubIssueCreateRequest request) {
@@ -59,6 +69,21 @@ public class GitHubIssueCreationService {
             if (!StringUtils.hasText(story.getDescription())) {
                 throw new IllegalArgumentException("stories[" + i + "].description is required");
             }
+        }
+    }
+
+    private void safeAuditLog(String requestId,
+                              String sourceType,
+                              List<DecompositionStory> stories,
+                              List<GitHubIssueSummary> issues,
+                              String error) {
+        try {
+            if (fileAuditLogService == null) {
+                return;
+            }
+            fileAuditLogService.logGitHubIssueCreationEntry(requestId, sourceType, stories, issues, error);
+        } catch (Exception ignored) {
+            // Do not fail issue creation due to audit logging.
         }
     }
 }
