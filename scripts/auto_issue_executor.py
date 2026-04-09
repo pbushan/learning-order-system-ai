@@ -173,8 +173,13 @@ def build_pr_scaffold(packet: dict[str, Any]) -> dict[str, Any]:
 
 
 def ensure_clean_and_base(base: str) -> None:
-    status = run_cmd("git", "status", "--porcelain").stdout.strip()
-    if status:
+    status_lines = [line.strip() for line in run_cmd("git", "status", "--porcelain").stdout.splitlines() if line.strip()]
+    non_audit_changes = [
+        line
+        for line in status_lines
+        if "order-api/audit/intake-chat.jsonl" not in line
+    ]
+    if non_audit_changes:
         raise RuntimeError("Working tree is not clean; aborting automated issue execution.")
     run_cmd("git", "fetch", "--all", "--prune")
     run_cmd("git", "checkout", base)
