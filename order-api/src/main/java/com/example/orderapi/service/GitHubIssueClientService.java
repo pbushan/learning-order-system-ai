@@ -11,6 +11,7 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -110,12 +111,20 @@ public class GitHubIssueClientService {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("labels", List.of(label.trim()));
 
-        restClient.post()
-                .uri("/repos/{owner}/{repo}/issues/{issueNumber}/labels", owner.trim(), repo.trim(), issueNumber)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
-                .body(body)
-                .retrieve()
-                .toBodilessEntity();
+        try {
+            restClient.post()
+                    .uri("/repos/{owner}/{repo}/issues/{issueNumber}/labels", owner.trim(), repo.trim(), issueNumber)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                    .body(body)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientResponseException ex) {
+            if (ex.getStatusCode().value() == 422) {
+                // Treat label-already-present shape as idempotent success for pickup.
+                return;
+            }
+            throw ex;
+        }
     }
 
     public List<ApprovedGitHubIssue> discoverApprovedIssues() {

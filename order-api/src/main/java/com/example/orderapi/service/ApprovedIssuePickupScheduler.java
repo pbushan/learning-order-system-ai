@@ -9,8 +9,7 @@ import org.springframework.stereotype.Service;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 public class ApprovedIssuePickupScheduler {
@@ -19,7 +18,7 @@ public class ApprovedIssuePickupScheduler {
 
     private final GitHubIssueClientService gitHubIssueClientService;
     private final FileAuditLogService fileAuditLogService;
-    private final Set<Long> activeIssueNumbers = ConcurrentHashMap.newKeySet();
+    private final AtomicBoolean pollInProgress = new AtomicBoolean(false);
 
     public ApprovedIssuePickupScheduler(GitHubIssueClientService gitHubIssueClientService,
                                         FileAuditLogService fileAuditLogService) {
@@ -29,51 +28,57 @@ public class ApprovedIssuePickupScheduler {
 
     @Scheduled(fixedDelayString = "${app.step5.poll-interval-ms:20000}", initialDelayString = "${app.step5.initial-delay-ms:5000}")
     public void pickUpApprovedIssues() {
+        if (!pollInProgress.compareAndSet(false, true)) {
+            log.info("Skipping Step 5 poll because a previous run is still in progress.");
+            safeAudit("approved-issue-poll-skipped", null, Map.of("reason", "poll-already-running"), "");
+            return;
+        }
+
         List<ApprovedGitHubIssue> issues;
         try {
             issues = gitHubIssueClientService.discoverApprovedIssues();
         } catch (Exception ex) {
             log.warn("Step 5 poll failed while discovering approved issues: {}", ex.getMessage());
             safeAudit("approved-issue-poll-failed", null, Map.of(), ex.getMessage());
+            pollInProgress.set(false);
             return;
         }
 
-        log.info("Step 5 poll completed. approvedIssuesFound={}", issues.size());
-        safeAudit("approved-issue-poll-ran", null, Map.of("approvedIssuesFound", issues.size()), "");
+        try {
+            log.info("Step 5 poll completed. approvedIssuesFound={}", issues.size());
+            safeAudit("approved-issue-poll-ran", null, Map.of("approvedIssuesFound", issues.size()), "");
 
-        for (ApprovedGitHubIssue issue : issues) {
-            if (issue == null || issue.getIssueNumber() <= 0) {
-                log.info("Skipping invalid approved issue payload.");
-                safeAudit("approved-issue-skipped", null, Map.of("reason", "invalid-issue-payload"), "");
-                continue;
-            }
+            for (ApprovedGitHubIssue issue : issues) {
+                if (issue == null || issue.getIssueNumber() <= 0) {
+                    log.info("Skipping invalid approved issue payload.");
+                    safeAudit("approved-issue-skipped", null, Map.of("reason", "invalid-issue-payload"), "");
+                    continue;
+                }
 
-            long issueNumber = issue.getIssueNumber();
-            if (!activeIssueNumbers.add(issueNumber)) {
-                log.info("Skipping issue #{} because it is already active in this runtime.", issueNumber);
-                safeAudit("approved-issue-skipped", issueNumber, Map.of("reason", "already-active-in-runtime"), "");
-                continue;
-            }
+                long issueNumber = issue.getIssueNumber();
 
-            try {
-                gitHubIssueClientService.addIssueLabel(issueNumber, "ai-in-progress");
-                Map<String, Object> metadata = new LinkedHashMap<>();
-                metadata.put("title", issue.getTitle());
-                metadata.put("labels", issue.getLabels() != null ? issue.getLabels() : List.of());
-                metadata.put("nextStep", "agent-execution");
-                log.info("Picked approved issue #{} and added ai-in-progress label.", issueNumber);
-                safeAudit("approved-issue-picked", issueNumber, metadata, "");
-            } catch (Exception ex) {
-                activeIssueNumbers.remove(issueNumber);
-                log.warn("Failed to mark issue #{} as ai-in-progress: {}", issueNumber, ex.getMessage());
-                safeAudit("approved-issue-pick-failed", issueNumber, Map.of(), ex.getMessage());
+                try {
+                    gitHubIssueClientService.addIssueLabel(issueNumber, "ai-in-progress");
+                    Map<String, Object> metadata = new LinkedHashMap<>();
+                    metadata.put("title", issue.getTitle());
+                    metadata.put("labels", issue.getLabels() != null ? issue.getLabels() : List.of());
+                    metadata.put("nextStep", "agent-execution");
+                    log.info("Picked approved issue #{} and added ai-in-progress label.", issueNumber);
+                    safeAudit("approved-issue-picked", issueNumber, metadata, "");
+                } catch (Exception ex) {
+                    log.warn("Failed to mark issue #{} as ai-in-progress: {}", issueNumber, ex.getMessage());
+                    safeAudit("approved-issue-pick-failed", issueNumber, Map.of(), ex.getMessage());
+                }
             }
+        } finally {
+            pollInProgress.set(false);
         }
     }
 
     private void safeAudit(String operation, Long issueNumber, Map<String, Object> metadata, String error) {
         try {
-            fileAuditLogService.logStep5LifecycleEntry(operation, "", issueNumber, metadata, error);
+            String requestId = issueNumber != null ? "issue-" + issueNumber : "";
+            fileAuditLogService.logStep5LifecycleEntry(operation, requestId, issueNumber, metadata, error);
         } catch (Exception ignored) {
             // Audit failures must never fail scheduler flow.
         }
