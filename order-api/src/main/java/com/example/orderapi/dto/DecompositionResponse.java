@@ -1,6 +1,8 @@
 package com.example.orderapi.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.annotation.Nulls;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 
@@ -12,8 +14,8 @@ public class DecompositionResponse {
     private String requestId;
 
     @JsonProperty("decompositionComplete")
-    @NotNull(message = "decompositionComplete is required")
-    private Boolean decompositionComplete;
+    @JsonSetter(nulls = Nulls.FAIL)
+    private boolean decompositionComplete;
 
     @JsonProperty("stories")
     @NotNull(message = "stories is required")
@@ -28,11 +30,11 @@ public class DecompositionResponse {
         this.requestId = requestId;
     }
 
-    public Boolean getDecompositionComplete() {
+    public boolean isDecompositionComplete() {
         return decompositionComplete;
     }
 
-    public void setDecompositionComplete(Boolean decompositionComplete) {
+    public void setDecompositionComplete(boolean decompositionComplete) {
         this.decompositionComplete = decompositionComplete;
     }
 
