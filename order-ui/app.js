@@ -538,16 +538,12 @@ async function handleCreateGithubIssuesClick() {
         }
 
         state.githubIssueCreationResult = {
-            requestId: response.requestId || decompositionResult.requestId,
-            issuesCreated: response.issuesCreated === true,
             issues: response.issues
         };
     } catch (error) {
         console.error("GitHub issue creation failed", error);
         showBanner(resolveGithubIssueCreationFallbackMessage(error), "error");
         state.githubIssueCreationResult = {
-            requestId: decompositionResult.requestId,
-            issuesCreated: false,
             issues: []
         };
     } finally {
