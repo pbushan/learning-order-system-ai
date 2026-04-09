@@ -129,6 +129,33 @@ public class FileAuditLogService {
         }
     }
 
+    public synchronized void logStep5LifecycleEntry(String operation,
+                                                    String requestId,
+                                                    Long issueNumber,
+                                                    Object metadata,
+                                                    String error) {
+        try {
+            Path path = resolveAuditPath();
+            Path parent = path.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("timestamp", OffsetDateTime.now(ZoneOffset.UTC).toString());
+            entry.put("requestId", safeString(requestId));
+            entry.put("operation", safeString(operation));
+            entry.put("issueNumber", issueNumber != null ? issueNumber : null);
+            entry.put("metadata", metadata != null ? metadata : Collections.emptyMap());
+            entry.put("error", safeString(error));
+
+            String jsonLine = objectMapper.writeValueAsString(entry) + System.lineSeparator();
+            Files.writeString(path, jsonLine, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (Exception ex) {
+            log.warn("Failed to write Step 5 audit log entry for operation={}", safeString(operation), ex);
+        }
+    }
+
     private Path resolveAuditPath() {
         Path configured = Paths.get(auditLogPath);
         Path normalized = configured.isAbsolute()
