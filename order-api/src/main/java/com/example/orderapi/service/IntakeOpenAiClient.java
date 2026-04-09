@@ -174,26 +174,31 @@ public class IntakeOpenAiClient {
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("requestId", normalizedRequestId);
-        payload.put("structuredData",
-                normalizeStructuredDataForDecomposition(
-                        structuredData,
-                        MAX_DECOMPOSITION_FIELD_CHARS,
-                        MAX_DECOMPOSITION_COMPONENTS
-                ));
         try {
-            String payloadJson = objectMapper.writeValueAsString(payload);
-            int payloadBytes = payloadJson.getBytes(StandardCharsets.UTF_8).length;
-            if (payloadBytes > MAX_DECOMPOSITION_PAYLOAD_BYTES) {
-                Map<String, Object> compactPayload = new LinkedHashMap<>();
-                compactPayload.put("requestId", normalizedRequestId);
-                compactPayload.put("structuredData",
+            String payloadJson = null;
+            int payloadBytes = Integer.MAX_VALUE;
+            int[] fieldLimits = {
+                    MAX_DECOMPOSITION_FIELD_CHARS,
+                    MAX_DECOMPOSITION_FALLBACK_FIELD_CHARS,
+                    250
+            };
+            int[] componentLimits = {
+                    MAX_DECOMPOSITION_COMPONENTS,
+                    MAX_DECOMPOSITION_FALLBACK_COMPONENTS,
+                    5
+            };
+            for (int i = 0; i < fieldLimits.length; i++) {
+                payload.put("structuredData",
                         normalizeStructuredDataForDecomposition(
                                 structuredData,
-                                MAX_DECOMPOSITION_FALLBACK_FIELD_CHARS,
-                                MAX_DECOMPOSITION_FALLBACK_COMPONENTS
+                                fieldLimits[i],
+                                componentLimits[i]
                         ));
-                payloadJson = objectMapper.writeValueAsString(compactPayload);
+                payloadJson = objectMapper.writeValueAsString(payload);
                 payloadBytes = payloadJson.getBytes(StandardCharsets.UTF_8).length;
+                if (payloadBytes <= MAX_DECOMPOSITION_PAYLOAD_BYTES) {
+                    break;
+                }
             }
             if (payloadBytes > MAX_DECOMPOSITION_PAYLOAD_BYTES) {
                 log.warn("Decomposition payload too large for requestId={}, bytes={}", normalizedRequestId, payloadBytes);
@@ -429,6 +434,10 @@ public class IntakeOpenAiClient {
         if (!storiesNode.isMissingNode() && !storiesNode.isNull() && !storiesNode.isArray()) {
             return false;
         }
+        boolean completionTrue = toBoolean(completionNode);
+        if (completionTrue && !storiesNode.isArray()) {
+            return false;
+        }
         if (storiesNode.isArray()) {
             for (JsonNode storyNode : storiesNode) {
                 if (storyNode == null || storyNode.isNull()) {
@@ -437,9 +446,17 @@ public class IntakeOpenAiClient {
                 if (!storyNode.isObject()) {
                     return false;
                 }
+                if (completionTrue && !hasTextualField(storyNode, "title") && !hasTextualField(storyNode, "description")) {
+                    return false;
+                }
             }
         }
         return true;
+    }
+
+    private boolean hasTextualField(JsonNode node, String key) {
+        JsonNode value = node.path(key);
+        return value.isTextual() && StringUtils.hasText(value.asText(""));
     }
 
     private boolean isValidRequestId(String requestId) {
