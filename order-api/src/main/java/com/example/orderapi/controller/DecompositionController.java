@@ -90,13 +90,15 @@ public class DecompositionController {
             }
             return ResponseEntity.ok(issueResponse);
         } catch (IllegalArgumentException ex) {
+            String requestId = resolveRequestId(null, request);
             return ResponseEntity.badRequest()
                     .header("X-Error-Message", ex.getMessage())
-                    .body(githubFailureResponse(request, ex.getMessage()));
+                    .body(githubFailureResponse(requestId, ex.getMessage()));
         } catch (IllegalStateException ex) {
+            String requestId = resolveRequestId(null, request);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .header("X-Error-Message", ex.getMessage())
-                    .body(githubFailureResponse(request, ex.getMessage()));
+                    .body(githubFailureResponse(requestId, ex.getMessage()));
         }
     }
 
@@ -123,9 +125,9 @@ public class DecompositionController {
         return normalized;
     }
 
-    private GitHubIssueCreateResponse githubFailureResponse(DecompositionRequest request, String error) {
+    private GitHubIssueCreateResponse githubFailureResponse(String requestId, String error) {
         GitHubIssueCreateResponse response = new GitHubIssueCreateResponse();
-        response.setRequestId(resolveRequestId(null, request));
+        response.setRequestId(requestId);
         response.setIssuesCreated(false);
         response.setIssues(Collections.emptyList());
         response.setError(error != null ? error : "");
@@ -145,15 +147,16 @@ public class DecompositionController {
                                                                         DecompositionRequest request,
                                                                         DecompositionResponse decomposition,
                                                                         String sourceType) {
+        String requestId = resolveRequestId(decomposition != null ? decomposition.getRequestId() : null, request);
         safeGitHubCreationAudit(
-                resolveRequestId(decomposition != null ? decomposition.getRequestId() : null, request),
+                requestId,
                 sourceType,
                 decomposition != null ? decomposition.getStories() : Collections.emptyList(),
                 errorMessage
         );
         return ResponseEntity.status(status)
                 .header("X-Error-Message", errorMessage)
-                .body(githubFailureResponse(request, errorMessage));
+                .body(githubFailureResponse(requestId, errorMessage));
     }
 
     private void safeGitHubCreationAudit(String requestId,

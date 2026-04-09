@@ -116,6 +116,26 @@ class DecompositionControllerTest {
     }
 
     @Test
+    void completeToGitHub_preservesDecompositionRequestIdOnFailure() {
+        DecompositionService decompositionService = mock(DecompositionService.class);
+        GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
+        FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
+        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService, fileAuditLogService);
+
+        DecompositionResponse decompositionResponse = new DecompositionResponse();
+        decompositionResponse.setRequestId("decomp-req-id");
+        decompositionResponse.setDecompositionComplete(false);
+        decompositionResponse.setStories(List.of());
+        when(decompositionService.decompose(any(DecompositionRequest.class))).thenReturn(decompositionResponse);
+
+        ResponseEntity<GitHubIssueCreateResponse> response = controller.completeToGitHub(sampleDecompositionRequest("incoming-id", "bug"));
+
+        assertEquals(HttpStatus.BAD_GATEWAY, response.getStatusCode());
+        assertEquals("decomp-req-id", response.getBody().getRequestId());
+        assertFalse(response.getBody().isIssuesCreated());
+    }
+
+    @Test
     void completeToGitHub_returnsBadGatewayWhenIssueServiceReturnsNull() {
         DecompositionService decompositionService = mock(DecompositionService.class);
         GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
