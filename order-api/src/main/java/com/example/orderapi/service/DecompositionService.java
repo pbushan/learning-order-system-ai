@@ -87,9 +87,12 @@ public class DecompositionService {
                               DecompositionResponse response,
                               String error) {
         try {
+            if (fileAuditLogService == null) {
+                return;
+            }
             fileAuditLogService.logDecompositionEntry(
                     requestId,
-                    structuredData,
+                    structuredData != null ? structuredData : new StructuredIntakeData(),
                     decompositionModel,
                     response != null ? response.isDecompositionComplete() : false,
                     response != null ? response.getStories() : Collections.emptyList(),
