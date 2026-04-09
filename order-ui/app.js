@@ -450,7 +450,6 @@ async function runAutomatedIntakeFlow(intakeResult) {
     } catch (error) {
         console.error("Automated intake flow failed", error);
         const message = resolveGithubIssueCreationFallbackMessage(error);
-        showBanner(message, "error");
         state.githubIssueCreationError = message;
         state.githubIssueCreationResult = null;
     } finally {
