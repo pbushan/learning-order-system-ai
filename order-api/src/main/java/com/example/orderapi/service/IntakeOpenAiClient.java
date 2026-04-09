@@ -415,8 +415,7 @@ public class IntakeOpenAiClient {
         if (!completionNode.isMissingNode()
                 && !completionNode.isNull()
                 && !completionNode.isBoolean()
-                && !completionNode.isTextual()
-                && !completionNode.isNumber()) {
+                && !(completionNode.isTextual() && isBooleanText(completionNode.asText(null)))) {
             return false;
         }
         JsonNode storiesNode = node.path("stories");
@@ -453,12 +452,12 @@ public class IntakeOpenAiClient {
                                                                         int maxFieldChars,
                                                                         int maxComponents) {
         Map<String, Object> normalized = new LinkedHashMap<>();
-        normalized.put("type", blankToNull(structuredData.getType()));
-        normalized.put("title", truncateForDecomposition(structuredData.getTitle(), maxFieldChars));
-        normalized.put("description", truncateForDecomposition(structuredData.getDescription(), maxFieldChars));
-        normalized.put("stepsToReproduce", truncateForDecomposition(structuredData.getStepsToReproduce(), maxFieldChars));
-        normalized.put("expectedBehavior", truncateForDecomposition(structuredData.getExpectedBehavior(), maxFieldChars));
-        normalized.put("priority", blankToNull(structuredData.getPriority()));
+        putIfNotNull(normalized, "type", blankToNull(structuredData.getType()));
+        putIfNotNull(normalized, "title", truncateForDecomposition(structuredData.getTitle(), maxFieldChars));
+        putIfNotNull(normalized, "description", truncateForDecomposition(structuredData.getDescription(), maxFieldChars));
+        putIfNotNull(normalized, "stepsToReproduce", truncateForDecomposition(structuredData.getStepsToReproduce(), maxFieldChars));
+        putIfNotNull(normalized, "expectedBehavior", truncateForDecomposition(structuredData.getExpectedBehavior(), maxFieldChars));
+        putIfNotNull(normalized, "priority", blankToNull(structuredData.getPriority()));
 
         List<String> affectedComponents = new ArrayList<>();
         if (structuredData.getAffectedComponents() != null) {
@@ -474,6 +473,12 @@ public class IntakeOpenAiClient {
         }
         normalized.put("affectedComponents", affectedComponents);
         return normalized;
+    }
+
+    private void putIfNotNull(Map<String, Object> target, String key, Object value) {
+        if (value != null) {
+            target.put(key, value);
+        }
     }
 
     private String truncateForDecomposition(String value) {
@@ -501,12 +506,20 @@ public class IntakeOpenAiClient {
         }
         if (node.isTextual()) {
             String value = blankToNull(node.asText(null));
-            return "true".equalsIgnoreCase(value);
-        }
-        if (node.isNumber()) {
-            return node.asInt(0) != 0;
+            if (value == null) {
+                return false;
+            }
+            return Boolean.parseBoolean(value);
         }
         return false;
+    }
+
+    private boolean isBooleanText(String value) {
+        String normalized = blankToNull(value);
+        if (normalized == null) {
+            return false;
+        }
+        return "true".equalsIgnoreCase(normalized) || "false".equalsIgnoreCase(normalized);
     }
 
     private String normalizeRole(String role) {
@@ -616,7 +629,7 @@ public class IntakeOpenAiClient {
     }
 
     private String safeRequestId(String requestId) {
-        return StringUtils.hasText(requestId) ? requestId : "unknown-request";
+        return requestId != null ? requestId : "unknown-request";
     }
 
     private String blankToNull(String value) {
