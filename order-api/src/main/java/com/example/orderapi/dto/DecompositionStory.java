@@ -2,6 +2,7 @@ package com.example.orderapi.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -24,14 +25,12 @@ public class DecompositionStory {
     @JsonProperty("acceptanceCriteria")
     @NotNull(message = "acceptanceCriteria is required")
     @Size(min = 1, message = "acceptanceCriteria must contain at least one item")
-    @Valid
-    private List<@NotBlank(message = "acceptanceCriteria entries must be non-blank") String> acceptanceCriteria;
+    private List<String> acceptanceCriteria;
 
     @JsonProperty("affectedComponents")
     @NotNull(message = "affectedComponents is required")
     @Size(min = 1, message = "affectedComponents must contain at least one item")
-    @Valid
-    private List<@NotBlank(message = "affectedComponents entries must be non-blank") String> affectedComponents;
+    private List<String> affectedComponents;
 
     @JsonProperty("estimatedSize")
     private String estimatedSize;
@@ -95,5 +94,19 @@ public class DecompositionStory {
 
     public void setPrSafety(PrSafety prSafety) {
         this.prSafety = prSafety;
+    }
+
+    @AssertTrue(message = "acceptanceCriteria entries must be non-blank")
+    public boolean isAcceptanceCriteriaEntriesValid() {
+        return acceptanceCriteria == null || acceptanceCriteria.stream().allMatch(this::isNonBlank);
+    }
+
+    @AssertTrue(message = "affectedComponents entries must be non-blank")
+    public boolean isAffectedComponentsEntriesValid() {
+        return affectedComponents == null || affectedComponents.stream().allMatch(this::isNonBlank);
+    }
+
+    private boolean isNonBlank(String value) {
+        return value != null && !value.isBlank();
     }
 }
