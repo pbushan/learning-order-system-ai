@@ -5,6 +5,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
 public class DecompositionResponse {
+    public DecompositionResponse() {
+    }
+
     @JsonProperty("requestId")
     private String requestId;
 

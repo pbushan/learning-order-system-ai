@@ -6,6 +6,9 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
 public class DecompositionRequest {
+    public DecompositionRequest() {
+    }
+
     @JsonProperty("requestId")
     @NotBlank(message = "requestId is required")
     private String requestId;

@@ -4,11 +4,13 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Size;
 
 import java.util.List;
 
 public class DecompositionStory {
+    public DecompositionStory() {
+    }
+
     @JsonProperty("storyId")
     @NotBlank(message = "storyId is required")
     private String storyId;
@@ -22,13 +24,9 @@ public class DecompositionStory {
     private String description;
 
     @JsonProperty("acceptanceCriteria")
-    @NotNull(message = "acceptanceCriteria is required")
-    @Size(min = 1, message = "acceptanceCriteria must contain at least one item")
     private List<String> acceptanceCriteria;
 
     @JsonProperty("affectedComponents")
-    @NotNull(message = "affectedComponents is required")
-    @Size(min = 1, message = "affectedComponents must contain at least one item")
     private List<String> affectedComponents;
 
     @JsonProperty("estimatedSize")

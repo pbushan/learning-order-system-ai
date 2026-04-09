@@ -4,6 +4,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;
 
 public class PrSafety {
+    public PrSafety() {
+    }
+
     @JsonProperty("target")
     @NotBlank(message = "target is required")
     private String target;
