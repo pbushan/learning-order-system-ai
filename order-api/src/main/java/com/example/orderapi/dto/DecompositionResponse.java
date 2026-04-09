@@ -25,7 +25,6 @@ public class DecompositionResponse {
         this.requestId = requestId;
     }
 
-    @JsonProperty("decompositionComplete")
     public boolean isDecompositionComplete() {
         return decompositionComplete;
     }

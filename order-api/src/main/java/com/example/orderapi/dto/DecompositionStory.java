@@ -1,9 +1,6 @@
 package com.example.orderapi.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 
 import java.util.List;
 
@@ -12,15 +9,12 @@ public class DecompositionStory {
     }
 
     @JsonProperty("storyId")
-    @NotBlank(message = "storyId is required")
     private String storyId;
 
     @JsonProperty("title")
-    @NotBlank(message = "title is required")
     private String title;
 
     @JsonProperty("description")
-    @NotBlank(message = "description is required")
     private String description;
 
     @JsonProperty("acceptanceCriteria")
@@ -33,8 +27,6 @@ public class DecompositionStory {
     private String estimatedSize;
 
     @JsonProperty("prSafety")
-    @NotNull(message = "prSafety is required")
-    @Valid
     private PrSafety prSafety;
 
     public String getStoryId() {
