@@ -20,7 +20,7 @@ def extract_section_lines(body: str, heading: str) -> list[str]:
         return []
 
     pattern = re.compile(
-        rf"(?im)^##\s*{re.escape(heading)}\s*$([\s\S]*?)(?=^##\s+|\Z)"
+        rf"(?im)^##\s*{re.escape(heading)}\s*$([\s\S]*?)(?=^#{{2,}}\s+|\Z)"
     )
     match = pattern.search(body)
     if not match:
@@ -38,7 +38,7 @@ def extract_section_lines(body: str, heading: str) -> list[str]:
 
 
 def build_work_packet(issue: dict[str, Any]) -> dict[str, Any]:
-    issue_number = int(issue.get("issueNumber", 0))
+    issue_number = int(issue["issueNumber"])
     title = str(issue.get("title", "")).strip()
     body = str(issue.get("body", "")).strip()
 
@@ -76,7 +76,35 @@ def main() -> int:
         with open(args.issue_json, "r", encoding="utf-8") as f:
             raw = f.read()
 
-    issue = json.loads(raw)
+    try:
+        issue = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        print(f"Invalid issue JSON: {exc}", file=sys.stderr)
+        return 1
+
+    if not isinstance(issue, dict):
+        print("Invalid issue JSON: expected an object.", file=sys.stderr)
+        return 1
+
+    if "issueNumber" not in issue or "title" not in issue:
+        print("Invalid issue JSON: requires issueNumber and title.", file=sys.stderr)
+        return 1
+
+    if not str(issue.get("title", "")).strip():
+        print("Invalid issue JSON: title must be non-empty.", file=sys.stderr)
+        return 1
+
+    try:
+        issue_number = int(issue["issueNumber"])
+    except (TypeError, ValueError):
+        print("Invalid issue JSON: issueNumber must be numeric.", file=sys.stderr)
+        return 1
+
+    if issue_number <= 0:
+        print("Invalid issue JSON: issueNumber must be > 0.", file=sys.stderr)
+        return 1
+
+    issue["issueNumber"] = issue_number
     packet = build_work_packet(issue)
     print(json.dumps(packet, ensure_ascii=True))
     return 0
