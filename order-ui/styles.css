@@ -558,6 +558,38 @@ tbody tr:last-child td {
     color: var(--muted);
 }
 
+.intake-github-results {
+    border: 1px solid rgba(105, 82, 58, 0.12);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.82);
+    padding: 10px 12px;
+}
+
+.intake-github-results h4 {
+    margin: 0 0 8px;
+    font-size: 0.98rem;
+}
+
+.intake-github-issue {
+    border-top: 1px solid rgba(105, 82, 58, 0.1);
+    padding: 8px 0;
+}
+
+.intake-github-issue:first-of-type {
+    border-top: none;
+    padding-top: 0;
+}
+
+.intake-github-issue p {
+    margin: 0 0 4px;
+}
+
+.intake-github-note {
+    margin: 8px 0 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
 .hidden {
     display: none;
 }
