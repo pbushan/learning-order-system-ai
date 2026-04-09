@@ -229,7 +229,7 @@ def ensure_clean_and_base(base: str) -> None:
 def create_or_reuse_branch(branch: str, base: str) -> None:
     exists = run_cmd("git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}", check=False).returncode == 0
     if exists:
-        run_cmd("git", "branch", "-D", branch, check=False)
+        raise RuntimeError(f"Local branch already exists: {branch}")
     run_cmd("git", "checkout", "-b", branch, base)
 
 
@@ -316,6 +316,9 @@ def merge_pr(owner: str, repo: str, token: str, pr_number: int) -> None:
         )
         if proc.returncode != 0:
             raise RuntimeError(f"PR merge failed: {proc.stderr.strip() or proc.stdout.strip() or 'unknown error'}")
+    pull = github_request("GET", owner, repo, f"/pulls/{pr_number}", token)
+    if not bool(pull.get("merged")):
+        raise RuntimeError(f"PR #{pr_number} is not merged; skipping cleanup.")
 
 
 def cleanup_branch(branch: str) -> None:
@@ -388,7 +391,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
 
         return result
     except Exception:
-        if label_applied and pr_number is None:
+        if label_applied:
             try:
                 remove_label(owner, repo, token, issue_number, "ai-in-progress")
             except Exception:
