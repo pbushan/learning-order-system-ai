@@ -4,7 +4,12 @@ const state = {
     products: [],
     intakeMessages: [],
     intakeLoading: false,
-    lastIntakeSentAt: 0
+    lastIntakeSentAt: 0,
+    intakeResult: null,
+    decompositionLoading: false,
+    decompositionResult: null,
+    decompositionRequestSeq: 0,
+    decompositionElementsWarningShown: false
 };
 const MAX_INTAKE_MESSAGES = 30;
 const INTAKE_REQUEST_TIMEOUT_MS = 15000;
@@ -29,6 +34,11 @@ const intakeChatHistory = document.getElementById("intake-chat-history");
 const intakeChatInput = document.getElementById("intake-chat-input");
 const intakeChatSend = document.getElementById("intake-chat-send");
 const intakeChatLoading = document.getElementById("intake-chat-loading");
+const intakeDecomposeActions = document.getElementById("intake-decompose-actions");
+const intakeDecomposeButton = document.getElementById("intake-decompose-button");
+const intakeDecomposeLoading = document.getElementById("intake-decompose-loading");
+const intakeDecomposition = document.getElementById("intake-decomposition");
+const intakeDecompositionList = document.getElementById("intake-decomposition-list");
 let tabButtons = [];
 let tabPanels = [];
 
@@ -49,8 +59,13 @@ document.addEventListener("DOMContentLoaded", () => {
     if (intakeChatInput) {
         intakeChatInput.addEventListener("keydown", handleIntakeInputKeydown);
     }
+    if (intakeDecomposeButton) {
+        intakeDecomposeButton.addEventListener("click", handleDecomposeClick);
+    }
     setIntakeChatLoading(false);
+    setDecompositionLoading(false);
     renderIntakeChatHistory();
+    renderDecompositionUI();
     initializeTabs();
 
     loadDashboard();
@@ -307,10 +322,14 @@ async function handleIntakeChatSubmit(event) {
         return;
     }
 
+    state.intakeResult = null;
+    state.decompositionResult = null;
+    state.decompositionRequestSeq += 1;
     state.intakeMessages.push({ role: "user", content });
     trimIntakeMessages();
     intakeChatInput.value = "";
     renderIntakeChatHistory();
+    renderDecompositionUI();
     setIntakeChatLoading(true);
     state.lastIntakeSentAt = Date.now();
 
@@ -329,6 +348,7 @@ async function handleIntakeChatSubmit(event) {
         }
         const reply = response.reply.trim();
         state.intakeMessages.push({ role: "assistant", content: reply });
+        updateIntakeResult(response);
         trimIntakeMessages();
     } catch (error) {
         const fallbackMessage = resolveIntakeFallbackMessage(error);
@@ -338,10 +358,13 @@ async function handleIntakeChatSubmit(event) {
             role: "assistant",
             content: fallbackMessage
         });
+        state.intakeResult = null;
+        state.decompositionResult = null;
         trimIntakeMessages();
     } finally {
         setIntakeChatLoading(false);
         renderIntakeChatHistory();
+        renderDecompositionUI();
     }
 }
 
@@ -371,6 +394,84 @@ function resolveIntakeFallbackMessage(error) {
         return "Intake service is taking too long to respond. Please try again.";
     }
     return "I could not reach intake service right now. Please try again shortly.";
+}
+
+function updateIntakeResult(response) {
+    const requestId = typeof response?.requestId === "string" ? response.requestId.trim() : "";
+    const structuredData = response?.structuredData && typeof response.structuredData === "object"
+        ? response.structuredData
+        : null;
+    const intakeComplete = response?.intakeComplete === true;
+    if (requestId && intakeComplete && structuredData) {
+        state.intakeResult = { requestId, structuredData, intakeComplete: true };
+        return;
+    }
+    state.intakeResult = null;
+    state.decompositionResult = null;
+}
+
+async function handleDecomposeClick() {
+    if (state.decompositionLoading) {
+        return;
+    }
+    const intakeResult = state.intakeResult;
+    if (!intakeResult?.requestId || !intakeResult?.structuredData) {
+        showBanner("Complete intake first, then run decomposition.", "error");
+        return;
+    }
+
+    setDecompositionLoading(true);
+    state.decompositionResult = null;
+    const requestSeq = state.decompositionRequestSeq + 1;
+    state.decompositionRequestSeq = requestSeq;
+    renderDecompositionUI();
+
+    try {
+        const response = await apiRequestWithTimeout("/api/intake/decompose", {
+            method: "POST",
+            body: JSON.stringify({
+                requestId: intakeResult.requestId,
+                structuredData: intakeResult.structuredData
+            })
+        }, INTAKE_REQUEST_TIMEOUT_MS);
+
+        if (!response || !Array.isArray(response.stories)) {
+            throw new Error("Invalid decomposition response");
+        }
+        if (requestSeq !== state.decompositionRequestSeq) {
+            return;
+        }
+
+        state.decompositionResult = {
+            requestId: response.requestId || intakeResult.requestId,
+            decompositionComplete: response.decompositionComplete === true,
+            stories: response.stories
+        };
+    } catch (error) {
+        if (requestSeq !== state.decompositionRequestSeq) {
+            return;
+        }
+        console.error("Decomposition request failed", error);
+        showBanner(resolveDecompositionFallbackMessage(error), "error");
+        state.decompositionResult = {
+            requestId: intakeResult.requestId,
+            decompositionComplete: false,
+            stories: []
+        };
+    } finally {
+        setDecompositionLoading(false);
+        renderDecompositionUI();
+    }
+}
+
+function resolveDecompositionFallbackMessage(error) {
+    if (error?.message === "Invalid decomposition response") {
+        return "Decomposition returned an unexpected response. Please try again.";
+    }
+    if (error?.message === "Intake request timed out") {
+        return "Decomposition timed out. Please try again.";
+    }
+    return "I could not reach decomposition service right now. Please try again shortly.";
 }
 
 function renderIntakeChatHistory() {
@@ -419,6 +520,106 @@ function setIntakeChatLoading(isLoading) {
     if (intakeChatLoading) {
         intakeChatLoading.classList.toggle("hidden", !isLoading);
     }
+}
+
+function setDecompositionLoading(isLoading) {
+    state.decompositionLoading = isLoading;
+    if (intakeDecomposeButton) {
+        intakeDecomposeButton.disabled = isLoading;
+    }
+    if (intakeDecomposeLoading) {
+        intakeDecomposeLoading.classList.toggle("hidden", !isLoading);
+    }
+}
+
+function renderDecompositionUI() {
+    if ((!intakeDecomposeActions || !intakeDecomposeButton || !intakeDecomposition || !intakeDecompositionList) && !state.decompositionElementsWarningShown) {
+        console.warn("Decomposition UI elements are missing. Check intake decomposition element IDs.");
+        state.decompositionElementsWarningShown = true;
+    }
+
+    const canDecompose = state.intakeResult?.intakeComplete
+        && typeof state.intakeResult.requestId === "string"
+        && state.intakeResult.requestId.length > 0
+        && !!state.intakeResult.structuredData;
+
+    if (intakeDecomposeActions) {
+        intakeDecomposeActions.classList.toggle("hidden", !canDecompose);
+    }
+    if (intakeDecomposition) {
+        intakeDecomposition.classList.toggle("hidden", !state.decompositionResult);
+    }
+    if (!intakeDecompositionList) {
+        return;
+    }
+
+    while (intakeDecompositionList.firstChild) {
+        intakeDecompositionList.removeChild(intakeDecompositionList.firstChild);
+    }
+
+    if (!state.decompositionResult) {
+        return;
+    }
+    if (!Array.isArray(state.decompositionResult.stories) || !state.decompositionResult.stories.length) {
+        const empty = document.createElement("p");
+        empty.className = "intake-decomposition-empty";
+        empty.textContent = "No stories returned yet.";
+        intakeDecompositionList.appendChild(empty);
+        return;
+    }
+
+    state.decompositionResult.stories.forEach((story, index) => {
+        const card = document.createElement("article");
+        card.className = "intake-story-card";
+
+        const title = document.createElement("h4");
+        title.textContent = story?.title || `Story ${index + 1}`;
+        card.appendChild(title);
+
+        const description = document.createElement("p");
+        description.textContent = story?.description || "No description";
+        card.appendChild(description);
+
+        card.appendChild(createStoryList("Acceptance Criteria", story?.acceptanceCriteria));
+        card.appendChild(createStoryList("Affected Components", story?.affectedComponents));
+
+        const size = document.createElement("p");
+        size.className = "intake-story-meta";
+        size.textContent = `Estimated size: ${story?.estimatedSize || "n/a"}`;
+        card.appendChild(size);
+
+        const safety = document.createElement("p");
+        safety.className = "intake-story-meta";
+        safety.textContent = `PR safety notes: ${story?.prSafety?.notes || "n/a"}`;
+        card.appendChild(safety);
+
+        intakeDecompositionList.appendChild(card);
+    });
+}
+
+function createStoryList(label, values) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "intake-story-list";
+    const heading = document.createElement("p");
+    heading.className = "intake-story-list-label";
+    heading.textContent = label;
+    wrapper.appendChild(heading);
+
+    const list = document.createElement("ul");
+    const items = Array.isArray(values) ? values.filter((item) => typeof item === "string" && item.trim()) : [];
+    if (!items.length) {
+        const empty = document.createElement("li");
+        empty.textContent = "n/a";
+        list.appendChild(empty);
+    } else {
+        items.forEach((item) => {
+            const li = document.createElement("li");
+            li.textContent = item;
+            list.appendChild(li);
+        });
+    }
+    wrapper.appendChild(list);
+    return wrapper;
 }
 
 function trimIntakeMessages() {
