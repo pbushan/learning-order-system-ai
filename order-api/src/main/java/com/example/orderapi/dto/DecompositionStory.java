@@ -23,11 +23,11 @@ public class DecompositionStory {
 
     @JsonProperty("acceptanceCriteria")
     @NotEmpty(message = "acceptanceCriteria is required")
-    private List<String> acceptanceCriteria;
+    private List<@NotBlank(message = "acceptanceCriteria entries must be non-blank") String> acceptanceCriteria;
 
     @JsonProperty("affectedComponents")
     @NotEmpty(message = "affectedComponents is required")
-    private List<String> affectedComponents;
+    private List<@NotBlank(message = "affectedComponents entries must be non-blank") String> affectedComponents;
 
     @JsonProperty("estimatedSize")
     private String estimatedSize;
@@ -66,7 +66,6 @@ public class DecompositionStory {
     }
 
     public void setAcceptanceCriteria(List<String> acceptanceCriteria) {
-        validateEntries("acceptanceCriteria", acceptanceCriteria);
         this.acceptanceCriteria = acceptanceCriteria;
     }
 
@@ -75,7 +74,6 @@ public class DecompositionStory {
     }
 
     public void setAffectedComponents(List<String> affectedComponents) {
-        validateEntries("affectedComponents", affectedComponents);
         this.affectedComponents = affectedComponents;
     }
 
@@ -93,16 +91,5 @@ public class DecompositionStory {
 
     public void setPrSafety(PrSafety prSafety) {
         this.prSafety = prSafety;
-    }
-
-    private void validateEntries(String fieldName, List<String> values) {
-        if (values == null) {
-            return;
-        }
-        for (String value : values) {
-            if (value == null || value.isBlank()) {
-                throw new IllegalArgumentException(fieldName + " entries must be non-blank");
-            }
-        }
     }
 }
