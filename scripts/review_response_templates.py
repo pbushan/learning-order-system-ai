@@ -46,19 +46,19 @@ def main() -> int:
 
     if args.mode == "addressed":
         response = addressed_reply(args.summary)
-        print(response)
-        log_step6_event("review-comment-addressed", metadata={"summary": args.summary})
+        operation = "review-comment-addressed"
+        metadata = {"summary": args.summary}
     elif args.mode == "deferred":
         response = deferred_reply()
-        print(response)
-        log_step6_event("review-comment-deferred", metadata={"reason": "portfolio-scope-non-blocking"})
+        operation = "review-comment-deferred"
+        metadata = {"reason": "portfolio-scope-non-blocking"}
     else:
         response = ready_to_merge_note(args.fixed, args.deferred)
-        print(response)
-        log_step6_event(
-            "ready-to-merge-note-posted",
-            metadata={"fixed": args.fixed, "deferred": args.deferred},
-        )
+        operation = "ready-to-merge-note-posted"
+        metadata = {"fixed": args.fixed, "deferred": args.deferred}
+
+    print(response)
+    log_step6_event(operation, metadata=metadata)
     return 0
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,7 @@ def log_step6_event(
     metadata: dict[str, Any] | None = None,
     error: str = "",
 ) -> None:
-    path = Path(os.getenv("STEP6_AUDIT_LOG_PATH", "order-api/audit/intake-chat.jsonl"))
+    path = Path(os.getenv("STEP6_AUDIT_LOG_PATH", "order-api/audit/intake-chat.jsonl")).resolve()
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "operation": operation or "",
@@ -31,4 +32,4 @@ def log_step6_event(
             f.write("\n")
     except Exception:
         # Logging failures must never break workflow scripts.
-        pass
+        print("Step 6 audit logging failed.", file=sys.stderr)
