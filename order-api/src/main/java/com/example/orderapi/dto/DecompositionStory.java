@@ -3,8 +3,8 @@ package com.example.orderapi.dto;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Pattern;
 
 import java.util.List;
 
@@ -22,15 +22,14 @@ public class DecompositionStory {
     private String description;
 
     @JsonProperty("acceptanceCriteria")
-    @NotNull(message = "acceptanceCriteria is required")
-    private List<String> acceptanceCriteria;
+    @NotEmpty(message = "acceptanceCriteria is required")
+    private List<@NotBlank(message = "acceptanceCriteria entries must be non-blank") String> acceptanceCriteria;
 
     @JsonProperty("affectedComponents")
-    @NotNull(message = "affectedComponents is required")
-    private List<String> affectedComponents;
+    @NotEmpty(message = "affectedComponents is required")
+    private List<@NotBlank(message = "affectedComponents entries must be non-blank") String> affectedComponents;
 
     @JsonProperty("estimatedSize")
-    @Pattern(regexp = "^(small|medium)$", message = "estimatedSize must be small or medium")
     private String estimatedSize;
 
     @JsonProperty("prSafety")
