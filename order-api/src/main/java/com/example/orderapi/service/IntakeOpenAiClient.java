@@ -193,6 +193,11 @@ public class IntakeOpenAiClient {
                                 MAX_DECOMPOSITION_FALLBACK_COMPONENTS
                         ));
                 payloadJson = objectMapper.writeValueAsString(compactPayload);
+                payloadBytes = payloadJson.getBytes(StandardCharsets.UTF_8).length;
+            }
+            if (payloadBytes > MAX_DECOMPOSITION_PAYLOAD_BYTES) {
+                log.warn("Decomposition payload too large for requestId={}, bytes={}", normalizedRequestId, payloadBytes);
+                return fallbackDecompositionResult(safeRequestId);
             }
             requestMessages.add(Map.of("role", "user", "content", payloadJson));
         } catch (Exception ex) {
@@ -417,7 +422,7 @@ public class IntakeOpenAiClient {
                 && !completionNode.isNull()
                 && !completionNode.isBoolean()
                 && !completionNode.isNumber()
-                && !(completionNode.isTextual() && isBooleanText(completionNode.asText(null)))) {
+                && !completionNode.isTextual()) {
             return false;
         }
         JsonNode storiesNode = node.path("stories");
@@ -499,7 +504,8 @@ public class IntakeOpenAiClient {
             return trimmed;
         }
         int boundary = safeBoundary(trimmed, maxChars);
-        return trimmed.substring(0, boundary);
+        int clampedBoundary = Math.max(1, Math.min(boundary, trimmed.length()));
+        return trimmed.substring(0, clampedBoundary);
     }
 
     private boolean toBoolean(JsonNode node) {
@@ -520,14 +526,6 @@ public class IntakeOpenAiClient {
             return node.asInt(0) != 0;
         }
         return false;
-    }
-
-    private boolean isBooleanText(String value) {
-        String normalized = blankToNull(value);
-        if (normalized == null) {
-            return false;
-        }
-        return "true".equalsIgnoreCase(normalized) || "false".equalsIgnoreCase(normalized);
     }
 
     private String normalizeRole(String role) {
