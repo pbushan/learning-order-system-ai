@@ -384,7 +384,17 @@ public class IntakeOpenAiClient {
 
     private PrSafety toPrSafety(JsonNode node) {
         PrSafety prSafety = new PrSafety();
-        if (node == null || node.isMissingNode() || node.isNull() || !node.isObject()) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            prSafety.setTarget("under-30000-char-patch");
+            prSafety.setNotes(null);
+            return prSafety;
+        }
+        if (node.isTextual()) {
+            prSafety.setTarget("under-30000-char-patch");
+            prSafety.setNotes(truncateForDecomposition(node.asText(null)));
+            return prSafety;
+        }
+        if (!node.isObject()) {
             prSafety.setTarget("under-30000-char-patch");
             prSafety.setNotes(null);
             return prSafety;
@@ -465,7 +475,10 @@ public class IntakeOpenAiClient {
                     return false;
                 }
                 JsonNode prSafetyNode = storyNode.path("prSafety");
-                if (!prSafetyNode.isMissingNode() && !prSafetyNode.isNull() && !prSafetyNode.isObject()) {
+                if (!prSafetyNode.isMissingNode()
+                        && !prSafetyNode.isNull()
+                        && !prSafetyNode.isObject()
+                        && !prSafetyNode.isTextual()) {
                     return false;
                 }
             }

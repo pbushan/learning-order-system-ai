@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class IntakeOpenAiClientTest {
@@ -85,5 +87,32 @@ class IntakeOpenAiClientTest {
         String result = client.truncateContent(input);
 
         assertEquals(maxChars, result.length());
+    }
+
+    @Test
+    void parseDecompositionResult_acceptsTextualPrSafety() throws Exception {
+        String rawResponse = """
+                {
+                  "choices": [
+                    {
+                      "message": {
+                        "content": "{\\"requestId\\":\\"req-1\\",\\"decompositionComplete\\":true,\\"stories\\":[{\\"title\\":\\"Fix label\\",\\"description\\":\\"Rename tab\\",\\"prSafety\\":\\"Small UI change\\"}]}"
+                      }
+                    }
+                  ]
+                }
+                """;
+
+        Method parse = IntakeOpenAiClient.class.getDeclaredMethod("parseDecompositionResult", String.class, String.class);
+        parse.setAccessible(true);
+        Object parsed = parse.invoke(client, rawResponse, "req-1");
+        assertNotNull(parsed);
+
+        assertTrue(parsed instanceof com.example.orderapi.dto.DecompositionResponse);
+        com.example.orderapi.dto.DecompositionResponse response = (com.example.orderapi.dto.DecompositionResponse) parsed;
+        assertTrue(response.isDecompositionComplete());
+        assertEquals(1, response.getStories().size());
+        assertEquals("Small UI change", response.getStories().get(0).getPrSafety().getNotes());
+        assertEquals("under-30000-char-patch", response.getStories().get(0).getPrSafety().getTarget());
     }
 }
