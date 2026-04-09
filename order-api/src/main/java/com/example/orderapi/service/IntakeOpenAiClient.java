@@ -152,12 +152,13 @@ public class IntakeOpenAiClient {
     }
 
     public DecompositionResponse decompose(String requestId, StructuredIntakeData structuredData) {
-        String safeRequestId = safeRequestId(requestId);
-        if (!StringUtils.hasText(requestId)) {
+        String normalizedRequestId = requestId != null ? requestId.trim() : null;
+        String safeRequestId = safeRequestId(normalizedRequestId);
+        if (!StringUtils.hasText(normalizedRequestId)) {
             log.warn("Decomposition requestId is blank; returning safe fallback");
             return fallbackDecompositionResult(safeRequestId);
         }
-        if (!isValidRequestId(requestId)) {
+        if (!isValidRequestId(normalizedRequestId)) {
             log.warn("Decomposition requestId failed validation; returning safe fallback");
             return fallbackDecompositionResult(safeRequestId);
         }
@@ -172,7 +173,7 @@ public class IntakeOpenAiClient {
         requestMessages.add(Map.of("role", "system", "content", DECOMPOSITION_SYSTEM_PROMPT));
 
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("requestId", requestId);
+        payload.put("requestId", normalizedRequestId);
         payload.put("structuredData",
                 normalizeStructuredDataForDecomposition(
                         structuredData,
@@ -184,7 +185,7 @@ public class IntakeOpenAiClient {
             int payloadBytes = payloadJson.getBytes(StandardCharsets.UTF_8).length;
             if (payloadBytes > MAX_DECOMPOSITION_PAYLOAD_BYTES) {
                 Map<String, Object> compactPayload = new LinkedHashMap<>();
-                compactPayload.put("requestId", requestId);
+                compactPayload.put("requestId", normalizedRequestId);
                 compactPayload.put("structuredData",
                         normalizeStructuredDataForDecomposition(
                                 structuredData,
@@ -209,7 +210,7 @@ public class IntakeOpenAiClient {
             String requestJson = objectMapper.writeValueAsString(body);
             int requestBytes = requestJson.getBytes(StandardCharsets.UTF_8).length;
             if (requestBytes > MAX_DECOMPOSITION_REQUEST_BYTES) {
-                log.warn("Decomposition request too large for requestId={}, bytes={}", requestId, requestBytes);
+                log.warn("Decomposition request too large for requestId={}, bytes={}", normalizedRequestId, requestBytes);
                 return fallbackDecompositionResult(safeRequestId);
             }
             String raw = restClient.post()
@@ -415,6 +416,7 @@ public class IntakeOpenAiClient {
         if (!completionNode.isMissingNode()
                 && !completionNode.isNull()
                 && !completionNode.isBoolean()
+                && !completionNode.isNumber()
                 && !(completionNode.isTextual() && isBooleanText(completionNode.asText(null)))) {
             return false;
         }
@@ -424,6 +426,9 @@ public class IntakeOpenAiClient {
         }
         if (storiesNode.isArray()) {
             for (JsonNode storyNode : storiesNode) {
+                if (storyNode == null || storyNode.isNull()) {
+                    continue;
+                }
                 if (!storyNode.isObject()) {
                     return false;
                 }
@@ -441,7 +446,7 @@ public class IntakeOpenAiClient {
         }
         for (int i = 0; i < requestId.length(); i++) {
             char ch = requestId.charAt(i);
-            if (Character.isISOControl(ch)) {
+            if (!Character.isLetterOrDigit(ch) && ch != '-' && ch != '_' && ch != ':' && ch != '.') {
                 return false;
             }
         }
@@ -510,6 +515,9 @@ public class IntakeOpenAiClient {
                 return false;
             }
             return Boolean.parseBoolean(value);
+        }
+        if (node.isNumber()) {
+            return node.asInt(0) != 0;
         }
         return false;
     }
@@ -629,7 +637,7 @@ public class IntakeOpenAiClient {
     }
 
     private String safeRequestId(String requestId) {
-        return requestId != null ? requestId : "unknown-request";
+        return StringUtils.hasText(requestId) ? requestId : "unknown-request";
     }
 
     private String blankToNull(String value) {
