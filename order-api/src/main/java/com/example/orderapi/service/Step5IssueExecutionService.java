@@ -181,12 +181,21 @@ public class Step5IssueExecutionService {
 
     private void resetIssueForRetry(long issueNumber, String reason) {
         try {
-            gitHubIssueClientService.removeIssueLabel(issueNumber, "ai-in-progress");
-            log.info("Issue #{}: reset ai-in-progress label for retry. reason={}", issueNumber, reason);
-            safeAudit("approved-issue-reset-for-retry", issueNumber, Map.of("reason", reason), "");
+            boolean removed = gitHubIssueClientService.removeIssueLabel(issueNumber, "ai-in-progress");
+            if (removed) {
+                log.info("Issue #{}: reset ai-in-progress label for retry. reason={}", issueNumber, reason);
+                safeAudit("approved-issue-reset-for-retry", issueNumber, Map.of("reason", reason, "label", "ai-in-progress"), "");
+            } else {
+                log.info("Issue #{}: ai-in-progress label already absent. reason={}", issueNumber, reason);
+                safeAudit("approved-issue-reset-skipped", issueNumber, Map.of("reason", "label-not-present", "label", "ai-in-progress"), "");
+            }
         } catch (Exception ex) {
-            log.warn("Issue #{}: failed to reset ai-in-progress label: {}", issueNumber, ex.getMessage());
-            safeAudit("approved-issue-reset-failed", issueNumber, Map.of("reason", reason), ex.getMessage());
+            String error = ex.getClass().getSimpleName() + ": " + ex.getMessage();
+            log.warn("Issue #{}: failed to reset ai-in-progress label: {}", issueNumber, error);
+            safeAudit("approved-issue-reset-failed",
+                    issueNumber,
+                    Map.of("reason", reason, "label", "ai-in-progress", "errorType", ex.getClass().getSimpleName()),
+                    error);
         }
     }
 

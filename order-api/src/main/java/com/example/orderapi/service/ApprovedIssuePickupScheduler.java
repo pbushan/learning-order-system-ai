@@ -72,16 +72,28 @@ public class ApprovedIssuePickupScheduler {
                             continue;
                         }
                         try {
-                            gitHubIssueClientService.removeIssueLabel(issueNumber, "ai-in-progress");
-                            safeAudit("approved-issue-reset-for-retry", issueNumber, Map.of("reason", availability.reason()), "");
+                            boolean removed = gitHubIssueClientService.removeIssueLabel(issueNumber, "ai-in-progress");
+                            if (removed) {
+                                safeAudit("approved-issue-reset-for-retry", issueNumber, Map.of("reason", availability.reason()), "");
+                            } else {
+                                safeAudit("approved-issue-reset-skipped", issueNumber, Map.of("reason", "label-not-present"), "");
+                            }
                         } catch (Exception ex) {
-                            log.warn("Failed resetting issue #{} while execution unavailable: {}", issueNumber, ex.getMessage());
-                            safeAudit("approved-issue-reset-failed", issueNumber, Map.of("reason", availability.reason()), ex.getMessage());
+                            String error = ex.getClass().getSimpleName() + ": " + ex.getMessage();
+                            log.warn("Failed resetting issue #{} while execution unavailable: {}", issueNumber, error);
+                            safeAudit("approved-issue-reset-failed",
+                                    issueNumber,
+                                    Map.of("reason", availability.reason(), "label", "ai-in-progress", "errorType", ex.getClass().getSimpleName()),
+                                    error);
                         }
                     }
                 } catch (Exception ex) {
-                    log.warn("Failed resetting in-progress issues while execution unavailable: {}", ex.getMessage());
-                    safeAudit("approved-issue-reset-failed", null, Map.of("reason", availability.reason()), ex.getMessage());
+                    String error = ex.getClass().getSimpleName() + ": " + ex.getMessage();
+                    log.warn("Failed resetting in-progress issues while execution unavailable: {}", error);
+                    safeAudit("approved-issue-reset-failed",
+                            null,
+                            Map.of("reason", availability.reason(), "label", "ai-in-progress", "errorType", ex.getClass().getSimpleName()),
+                            error);
                 }
                 return;
             }

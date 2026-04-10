@@ -132,7 +132,7 @@ public class GitHubIssueClientService {
         }
     }
 
-    public void removeIssueLabel(long issueNumber, String label) {
+    public boolean removeIssueLabel(long issueNumber, String label) {
         if (!StringUtils.hasText(token)) {
             throw new IllegalStateException("GitHub token is not configured. Set app.github.token or GITHUB_TOKEN.");
         }
@@ -157,11 +157,11 @@ public class GitHubIssueClientService {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
                         .retrieve()
                         .toBodilessEntity();
-                return;
+                return true;
             } catch (RestClientResponseException ex) {
                 int status = ex.getStatusCode().value();
                 if (status == 404) {
-                    return;
+                    return false;
                 }
                 boolean transientFailure = status == 429 || (status >= 500 && status <= 599);
                 if (!transientFailure || attempts >= 2) {
@@ -175,6 +175,7 @@ public class GitHubIssueClientService {
                 }
             }
         }
+        return false;
     }
 
     public List<ApprovedGitHubIssue> discoverApprovedIssues() {
@@ -241,7 +242,6 @@ public class GitHubIssueClientService {
                 .uri(uriBuilder -> uriBuilder
                         .path("/repos/{owner}/{repo}/issues")
                         .queryParam("state", "open")
-                        .queryParam("labels", "ai-in-progress")
                         .queryParam("per_page", "100")
                         .build(owner.trim(), repo.trim()))
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
