@@ -130,6 +130,34 @@ public class GitHubIssueClientService {
         }
     }
 
+    public void removeIssueLabel(long issueNumber, String label) {
+        if (!StringUtils.hasText(token)) {
+            throw new IllegalStateException("GitHub token is not configured. Set app.github.token or GITHUB_TOKEN.");
+        }
+        if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
+            throw new IllegalStateException("GitHub repository is not configured. Set app.github.owner and app.github.repo.");
+        }
+        if (issueNumber <= 0) {
+            throw new IllegalArgumentException("issueNumber must be > 0");
+        }
+        if (!StringUtils.hasText(label)) {
+            throw new IllegalArgumentException("label is required");
+        }
+
+        try {
+            restClient.delete()
+                    .uri("/repos/{owner}/{repo}/issues/{issueNumber}/labels/{label}",
+                            owner.trim(), repo.trim(), issueNumber, label.trim())
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientResponseException ex) {
+            if (ex.getStatusCode().value() != 404) {
+                throw ex;
+            }
+        }
+    }
+
     public List<ApprovedGitHubIssue> discoverApprovedIssues() {
         if (!StringUtils.hasText(token)) {
             throw new IllegalStateException("GitHub token is not configured. Set app.github.token or GITHUB_TOKEN.");
@@ -180,6 +208,48 @@ public class GitHubIssueClientService {
         } finally {
             safeAuditApprovedIssueSelection(issues, error);
         }
+    }
+
+    public List<ApprovedGitHubIssue> discoverApprovedInProgressIssues() {
+        if (!StringUtils.hasText(token)) {
+            throw new IllegalStateException("GitHub token is not configured. Set app.github.token or GITHUB_TOKEN.");
+        }
+        if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
+            throw new IllegalStateException("GitHub repository is not configured. Set app.github.owner and app.github.repo.");
+        }
+
+        GitHubIssueListItem[] response = restClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/repos/{owner}/{repo}/issues")
+                        .queryParam("state", "open")
+                        .queryParam("labels", "approved-for-dev,ai-in-progress")
+                        .queryParam("per_page", "100")
+                        .build(owner.trim(), repo.trim()))
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                .retrieve()
+                .body(GitHubIssueListItem[].class);
+
+        if (response == null || response.length == 0) {
+            return List.of();
+        }
+
+        List<ApprovedGitHubIssue> issues = new ArrayList<>();
+        for (GitHubIssueListItem item : response) {
+            if (item == null || item.getPullRequest() != null) {
+                continue;
+            }
+            List<String> labels = extractLabelNames(item.getLabels());
+            if (!labels.contains("approved-for-dev") || !labels.contains("ai-in-progress")) {
+                continue;
+            }
+            ApprovedGitHubIssue normalized = new ApprovedGitHubIssue();
+            normalized.setIssueNumber(item.getNumber());
+            normalized.setTitle(item.getTitle());
+            normalized.setBody(item.getBody());
+            normalized.setLabels(labels);
+            issues.add(normalized);
+        }
+        return issues;
     }
 
     private void safeAuditApprovedIssueSelection(List<ApprovedGitHubIssue> issues, String error) {

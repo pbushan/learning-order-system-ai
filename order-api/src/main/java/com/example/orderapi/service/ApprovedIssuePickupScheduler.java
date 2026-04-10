@@ -39,6 +39,15 @@ public class ApprovedIssuePickupScheduler {
             return;
         }
 
+        Step5IssueExecutionService.ExecutionAvailability availability = step5IssueExecutionService.getExecutionAvailability();
+        if (!availability.available()) {
+            log.warn("Step 5 poll cannot execute issues because {}.", availability.reason());
+            safeAudit("approved-issue-poll-skipped", null, Map.of("reason", availability.reason()), "");
+            resetStuckInProgressIssues(availability.reason());
+            pollInProgress.set(false);
+            return;
+        }
+
         List<ApprovedGitHubIssue> issues;
         try {
             issues = gitHubIssueClientService.discoverApprovedIssues();
@@ -87,6 +96,33 @@ public class ApprovedIssuePickupScheduler {
             }
         } finally {
             pollInProgress.set(false);
+        }
+    }
+
+    private void resetStuckInProgressIssues(String reason) {
+        List<ApprovedGitHubIssue> inProgressIssues;
+        try {
+            inProgressIssues = gitHubIssueClientService.discoverApprovedInProgressIssues();
+        } catch (Exception ex) {
+            log.warn("Failed to discover in-progress approved issues for reset: {}", ex.getMessage());
+            safeAudit("approved-issue-reset-for-retry-failed", null, Map.of("reason", reason), ex.getMessage());
+            return;
+        }
+
+        for (ApprovedGitHubIssue issue : inProgressIssues) {
+            if (issue == null || issue.getIssueNumber() <= 0) {
+                continue;
+            }
+            long issueNumber = issue.getIssueNumber();
+            try {
+                gitHubIssueClientService.removeIssueLabel(issueNumber, "ai-in-progress");
+                recentlyPickedAtMs.remove(issueNumber);
+                log.info("Reset issue #{} for retry because Step 5 runtime is unavailable. reason={}", issueNumber, reason);
+                safeAudit("approved-issue-reset-for-retry", issueNumber, Map.of("reason", reason), "");
+            } catch (Exception ex) {
+                log.warn("Failed resetting issue #{} for retry: {}", issueNumber, ex.getMessage());
+                safeAudit("approved-issue-reset-for-retry-failed", issueNumber, Map.of("reason", reason), ex.getMessage());
+            }
         }
     }
 

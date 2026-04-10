@@ -31,14 +31,31 @@ def log(msg: str) -> None:
     print(msg, flush=True)
 
 
+def redact_secrets(text: str) -> str:
+    if not text:
+        return ""
+    sanitized = text
+    token = token_from_env()
+    if token:
+        sanitized = sanitized.replace(token, "***")
+    sanitized = re.sub(r"x-access-token:[^@\s]+@", "x-access-token:***@", sanitized)
+    return sanitized
+
+
 def run_cmd(*args: str, check: bool = True, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    proc = subprocess.run(
         list(args),
         cwd=str(cwd or REPO_ROOT),
         text=True,
         capture_output=True,
-        check=check,
+        check=False,
     )
+    if check and proc.returncode != 0:
+        stderr = redact_secrets((proc.stderr or "").strip())
+        stdout = redact_secrets((proc.stdout or "").strip())
+        detail = stderr or stdout or f"exit-code={proc.returncode}"
+        raise RuntimeError(f"Command failed: {args[0]} ({detail})")
+    return proc
 
 
 def run_cmd_with_gh_auth_fallback(*args: str) -> subprocess.CompletedProcess[str]:
@@ -262,7 +279,20 @@ def commit_and_push(branch: str, issue_number: int, changed_files: list[str]) ->
         raise RuntimeError("No staged changes to commit.")
     message = f"Issue #{issue_number}: apply approved update"
     run_cmd("git", "commit", "-m", message)
-    run_cmd("git", "push", "-u", "origin", branch)
+
+    push_proc = run_cmd("git", "push", "-u", "origin", branch, check=False)
+    if push_proc.returncode != 0:
+        token = token_from_env()
+        if not token:
+            raise RuntimeError(redact_secrets(push_proc.stderr.strip() or push_proc.stdout.strip() or "git push failed"))
+        remote = run_cmd("git", "remote", "get-url", "origin").stdout.strip()
+        if not remote.startswith("https://github.com/"):
+            raise RuntimeError(redact_secrets(push_proc.stderr.strip() or push_proc.stdout.strip() or "git push failed"))
+        token_remote = remote.replace("https://", f"https://x-access-token:{token}@")
+        fallback = run_cmd("git", "push", "-u", token_remote, branch, check=False)
+        if fallback.returncode != 0:
+            detail = fallback.stderr.strip() or fallback.stdout.strip() or "git push failed"
+            raise RuntimeError(redact_secrets(detail))
     return message
 
 
@@ -553,7 +583,7 @@ def main() -> int:
                     result = process_issue(args.owner, args.repo, token, issue, args.auto_merge)
                     log(json.dumps({"result": result}, ensure_ascii=True))
                 except Exception as exc:  # minimal explicit failure visibility
-                    error = str(exc)
+                    error = redact_secrets(str(exc))
                     log(f"Issue #{issue_number}: FAILED - {error}")
                     log_step5_event("approved-issue-execution-failed", issue_number=issue_number, error=error)
                     try:
