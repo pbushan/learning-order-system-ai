@@ -9,6 +9,9 @@ import org.springframework.stereotype.Service;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -140,9 +143,18 @@ public class ApprovedIssuePickupScheduler {
         if (labels == null || labels.isEmpty()) {
             return false;
         }
-        return labels.contains("approved-for-dev")
-                && labels.contains("ai-generated")
-                && labels.contains("portfolio");
+        Set<String> normalized = new HashSet<>();
+        for (String label : labels) {
+            if (label != null) {
+                String clean = label.trim().toLowerCase(Locale.ROOT);
+                if (!clean.isEmpty()) {
+                    normalized.add(clean);
+                }
+            }
+        }
+        return normalized.contains("approved-for-dev")
+                && normalized.contains("ai-generated")
+                && normalized.contains("portfolio");
     }
     private void safeAudit(String operation, Long issueNumber, Map<String, Object> metadata, String error) {
         try {
