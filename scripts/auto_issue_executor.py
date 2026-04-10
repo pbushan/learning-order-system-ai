@@ -125,6 +125,22 @@ def discover_eligible_issues(owner: str, repo: str, token: str) -> list[dict[str
     return result
 
 
+def fetch_issue(owner: str, repo: str, token: str, issue_number: int) -> dict[str, Any]:
+    issue = github_request("GET", owner, repo, f"/issues/{issue_number}", token)
+    if not isinstance(issue, dict) or issue.get("pull_request") is not None:
+        raise RuntimeError(f"Issue #{issue_number} is invalid or is a pull request.")
+
+    labels = [str((lbl or {}).get("name", "")).strip() for lbl in issue.get("labels", [])]
+    return {
+        "issueNumber": int(issue.get("number")),
+        "title": issue.get("title") or "",
+        "body": issue.get("body") or "",
+        "labels": labels,
+        "htmlUrl": issue.get("html_url") or "",
+        "state": issue.get("state") or "",
+    }
+
+
 def add_label(owner: str, repo: str, token: str, issue_number: int, label: str) -> None:
     github_request("POST", owner, repo, f"/issues/{issue_number}/labels", token, {"labels": [label]})
 
@@ -433,6 +449,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--once", action="store_true", help="Run a single scan iteration and exit.")
     parser.add_argument("--interval-seconds", type=int, default=20)
     parser.add_argument("--auto-merge", action="store_true", help="Merge PR and cleanup when created.")
+    parser.add_argument(
+        "--allow-in-progress",
+        action="store_true",
+        help="Allow direct --issue execution even when ai-in-progress is already set.",
+    )
     return parser.parse_args()
 
 
@@ -446,9 +467,19 @@ def main() -> int:
     while True:
         try:
             log("Polling approved issues...")
-            issues = discover_eligible_issues(args.owner, args.repo, token)
             if args.issue is not None:
-                issues = [i for i in issues if int(i["issueNumber"]) == args.issue]
+                direct_issue = fetch_issue(args.owner, args.repo, token, args.issue)
+                labels = direct_issue.get("labels", [])
+                if direct_issue.get("state") != "open":
+                    issues = []
+                elif "approved-for-dev" not in labels:
+                    issues = []
+                elif ("ai-in-progress" in labels) and (not args.allow_in_progress):
+                    issues = []
+                else:
+                    issues = [direct_issue]
+            else:
+                issues = discover_eligible_issues(args.owner, args.repo, token)
             log(f"Approved eligible issues found: {len(issues)}")
             log_step5_event("approved-issue-poll-ran", metadata={"approvedIssuesFound": len(issues)})
 
