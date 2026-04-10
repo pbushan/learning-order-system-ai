@@ -18,13 +18,16 @@ public class ApprovedIssuePickupScheduler {
     private static final Logger log = LoggerFactory.getLogger(ApprovedIssuePickupScheduler.class);
 
     private final GitHubIssueClientService gitHubIssueClientService;
+    private final Step5IssueExecutionService step5IssueExecutionService;
     private final FileAuditLogService fileAuditLogService;
     private final AtomicBoolean pollInProgress = new AtomicBoolean(false);
     private final Map<Long, Long> recentlyPickedAtMs = new ConcurrentHashMap<>();
 
     public ApprovedIssuePickupScheduler(GitHubIssueClientService gitHubIssueClientService,
+                                        Step5IssueExecutionService step5IssueExecutionService,
                                         FileAuditLogService fileAuditLogService) {
         this.gitHubIssueClientService = gitHubIssueClientService;
+        this.step5IssueExecutionService = step5IssueExecutionService;
         this.fileAuditLogService = fileAuditLogService;
     }
 
@@ -73,6 +76,7 @@ public class ApprovedIssuePickupScheduler {
                     metadata.put("nextStep", "agent-execution");
                     log.info("Picked approved issue #{} and added ai-in-progress label.", issueNumber);
                     safeAudit("approved-issue-picked", issueNumber, metadata, "");
+                    step5IssueExecutionService.executeIssueAsync(issueNumber);
                 } catch (Exception ex) {
                     log.warn("Failed to mark issue #{} as ai-in-progress: {}", issueNumber, ex.getMessage());
                     Map<String, Object> metadata = new LinkedHashMap<>();
