@@ -82,8 +82,8 @@ public class Step5IssueExecutionService {
             safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-script"), "");
             return;
         }
-        Path repoRoot = scriptPath.getParent() != null ? scriptPath.getParent().getParent() : null;
-        if (repoRoot == null || !Files.exists(repoRoot.resolve(".git"))) {
+        Path repoRoot = resolveRepoRoot(scriptPath);
+        if (repoRoot == null) {
             log.warn("Skipping Step 5 execution for #{} because repo root is unavailable for script {}", issueNumber, scriptPath);
             safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-repo-root"), "");
             return;
@@ -170,6 +170,17 @@ public class Step5IssueExecutionService {
             if (Files.exists(candidate)) {
                 return candidate;
             }
+        }
+        return null;
+    }
+
+    private Path resolveRepoRoot(Path scriptPath) {
+        Path current = scriptPath.getParent();
+        while (current != null) {
+            if (Files.exists(current.resolve(".git"))) {
+                return current;
+            }
+            current = current.getParent();
         }
         return null;
     }
