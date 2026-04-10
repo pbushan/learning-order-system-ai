@@ -76,10 +76,16 @@ public class Step5IssueExecutionService {
             safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-owner-repo"), "");
             return;
         }
-        Path scriptPath = Path.of(executorScriptPath).normalize();
-        if (!scriptPath.getFileName().toString().equals("auto_issue_executor.py") || !Files.exists(scriptPath)) {
-            log.warn("Skipping Step 5 execution for #{} because script is unavailable at {}", issueNumber, scriptPath);
+        Path scriptPath = resolveScriptPath();
+        if (scriptPath == null || !scriptPath.getFileName().toString().equals("auto_issue_executor.py")) {
+            log.warn("Skipping Step 5 execution for #{} because script is unavailable. configuredPath={}", issueNumber, executorScriptPath);
             safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-script"), "");
+            return;
+        }
+        Path repoRoot = scriptPath.getParent() != null ? scriptPath.getParent().getParent() : null;
+        if (repoRoot == null || !Files.exists(repoRoot.resolve(".git"))) {
+            log.warn("Skipping Step 5 execution for #{} because repo root is unavailable for script {}", issueNumber, scriptPath);
+            safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-repo-root"), "");
             return;
         }
 
@@ -100,6 +106,7 @@ public class Step5IssueExecutionService {
 
         ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.redirectErrorStream(true);
+        processBuilder.directory(repoRoot.toFile());
         processBuilder.environment().put("ALLOW_AUTO_MERGE", String.valueOf(autoMerge));
 
         try {
@@ -143,5 +150,27 @@ public class Step5IssueExecutionService {
         } catch (Exception ignored) {
             // Audit failures must never fail scheduler flow.
         }
+    }
+
+    private Path resolveScriptPath() {
+        List<Path> candidates = new ArrayList<>();
+        Path configured = Path.of(executorScriptPath);
+        if (configured.isAbsolute()) {
+            candidates.add(configured.normalize());
+        }
+
+        Path cwd = Path.of(System.getProperty("user.dir")).normalize();
+        candidates.add(cwd.resolve(executorScriptPath).normalize());
+        candidates.add(cwd.resolve("scripts/auto_issue_executor.py").normalize());
+        if (cwd.getParent() != null) {
+            candidates.add(cwd.getParent().resolve("scripts/auto_issue_executor.py").normalize());
+        }
+
+        for (Path candidate : candidates) {
+            if (Files.exists(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
     }
 }
