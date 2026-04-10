@@ -315,8 +315,48 @@ def create_pr(owner: str, repo: str, token: str, branch: str, scaffold: dict[str
 
 
 def post_ready_note(owner: str, repo: str, token: str, pr_number: int) -> None:
-    message = "All P2+ comments addressed. Ready for merge."
+    message = "PR ready for review. Awaiting human merge."
     github_request("POST", owner, repo, f"/issues/{pr_number}/comments", token, {"body": message})
+
+
+def extract_label_names(raw_labels: Any) -> list[str]:
+    names: list[str] = []
+    if isinstance(raw_labels, dict):
+        if "labels" in raw_labels:
+            raw_labels = raw_labels.get("labels")
+        else:
+            raw_labels = [raw_labels]
+    if not isinstance(raw_labels, list):
+        return names
+    for label in raw_labels:
+        if isinstance(label, str):
+            text = label.strip().lower()
+            if text:
+                names.append(text)
+        elif isinstance(label, dict):
+            text = str(label.get("name", "")).strip().lower()
+            if text:
+                names.append(text)
+    return names
+
+
+def is_auto_merge_allowed(owner: str, repo: str, token: str, pr_number: int, auto_merge_requested: bool) -> tuple[bool, str]:
+    if not auto_merge_requested:
+        return False, "auto-merge flag not requested"
+
+    env_flag = str(os.getenv("ALLOW_AUTO_MERGE", "")).strip().lower()
+    if env_flag not in {"1", "true", "yes", "on"}:
+        return False, "ALLOW_AUTO_MERGE is not enabled"
+
+    try:
+        labels_payload = github_request("GET", owner, repo, f"/issues/{pr_number}/labels", token)
+        labels = extract_label_names(labels_payload)
+    except Exception as ex:
+        return False, f"unable to read PR labels: {ex}"
+    if "approved-to-merge" not in labels:
+        return False, "missing approved-to-merge label"
+
+    return True, ""
 
 
 def merge_pr(owner: str, repo: str, token: str, pr_number: int) -> None:
@@ -384,6 +424,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
 
         log(f"Issue #{issue_number}: creating pull request")
         pr_number, pr_url = create_pr(owner, repo, token, branch, scaffold)
+        log(f"Issue #{issue_number}: PR created #{pr_number} {pr_url}")
         log_step5_event("issue-pr-created", issue_number=issue_number, metadata={"prNumber": pr_number, "prUrl": pr_url})
 
         result = {
@@ -395,7 +436,21 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
             "merged": False,
         }
 
-        if auto_merge:
+        can_merge, merge_skip_reason = is_auto_merge_allowed(owner, repo, token, pr_number, auto_merge)
+        if not can_merge:
+            log(f"Issue #{issue_number}: Merge skipped: human approval required ({merge_skip_reason})")
+            try:
+                post_ready_note(owner, repo, token, pr_number)
+            except Exception as ex:
+                log(f"Issue #{issue_number}: review-note skipped due to error: {ex}")
+            log_step5_event(
+                "issue-pr-awaiting-human-merge",
+                issue_number=issue_number,
+                metadata={"prNumber": pr_number, "reason": merge_skip_reason},
+            )
+            return result
+
+        if can_merge:
             log(f"Issue #{issue_number}: posting ready-to-merge note")
             try:
                 post_ready_note(owner, repo, token, pr_number)
