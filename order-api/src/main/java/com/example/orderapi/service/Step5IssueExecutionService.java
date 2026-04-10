@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.Set;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -76,16 +77,17 @@ public class Step5IssueExecutionService {
             safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-owner-repo"), "");
             return;
         }
-        Path scriptPath = resolveScriptPath();
-        if (scriptPath == null || !scriptPath.getFileName().toString().equals("auto_issue_executor.py")) {
-            log.warn("Skipping Step 5 execution for #{} because script is unavailable. configuredPath={}", issueNumber, executorScriptPath);
-            safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-script"), "");
+        Path repoRoot = resolveRepoRoot(Path.of(System.getProperty("user.dir")).normalize());
+        if (repoRoot == null || !Files.isDirectory(repoRoot)) {
+            log.warn("Skipping Step 5 execution for #{} because repo root is unavailable from current runtime.", issueNumber);
+            safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-repo-root"), "");
             return;
         }
-        Path repoRoot = resolveRepoRoot(scriptPath);
-        if (repoRoot == null) {
-            log.warn("Skipping Step 5 execution for #{} because repo root is unavailable for script {}", issueNumber, scriptPath);
-            safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-repo-root"), "");
+
+        Path scriptPath = resolveScriptPath(repoRoot);
+        if (scriptPath == null || !scriptPath.getFileName().toString().equals("auto_issue_executor.py")) {
+            log.warn("Skipping Step 5 execution for #{} because script is unavailable under repo scripts directory.", issueNumber);
+            safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-script"), "");
             return;
         }
 
@@ -152,32 +154,25 @@ public class Step5IssueExecutionService {
         }
     }
 
-    private Path resolveScriptPath() {
+    private Path resolveScriptPath(Path repoRoot) {
         if (!StringUtils.hasText(executorScriptPath)) {
             return null;
         }
-        List<Path> candidates = new ArrayList<>();
+        LinkedHashSet<Path> candidates = new LinkedHashSet<>();
+        Path scriptsDir = repoRoot.resolve("scripts").normalize();
+        candidates.add(scriptsDir.resolve("auto_issue_executor.py").normalize());
+
         Path configured = Path.of(executorScriptPath);
         if (configured.isAbsolute()) {
             candidates.add(configured.normalize());
-        }
-
-        Path cwd = Path.of(System.getProperty("user.dir")).normalize();
-        candidates.add(cwd.resolve(executorScriptPath).normalize());
-        candidates.add(cwd.resolve("scripts/auto_issue_executor.py").normalize());
-        if (cwd.getParent() != null) {
-            candidates.add(cwd.getParent().resolve("scripts/auto_issue_executor.py").normalize());
+        } else {
+            candidates.add(repoRoot.resolve(executorScriptPath).normalize());
         }
 
         for (Path candidate : candidates) {
             if (Files.exists(candidate) && "auto_issue_executor.py".equals(candidate.getFileName().toString())) {
-                Path repoRoot = resolveRepoRoot(candidate);
-                if (repoRoot == null) {
-                    continue;
-                }
-                Path expectedScriptsDir = repoRoot.resolve("scripts").normalize();
                 Path normalizedCandidate = candidate.normalize();
-                if (!normalizedCandidate.startsWith(expectedScriptsDir)) {
+                if (!normalizedCandidate.startsWith(scriptsDir)) {
                     continue;
                 }
                 return candidate;
