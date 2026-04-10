@@ -59,6 +59,7 @@ public class ApprovedIssuePickupScheduler {
             Step5IssueExecutionService.ExecutionAvailability availability =
                     step5IssueExecutionService.checkExecutionAvailability();
             if (!availability.available()) {
+                step5IssueExecutionService.setExecutionPaused(true, availability.reason());
                 log.warn("Step 5 execution unavailable from current runtime. reason={}", availability.reason());
                 safeAudit("approved-issue-execution-skipped", null, Map.of("reason", "execution-unavailable:" + availability.reason()), "");
 
@@ -75,7 +76,7 @@ public class ApprovedIssuePickupScheduler {
                             continue;
                         }
                         try {
-                            boolean removed = gitHubIssueClientService.removeIssueLabel(issueNumber, "ai-in-progress");
+                            boolean removed = gitHubIssueClientService.removeIssueLabelCaseInsensitive(issueNumber, "ai-in-progress");
                             if (removed) {
                                 safeAudit("approved-issue-reset-for-retry", issueNumber, Map.of("reason", availability.reason()), "");
                             } else {
@@ -100,6 +101,7 @@ public class ApprovedIssuePickupScheduler {
                 }
                 return;
             }
+            step5IssueExecutionService.setExecutionPaused(false, "");
 
             for (ApprovedGitHubIssue issue : issues) {
                 if (issue == null || issue.getIssueNumber() <= 0) {
@@ -139,6 +141,9 @@ public class ApprovedIssuePickupScheduler {
     }
 
     private boolean isStep5OwnedIssue(ApprovedGitHubIssue issue) {
+        if (issue == null) {
+            return false;
+        }
         List<String> labels = issue.getLabels();
         if (labels == null || labels.isEmpty()) {
             return false;

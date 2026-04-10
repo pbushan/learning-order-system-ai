@@ -46,10 +46,11 @@ class ApprovedIssuePickupSchedulerTest {
         scheduler.pickUpApprovedIssues();
 
         verify(gitHubIssueClientService).discoverApprovedInProgressIssues();
-        verify(gitHubIssueClientService, never()).removeIssueLabel(42L, "ai-in-progress");
-        verify(gitHubIssueClientService).removeIssueLabel(43L, "ai-in-progress");
+        verify(gitHubIssueClientService, never()).removeIssueLabelCaseInsensitive(42L, "ai-in-progress");
+        verify(gitHubIssueClientService).removeIssueLabelCaseInsensitive(43L, "ai-in-progress");
         verify(step5IssueExecutionService, never()).executeIssueAsync(42L);
         verify(step5IssueExecutionService, never()).executeIssueAsync(43L);
+        verify(step5IssueExecutionService).setExecutionPaused(true, "missing-repo-root");
     }
 
     @Test
@@ -67,7 +68,7 @@ class ApprovedIssuePickupSchedulerTest {
 
         scheduler.pickUpApprovedIssues();
 
-        verify(gitHubIssueClientService).removeIssueLabel(55L, "ai-in-progress");
+        verify(gitHubIssueClientService).removeIssueLabelCaseInsensitive(55L, "ai-in-progress");
     }
 
     @Test
@@ -77,7 +78,7 @@ class ApprovedIssuePickupSchedulerTest {
 
         ApprovedGitHubIssue step5Owned = issue(77L, "Owned", List.of("approved-for-dev", "ai-in-progress", "ai-generated", "portfolio"));
         when(gitHubIssueClientService.discoverApprovedInProgressIssues()).thenReturn(List.of(step5Owned));
-        when(gitHubIssueClientService.removeIssueLabel(77L, "ai-in-progress")).thenReturn(false);
+        when(gitHubIssueClientService.removeIssueLabelCaseInsensitive(77L, "ai-in-progress")).thenReturn(false);
 
         scheduler.pickUpApprovedIssues();
 
@@ -102,6 +103,36 @@ class ApprovedIssuePickupSchedulerTest {
 
         verify(gitHubIssueClientService).addIssueLabel(84L, "ai-in-progress");
         verify(step5IssueExecutionService).executeIssueAsync(84L);
+        verify(step5IssueExecutionService).setExecutionPaused(false, "");
+    }
+
+    @Test
+    void doesNotResetWhenRequiredLabelsPresentButNoAiGeneratedOrMarkers() {
+        when(step5IssueExecutionService.checkExecutionAvailability())
+                .thenReturn(new Step5IssueExecutionService.ExecutionAvailability(false, "missing-repo-root"));
+        ApprovedGitHubIssue notOwned = issue(88L, "No markers", List.of("approved-for-dev", "ai-in-progress", "portfolio"), "plain body");
+        when(gitHubIssueClientService.discoverApprovedInProgressIssues()).thenReturn(List.of(notOwned));
+
+        scheduler.pickUpApprovedIssues();
+
+        verify(gitHubIssueClientService, never()).removeIssueLabelCaseInsensitive(88L, "ai-in-progress");
+    }
+
+    @Test
+    void doesNotResetWhenMarkersPresentButRequiredLabelsMissing() {
+        when(step5IssueExecutionService.checkExecutionAvailability())
+                .thenReturn(new Step5IssueExecutionService.ExecutionAvailability(false, "missing-repo-root"));
+        ApprovedGitHubIssue notOwned = issue(
+                89L,
+                "Markers only",
+                List.of("ai-in-progress", "ai-generated"),
+                "## Story ID\nabc\n\n## PR Safety\n- target: under-30000-char-patch"
+        );
+        when(gitHubIssueClientService.discoverApprovedInProgressIssues()).thenReturn(List.of(notOwned));
+
+        scheduler.pickUpApprovedIssues();
+
+        verify(gitHubIssueClientService, never()).removeIssueLabelCaseInsensitive(89L, "ai-in-progress");
     }
 
     private ApprovedGitHubIssue issue(long number, String title, List<String> labels) {

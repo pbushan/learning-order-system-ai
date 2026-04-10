@@ -21,6 +21,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 public class Step5IssueExecutionService {
@@ -38,6 +39,7 @@ public class Step5IssueExecutionService {
     private final FileAuditLogService fileAuditLogService;
     private final ExecutorService executorService = Executors.newSingleThreadExecutor();
     private final Set<Long> inFlightIssues = ConcurrentHashMap.newKeySet();
+    private final AtomicReference<String> pausedReason = new AtomicReference<>("");
 
     public Step5IssueExecutionService(@Value("${app.github.owner:}") String owner,
                                       @Value("${app.github.repo:}") String repo,
@@ -62,6 +64,14 @@ public class Step5IssueExecutionService {
     public record ExecutionAvailability(boolean available, String reason) {
     }
 
+    public void setExecutionPaused(boolean paused, String reason) {
+        if (!paused) {
+            pausedReason.set("");
+            return;
+        }
+        pausedReason.set(StringUtils.hasText(reason) ? reason : "execution-paused");
+    }
+
     public ExecutionAvailability checkExecutionAvailability() {
         if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
             return new ExecutionAvailability(false, "missing-owner-repo");
@@ -78,6 +88,13 @@ public class Step5IssueExecutionService {
     }
 
     public void executeIssueAsync(long issueNumber) {
+        String currentPauseReason = pausedReason.get();
+        if (StringUtils.hasText(currentPauseReason)) {
+            log.info("Issue #{}: Step 5 execution currently paused. reason={}", issueNumber, currentPauseReason);
+            safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "execution-paused:" + currentPauseReason), "");
+            resetIssueForRetry(issueNumber, "execution-paused");
+            return;
+        }
         if (!inFlightIssues.add(issueNumber)) {
             log.info("Issue #{}: Step 5 execution already in progress; skipping duplicate trigger.", issueNumber);
             safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "already-in-flight"), "");
@@ -181,7 +198,7 @@ public class Step5IssueExecutionService {
 
     private void resetIssueForRetry(long issueNumber, String reason) {
         try {
-            boolean removed = gitHubIssueClientService.removeIssueLabel(issueNumber, "ai-in-progress");
+            boolean removed = gitHubIssueClientService.removeIssueLabelCaseInsensitive(issueNumber, "ai-in-progress");
             if (removed) {
                 log.info("Issue #{}: reset ai-in-progress label for retry. reason={}", issueNumber, reason);
                 safeAudit("approved-issue-reset-for-retry", issueNumber, Map.of("reason", reason, "label", "ai-in-progress"), "");

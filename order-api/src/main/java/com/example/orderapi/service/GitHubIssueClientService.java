@@ -179,6 +179,26 @@ public class GitHubIssueClientService {
         return false;
     }
 
+    public boolean removeIssueLabelCaseInsensitive(long issueNumber, String label) {
+        if (issueNumber <= 0) {
+            throw new IllegalArgumentException("issueNumber must be > 0");
+        }
+        if (!StringUtils.hasText(label)) {
+            throw new IllegalArgumentException("label is required");
+        }
+        List<String> labels = fetchIssueLabelNames(issueNumber);
+        if (labels.isEmpty()) {
+            return false;
+        }
+        String target = label.trim().toLowerCase(Locale.ROOT);
+        for (String current : labels) {
+            if (StringUtils.hasText(current) && current.trim().toLowerCase(Locale.ROOT).equals(target)) {
+                return removeIssueLabel(issueNumber, current);
+            }
+        }
+        return false;
+    }
+
     public List<ApprovedGitHubIssue> discoverApprovedIssues() {
         if (!StringUtils.hasText(token)) {
             throw new IllegalStateException("GitHub token is not configured. Set app.github.token or GITHUB_TOKEN.");
@@ -346,6 +366,18 @@ public class GitHubIssueClientService {
             }
         }
         return names;
+    }
+
+    private List<String> fetchIssueLabelNames(long issueNumber) {
+        GitHubIssueListItem issue = restClient.get()
+                .uri("/repos/{owner}/{repo}/issues/{issueNumber}", owner.trim(), repo.trim(), issueNumber)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                .retrieve()
+                .body(GitHubIssueListItem.class);
+        if (issue == null) {
+            return List.of();
+        }
+        return extractLabelNames(issue.getLabels());
     }
 
     private List<String> normalizeLabels(List<String> labels) {
