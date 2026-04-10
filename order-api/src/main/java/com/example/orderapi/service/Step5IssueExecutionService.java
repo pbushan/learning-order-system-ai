@@ -153,6 +153,9 @@ public class Step5IssueExecutionService {
     }
 
     private Path resolveScriptPath() {
+        if (!StringUtils.hasText(executorScriptPath)) {
+            return null;
+        }
         List<Path> candidates = new ArrayList<>();
         Path configured = Path.of(executorScriptPath);
         if (configured.isAbsolute()) {
@@ -167,7 +170,16 @@ public class Step5IssueExecutionService {
         }
 
         for (Path candidate : candidates) {
-            if (Files.exists(candidate)) {
+            if (Files.exists(candidate) && "auto_issue_executor.py".equals(candidate.getFileName().toString())) {
+                Path repoRoot = resolveRepoRoot(candidate);
+                if (repoRoot == null) {
+                    continue;
+                }
+                Path expectedScriptsDir = repoRoot.resolve("scripts").normalize();
+                Path normalizedCandidate = candidate.normalize();
+                if (!normalizedCandidate.startsWith(expectedScriptsDir)) {
+                    continue;
+                }
                 return candidate;
             }
         }
