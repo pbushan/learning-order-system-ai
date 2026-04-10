@@ -40,7 +40,7 @@ public class Step5IssueExecutionService {
                                       @Value("${app.github.repo:}") String repo,
                                       @Value("${app.step5.executor.python:python3}") String pythonCommand,
                                       @Value("${app.step5.executor.script-path:../scripts/auto_issue_executor.py}") String executorScriptPath,
-                                      @Value("${app.step5.executor.auto-merge:true}") boolean autoMerge,
+                                      @Value("${app.step5.executor.auto-merge:false}") boolean autoMerge,
                                       @Value("${app.step5.executor.timeout-seconds:180}") long timeoutSeconds,
                                       FileAuditLogService fileAuditLogService) {
         this.owner = owner;
@@ -102,7 +102,7 @@ public class Step5IssueExecutionService {
         processBuilder.redirectErrorStream(true);
 
         try {
-            log.info("Issue #{}: starting Step 5 execution command.", issueNumber);
+            log.info("Issue #{}: Post-pickup execution started.", issueNumber);
             safeAudit("approved-issue-execution-started", issueNumber, Map.of("script", "auto_issue_executor.py"), "");
 
             Process process = processBuilder.start();
