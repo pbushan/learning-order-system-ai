@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.Set;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -76,9 +77,16 @@ public class Step5IssueExecutionService {
             safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-owner-repo"), "");
             return;
         }
-        Path scriptPath = Path.of(executorScriptPath).normalize();
-        if (!scriptPath.getFileName().toString().equals("auto_issue_executor.py") || !Files.exists(scriptPath)) {
-            log.warn("Skipping Step 5 execution for #{} because script is unavailable at {}", issueNumber, scriptPath);
+        Path repoRoot = resolveRepoRoot(Path.of(System.getProperty("user.dir")).normalize());
+        if (repoRoot == null || !Files.isDirectory(repoRoot)) {
+            log.warn("Skipping Step 5 execution for #{} because repo root is unavailable from current runtime.", issueNumber);
+            safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-repo-root"), "");
+            return;
+        }
+
+        Path scriptPath = resolveScriptPath(repoRoot);
+        if (scriptPath == null || !scriptPath.getFileName().toString().equals("auto_issue_executor.py")) {
+            log.warn("Skipping Step 5 execution for #{} because script is unavailable under repo scripts directory.", issueNumber);
             safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-script"), "");
             return;
         }
@@ -100,6 +108,7 @@ public class Step5IssueExecutionService {
 
         ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.redirectErrorStream(true);
+        processBuilder.directory(repoRoot.toFile());
         processBuilder.environment().put("ALLOW_AUTO_MERGE", String.valueOf(autoMerge));
 
         try {
@@ -143,5 +152,43 @@ public class Step5IssueExecutionService {
         } catch (Exception ignored) {
             // Audit failures must never fail scheduler flow.
         }
+    }
+
+    private Path resolveScriptPath(Path repoRoot) {
+        if (!StringUtils.hasText(executorScriptPath)) {
+            return null;
+        }
+        LinkedHashSet<Path> candidates = new LinkedHashSet<>();
+        Path scriptsDir = repoRoot.resolve("scripts").normalize();
+        candidates.add(scriptsDir.resolve("auto_issue_executor.py").normalize());
+
+        Path configured = Path.of(executorScriptPath);
+        if (configured.isAbsolute()) {
+            candidates.add(configured.normalize());
+        } else {
+            candidates.add(repoRoot.resolve(executorScriptPath).normalize());
+        }
+
+        for (Path candidate : candidates) {
+            if (Files.exists(candidate) && "auto_issue_executor.py".equals(candidate.getFileName().toString())) {
+                Path normalizedCandidate = candidate.normalize();
+                if (!normalizedCandidate.startsWith(scriptsDir)) {
+                    continue;
+                }
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private Path resolveRepoRoot(Path scriptPath) {
+        Path current = scriptPath.getParent();
+        while (current != null) {
+            if (Files.exists(current.resolve(".git"))) {
+                return current;
+            }
+            current = current.getParent();
+        }
+        return null;
     }
 }
