@@ -16,6 +16,7 @@ import org.springframework.web.util.UriUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Locale;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -210,7 +211,8 @@ public class GitHubIssueClientService {
                     continue;
                 }
                 List<String> labels = extractLabelNames(item.getLabels());
-                if (labels.contains("ai-in-progress")) {
+                List<String> normalizedLabels = normalizeLabels(labels);
+                if (normalizedLabels.contains("ai-in-progress")) {
                     continue;
                 }
 
@@ -258,7 +260,8 @@ public class GitHubIssueClientService {
                 continue;
             }
             List<String> labels = extractLabelNames(item.getLabels());
-            if (!labels.contains("ai-in-progress")) {
+            List<String> normalizedLabels = normalizeLabels(labels);
+            if (!normalizedLabels.contains("ai-in-progress")) {
                 continue;
             }
             ApprovedGitHubIssue normalized = new ApprovedGitHubIssue();
@@ -343,6 +346,20 @@ public class GitHubIssueClientService {
             }
         }
         return names;
+    }
+
+    private List<String> normalizeLabels(List<String> labels) {
+        if (labels == null || labels.isEmpty()) {
+            return List.of();
+        }
+        List<String> normalized = new ArrayList<>();
+        for (String label : labels) {
+            if (!StringUtils.hasText(label)) {
+                continue;
+            }
+            normalized.add(label.trim().toLowerCase(Locale.ROOT));
+        }
+        return normalized;
     }
 
     static class CreateIssueRequest {

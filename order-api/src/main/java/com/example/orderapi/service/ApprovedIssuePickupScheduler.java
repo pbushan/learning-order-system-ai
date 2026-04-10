@@ -60,7 +60,7 @@ public class ApprovedIssuePickupScheduler {
                     step5IssueExecutionService.checkExecutionAvailability();
             if (!availability.available()) {
                 log.warn("Step 5 execution unavailable from current runtime. reason={}", availability.reason());
-                safeAudit("approved-issue-execution-unavailable", null, Map.of("reason", availability.reason()), "");
+                safeAudit("approved-issue-execution-skipped", null, Map.of("reason", "execution-unavailable:" + availability.reason()), "");
 
                 try {
                     List<ApprovedGitHubIssue> inProgressIssues = gitHubIssueClientService.discoverApprovedInProgressIssues();
@@ -152,9 +152,16 @@ public class ApprovedIssuePickupScheduler {
                 }
             }
         }
-        return normalized.contains("approved-for-dev")
-                && normalized.contains("ai-generated")
-                && normalized.contains("portfolio");
+        boolean hasRequiredLabels = normalized.contains("approved-for-dev") && normalized.contains("portfolio");
+        if (!hasRequiredLabels) {
+            return false;
+        }
+
+        String body = issue.getBody();
+        boolean hasStep5BodyMarkers = body != null
+                && body.contains("## Story ID")
+                && body.contains("## PR Safety");
+        return normalized.contains("ai-generated") || hasStep5BodyMarkers;
     }
     private void safeAudit(String operation, Long issueNumber, Map<String, Object> metadata, String error) {
         try {
