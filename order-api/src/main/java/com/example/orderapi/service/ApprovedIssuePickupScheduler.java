@@ -76,7 +76,7 @@ public class ApprovedIssuePickupScheduler {
                     metadata.put("nextStep", "agent-execution");
                     log.info("Picked approved issue #{} and added ai-in-progress label.", issueNumber);
                     safeAudit("approved-issue-picked", issueNumber, metadata, "");
-                    step5IssueExecutionService.executeIssue(issueNumber);
+                    step5IssueExecutionService.executeIssueAsync(issueNumber);
                 } catch (Exception ex) {
                     log.warn("Failed to mark issue #{} as ai-in-progress: {}", issueNumber, ex.getMessage());
                     Map<String, Object> metadata = new LinkedHashMap<>();
