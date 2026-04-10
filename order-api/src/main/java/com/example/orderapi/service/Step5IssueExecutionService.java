@@ -12,9 +12,13 @@ import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
+import java.util.Set;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -29,6 +33,8 @@ public class Step5IssueExecutionService {
     private final boolean autoMerge;
     private final long timeoutSeconds;
     private final FileAuditLogService fileAuditLogService;
+    private final ExecutorService executorService = Executors.newSingleThreadExecutor();
+    private final Set<Long> inFlightIssues = ConcurrentHashMap.newKeySet();
 
     public Step5IssueExecutionService(@Value("${app.github.owner:}") String owner,
                                       @Value("${app.github.repo:}") String repo,
@@ -47,7 +53,18 @@ public class Step5IssueExecutionService {
     }
 
     public void executeIssueAsync(long issueNumber) {
-        CompletableFuture.runAsync(() -> executeIssue(issueNumber));
+        if (!inFlightIssues.add(issueNumber)) {
+            log.info("Issue #{}: Step 5 execution already in progress; skipping duplicate trigger.", issueNumber);
+            safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "already-in-flight"), "");
+            return;
+        }
+        CompletableFuture.runAsync(() -> {
+            try {
+                executeIssue(issueNumber);
+            } finally {
+                inFlightIssues.remove(issueNumber);
+            }
+        }, executorService);
     }
 
     public void executeIssue(long issueNumber) {
