@@ -10,10 +10,12 @@ import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.util.ArrayList;
+import java.util.Locale;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -130,6 +132,83 @@ public class GitHubIssueClientService {
         }
     }
 
+    public boolean removeIssueLabel(long issueNumber, String label) {
+        if (!StringUtils.hasText(token)) {
+            throw new IllegalStateException("GitHub token is not configured. Set app.github.token or GITHUB_TOKEN.");
+        }
+        if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
+            throw new IllegalStateException("GitHub repository is not configured. Set app.github.owner and app.github.repo.");
+        }
+        if (issueNumber <= 0) {
+            throw new IllegalArgumentException("issueNumber must be > 0");
+        }
+        if (!StringUtils.hasText(label)) {
+            throw new IllegalArgumentException("label is required");
+        }
+
+        int attempts = 0;
+        while (attempts < 2) {
+            attempts++;
+            try {
+                restClient.delete()
+                        .uri("/repos/{owner}/{repo}/issues/{issueNumber}/labels/{label}",
+                                owner.trim(), repo.trim(), issueNumber, label.trim())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                        .retrieve()
+                        .toBodilessEntity();
+                return true;
+            } catch (RestClientResponseException ex) {
+                int status = ex.getStatusCode().value();
+                if (status == 404) {
+                    return false;
+                }
+                boolean transientFailure = status == 429 || (status >= 500 && status <= 599);
+                if (!transientFailure || attempts >= 2) {
+                    throw ex;
+                }
+                try {
+                    Thread.sleep(300);
+                } catch (InterruptedException interruptedException) {
+                    Thread.currentThread().interrupt();
+                    throw ex;
+                }
+            }
+        }
+        return false;
+    }
+
+    public boolean removeIssueLabelCaseInsensitive(long issueNumber, String label) {
+        if (issueNumber <= 0) {
+            throw new IllegalArgumentException("issueNumber must be > 0");
+        }
+        if (!StringUtils.hasText(label)) {
+            throw new IllegalArgumentException("label is required");
+        }
+        List<String> labels = fetchIssueLabelNamesWithRetry(issueNumber);
+        if (labels.isEmpty()) {
+            return false;
+        }
+        String target = label.trim().toLowerCase(Locale.ROOT);
+        for (String current : labels) {
+            if (StringUtils.hasText(current) && current.trim().toLowerCase(Locale.ROOT).equals(target)) {
+                boolean removed = removeIssueLabel(issueNumber, current);
+                if (removed) {
+                    return true;
+                }
+                // Label set may have changed between fetch and delete; retry once with a fresh view.
+                List<String> refreshed = fetchIssueLabelNamesWithRetry(issueNumber);
+                for (String refreshedLabel : refreshed) {
+                    if (StringUtils.hasText(refreshedLabel)
+                            && refreshedLabel.trim().toLowerCase(Locale.ROOT).equals(target)) {
+                        return removeIssueLabel(issueNumber, refreshedLabel);
+                    }
+                }
+                return false;
+            }
+        }
+        return false;
+    }
+
     public List<ApprovedGitHubIssue> discoverApprovedIssues() {
         if (!StringUtils.hasText(token)) {
             throw new IllegalStateException("GitHub token is not configured. Set app.github.token or GITHUB_TOKEN.");
@@ -162,7 +241,8 @@ public class GitHubIssueClientService {
                     continue;
                 }
                 List<String> labels = extractLabelNames(item.getLabels());
-                if (labels.contains("ai-in-progress")) {
+                List<String> normalizedLabels = normalizeLabels(labels);
+                if (normalizedLabels.contains("ai-in-progress")) {
                     continue;
                 }
 
@@ -180,6 +260,48 @@ public class GitHubIssueClientService {
         } finally {
             safeAuditApprovedIssueSelection(issues, error);
         }
+    }
+
+    public List<ApprovedGitHubIssue> discoverApprovedInProgressIssues() {
+        if (!StringUtils.hasText(token)) {
+            throw new IllegalStateException("GitHub token is not configured. Set app.github.token or GITHUB_TOKEN.");
+        }
+        if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
+            throw new IllegalStateException("GitHub repository is not configured. Set app.github.owner and app.github.repo.");
+        }
+
+        GitHubIssueListItem[] response = restClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/repos/{owner}/{repo}/issues")
+                        .queryParam("state", "open")
+                        .queryParam("per_page", "100")
+                        .build(owner.trim(), repo.trim()))
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                .retrieve()
+                .body(GitHubIssueListItem[].class);
+
+        if (response == null || response.length == 0) {
+            return List.of();
+        }
+
+        List<ApprovedGitHubIssue> issues = new ArrayList<>();
+        for (GitHubIssueListItem item : response) {
+            if (item == null || item.getPullRequest() != null) {
+                continue;
+            }
+            List<String> labels = extractLabelNames(item.getLabels());
+            List<String> normalizedLabels = normalizeLabels(labels);
+            if (!normalizedLabels.contains("ai-in-progress")) {
+                continue;
+            }
+            ApprovedGitHubIssue normalized = new ApprovedGitHubIssue();
+            normalized.setIssueNumber(item.getNumber());
+            normalized.setTitle(item.getTitle());
+            normalized.setBody(item.getBody());
+            normalized.setLabels(labels);
+            issues.add(normalized);
+        }
+        return issues;
     }
 
     private void safeAuditApprovedIssueSelection(List<ApprovedGitHubIssue> issues, String error) {
@@ -254,6 +376,64 @@ public class GitHubIssueClientService {
             }
         }
         return names;
+    }
+
+    private List<String> fetchIssueLabelNames(long issueNumber) {
+        GitHubIssueListItem issue = restClient.get()
+                .uri("/repos/{owner}/{repo}/issues/{issueNumber}", owner.trim(), repo.trim(), issueNumber)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                .retrieve()
+                .body(GitHubIssueListItem.class);
+        if (issue == null) {
+            return List.of();
+        }
+        return extractLabelNames(issue.getLabels());
+    }
+
+    private List<String> fetchIssueLabelNamesWithRetry(long issueNumber) {
+        int attempts = 0;
+        while (attempts < 2) {
+            attempts++;
+            try {
+                return fetchIssueLabelNames(issueNumber);
+            } catch (RestClientResponseException ex) {
+                int status = ex.getStatusCode().value();
+                boolean transientFailure = status == 429 || (status >= 500 && status <= 599);
+                if (!transientFailure || attempts >= 2) {
+                    throw ex;
+                }
+                sleepQuietly(300);
+            } catch (ResourceAccessException ex) {
+                if (attempts >= 2) {
+                    throw ex;
+                }
+                sleepQuietly(300);
+            }
+        }
+        return List.of();
+    }
+
+    private void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting for GitHub retry.", interruptedException);
+        }
+    }
+
+    private List<String> normalizeLabels(List<String> labels) {
+        if (labels == null || labels.isEmpty()) {
+            return List.of();
+        }
+        List<String> normalized = new ArrayList<>();
+        for (String label : labels) {
+            if (!StringUtils.hasText(label)) {
+                continue;
+            }
+            normalized.add(label.trim().toLowerCase(Locale.ROOT));
+        }
+        return normalized;
     }
 
     static class CreateIssueRequest {

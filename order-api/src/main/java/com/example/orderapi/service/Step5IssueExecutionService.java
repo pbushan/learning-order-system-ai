@@ -21,6 +21,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 public class Step5IssueExecutionService {
@@ -31,63 +32,106 @@ public class Step5IssueExecutionService {
     private final String repo;
     private final String pythonCommand;
     private final String executorScriptPath;
+    private final String repoRootOverride;
     private final boolean autoMerge;
     private final long timeoutSeconds;
+    private final GitHubIssueClientService gitHubIssueClientService;
     private final FileAuditLogService fileAuditLogService;
     private final ExecutorService executorService = Executors.newSingleThreadExecutor();
     private final Set<Long> inFlightIssues = ConcurrentHashMap.newKeySet();
+    private final AtomicReference<String> pausedReason = new AtomicReference<>("");
 
     public Step5IssueExecutionService(@Value("${app.github.owner:}") String owner,
                                       @Value("${app.github.repo:}") String repo,
                                       @Value("${app.step5.executor.python:python3}") String pythonCommand,
                                       @Value("${app.step5.executor.script-path:../scripts/auto_issue_executor.py}") String executorScriptPath,
+                                      @Value("${app.step5.repo-root:}") String repoRootOverride,
                                       @Value("${app.step5.executor.auto-merge:false}") boolean autoMerge,
                                       @Value("${app.step5.executor.timeout-seconds:180}") long timeoutSeconds,
+                                      GitHubIssueClientService gitHubIssueClientService,
                                       FileAuditLogService fileAuditLogService) {
         this.owner = owner;
         this.repo = repo;
         this.pythonCommand = pythonCommand;
         this.executorScriptPath = executorScriptPath;
+        this.repoRootOverride = repoRootOverride;
         this.autoMerge = autoMerge;
         this.timeoutSeconds = timeoutSeconds;
+        this.gitHubIssueClientService = gitHubIssueClientService;
         this.fileAuditLogService = fileAuditLogService;
     }
 
+    public record ExecutionAvailability(boolean available, String reason) {
+    }
+
+    public void setExecutionPaused(boolean paused, String reason) {
+        if (!paused) {
+            pausedReason.set("");
+            return;
+        }
+        pausedReason.set(StringUtils.hasText(reason) ? reason : "execution-paused");
+    }
+
+    public ExecutionAvailability checkExecutionAvailability() {
+        if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
+            return new ExecutionAvailability(false, "missing-owner-repo");
+        }
+        Path repoRoot = resolveCurrentRepoRoot();
+        if (repoRoot == null || !Files.isDirectory(repoRoot)) {
+            return new ExecutionAvailability(false, "missing-repo-root");
+        }
+        Path scriptPath = resolveScriptPath(repoRoot);
+        if (scriptPath == null || !Files.exists(scriptPath)) {
+            return new ExecutionAvailability(false, "missing-script");
+        }
+        return new ExecutionAvailability(true, "");
+    }
+
     public void executeIssueAsync(long issueNumber) {
+        String currentPauseReason = pausedReason.get();
+        if (StringUtils.hasText(currentPauseReason)) {
+            log.info("Issue #{}: Step 5 execution currently paused. reason={}", issueNumber, currentPauseReason);
+            safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "execution-paused:" + currentPauseReason), "");
+            resetIssueForRetry(issueNumber, "execution-paused");
+            return;
+        }
         if (!inFlightIssues.add(issueNumber)) {
             log.info("Issue #{}: Step 5 execution already in progress; skipping duplicate trigger.", issueNumber);
             safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "already-in-flight"), "");
             return;
         }
-        CompletableFuture.runAsync(() -> {
-            try {
-                executeIssue(issueNumber);
-            } finally {
-                inFlightIssues.remove(issueNumber);
-            }
-        }, executorService);
+        try {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    executeIssue(issueNumber);
+                } finally {
+                    inFlightIssues.remove(issueNumber);
+                }
+            }, executorService);
+        } catch (RuntimeException ex) {
+            inFlightIssues.remove(issueNumber);
+            throw ex;
+        }
     }
 
     public void executeIssue(long issueNumber) {
         if (issueNumber <= 0) {
             return;
         }
-        if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
-            log.warn("Skipping Step 5 execution for #{} because owner/repo are not configured.", issueNumber);
-            safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-owner-repo"), "");
+        ExecutionAvailability availability = checkExecutionAvailability();
+        if (!availability.available()) {
+            log.warn("Skipping Step 5 execution for #{} because {}.", issueNumber, availability.reason());
+            safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", availability.reason()), "");
+            resetIssueForRetry(issueNumber, availability.reason());
             return;
         }
-        Path repoRoot = resolveRepoRoot(Path.of(System.getProperty("user.dir")).normalize());
-        if (repoRoot == null || !Files.isDirectory(repoRoot)) {
-            log.warn("Skipping Step 5 execution for #{} because repo root is unavailable from current runtime.", issueNumber);
-            safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-repo-root"), "");
-            return;
-        }
+        Path repoRoot = resolveCurrentRepoRoot();
 
         Path scriptPath = resolveScriptPath(repoRoot);
         if (scriptPath == null || !scriptPath.getFileName().toString().equals("auto_issue_executor.py")) {
             log.warn("Skipping Step 5 execution for #{} because script is unavailable under repo scripts directory.", issueNumber);
             safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-script"), "");
+            resetIssueForRetry(issueNumber, "missing-script");
             return;
         }
 
@@ -121,6 +165,7 @@ public class Step5IssueExecutionService {
                 process.destroyForcibly();
                 log.warn("Issue #{}: Step 5 execution timed out after {} seconds.", issueNumber, timeoutSeconds);
                 safeAudit("approved-issue-execution-failed", issueNumber, Map.of("reason", "timeout"), "execution-timeout");
+                resetIssueForRetry(issueNumber, "execution-timeout");
                 return;
             }
             String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
@@ -136,6 +181,7 @@ public class Step5IssueExecutionService {
             } else {
                 log.warn("Issue #{}: Step 5 execution failed. exitCode={}, output={}", issueNumber, exitCode, output);
                 safeAudit("approved-issue-execution-failed", issueNumber, metadata, "execution-command-failed");
+                resetIssueForRetry(issueNumber, "execution-command-failed");
             }
         } catch (IOException | InterruptedException ex) {
             if (ex instanceof InterruptedException) {
@@ -143,6 +189,7 @@ public class Step5IssueExecutionService {
             }
             log.warn("Issue #{}: Step 5 execution error: {}", issueNumber, ex.getMessage());
             safeAudit("approved-issue-execution-failed", issueNumber, Map.of(), ex.getMessage());
+            resetIssueForRetry(issueNumber, "execution-service-exception");
         }
     }
 
@@ -151,6 +198,26 @@ public class Step5IssueExecutionService {
             fileAuditLogService.logStep5LifecycleEntry(operation, "issue-" + issueNumber, issueNumber, metadata, error);
         } catch (Exception ignored) {
             // Audit failures must never fail scheduler flow.
+        }
+    }
+
+    private void resetIssueForRetry(long issueNumber, String reason) {
+        try {
+            boolean removed = gitHubIssueClientService.removeIssueLabelCaseInsensitive(issueNumber, "ai-in-progress");
+            if (removed) {
+                log.info("Issue #{}: reset ai-in-progress label for retry. reason={}", issueNumber, reason);
+                safeAudit("approved-issue-reset-for-retry", issueNumber, Map.of("reason", reason, "label", "ai-in-progress"), "");
+            } else {
+                log.info("Issue #{}: ai-in-progress label already absent. reason={}", issueNumber, reason);
+                safeAudit("approved-issue-reset-skipped", issueNumber, Map.of("reason", "label-not-present", "label", "ai-in-progress"), "");
+            }
+        } catch (Exception ex) {
+            String error = ex.getClass().getSimpleName() + ": " + ex.getMessage();
+            log.warn("Issue #{}: failed to reset ai-in-progress label: {}", issueNumber, error);
+            safeAudit("approved-issue-reset-failed",
+                    issueNumber,
+                    Map.of("reason", reason, "label", "ai-in-progress", "errorType", ex.getClass().getSimpleName()),
+                    error);
         }
     }
 
@@ -190,5 +257,15 @@ public class Step5IssueExecutionService {
             current = current.getParent();
         }
         return null;
+    }
+
+    private Path resolveCurrentRepoRoot() {
+        if (StringUtils.hasText(repoRootOverride)) {
+            Path configured = Path.of(repoRootOverride).normalize();
+            if (Files.exists(configured.resolve(".git"))) {
+                return configured;
+            }
+        }
+        return resolveRepoRoot(Path.of(System.getProperty("user.dir")).normalize());
     }
 }

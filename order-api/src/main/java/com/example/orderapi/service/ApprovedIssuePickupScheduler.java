@@ -9,6 +9,9 @@ import org.springframework.stereotype.Service;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -53,6 +56,53 @@ public class ApprovedIssuePickupScheduler {
             log.info("Step 5 poll completed. approvedIssuesFound={}", issues.size());
             safeAudit("approved-issue-poll-ran", null, Map.of("approvedIssuesFound", issues.size()), "");
 
+            Step5IssueExecutionService.ExecutionAvailability availability =
+                    step5IssueExecutionService.checkExecutionAvailability();
+            if (!availability.available()) {
+                step5IssueExecutionService.setExecutionPaused(true, availability.reason());
+                log.warn("Step 5 execution unavailable from current runtime. reason={}", availability.reason());
+                safeAudit("approved-issue-execution-skipped", null, Map.of("reason", "execution-unavailable:" + availability.reason()), "");
+
+                try {
+                    List<ApprovedGitHubIssue> inProgressIssues = gitHubIssueClientService.discoverApprovedInProgressIssues();
+                    for (ApprovedGitHubIssue inProgressIssue : inProgressIssues) {
+                        if (inProgressIssue == null || inProgressIssue.getIssueNumber() <= 0) {
+                            continue;
+                        }
+                        long issueNumber = inProgressIssue.getIssueNumber();
+                        if (!isStep5OwnedIssue(inProgressIssue)) {
+                            log.info("Skipping in-progress reset for issue #{} because it is not Step 5-owned.", issueNumber);
+                            safeAudit("approved-issue-reset-skipped", issueNumber, Map.of("reason", "not-step5-owned"), "");
+                            continue;
+                        }
+                        try {
+                            boolean removed = gitHubIssueClientService.removeIssueLabelCaseInsensitive(issueNumber, "ai-in-progress");
+                            if (removed) {
+                                safeAudit("approved-issue-reset-for-retry", issueNumber, Map.of("reason", availability.reason()), "");
+                            } else {
+                                safeAudit("approved-issue-reset-skipped", issueNumber, Map.of("reason", "label-not-present"), "");
+                            }
+                        } catch (Exception ex) {
+                            String error = ex.getClass().getSimpleName() + ": " + ex.getMessage();
+                            log.warn("Failed resetting issue #{} while execution unavailable: {}", issueNumber, error);
+                            safeAudit("approved-issue-reset-failed",
+                                    issueNumber,
+                                    Map.of("reason", availability.reason(), "label", "ai-in-progress", "errorType", ex.getClass().getSimpleName()),
+                                    error);
+                        }
+                    }
+                } catch (Exception ex) {
+                    String error = ex.getClass().getSimpleName() + ": " + ex.getMessage();
+                    log.warn("Failed resetting in-progress issues while execution unavailable: {}", error);
+                    safeAudit("approved-issue-reset-failed",
+                            null,
+                            Map.of("reason", availability.reason(), "label", "ai-in-progress", "errorType", ex.getClass().getSimpleName()),
+                            error);
+                }
+                return;
+            }
+            step5IssueExecutionService.setExecutionPaused(false, "");
+
             for (ApprovedGitHubIssue issue : issues) {
                 if (issue == null || issue.getIssueNumber() <= 0) {
                     log.info("Skipping invalid approved issue payload.");
@@ -90,6 +140,28 @@ public class ApprovedIssuePickupScheduler {
         }
     }
 
+    private boolean isStep5OwnedIssue(ApprovedGitHubIssue issue) {
+        if (issue == null) {
+            return false;
+        }
+        List<String> labels = issue.getLabels();
+        if (labels == null || labels.isEmpty()) {
+            return false;
+        }
+        Set<String> normalized = new HashSet<>();
+        for (String label : labels) {
+            if (label != null) {
+                String clean = label.trim().toLowerCase(Locale.ROOT);
+                if (!clean.isEmpty()) {
+                    normalized.add(clean);
+                }
+            }
+        }
+        return normalized.contains("approved-for-dev")
+                && normalized.contains("portfolio")
+                && normalized.contains("ai-generated")
+                && normalized.contains("needs-human-approval");
+    }
     private void safeAudit(String operation, Long issueNumber, Map<String, Object> metadata, String error) {
         try {
             String requestId = issueNumber != null ? "issue-" + issueNumber : "step5-poll";
