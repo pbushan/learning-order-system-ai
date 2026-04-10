@@ -343,8 +343,8 @@ def is_auto_merge_allowed(owner: str, repo: str, token: str, pr_number: int, aut
     if env_flag not in {"1", "true", "yes", "on"}:
         return False, "ALLOW_AUTO_MERGE is not enabled"
 
-    pr_issue = github_request("GET", owner, repo, f"/issues/{pr_number}", token)
-    labels = extract_label_names(pr_issue.get("labels"))
+    labels_payload = github_request("GET", owner, repo, f"/issues/{pr_number}/labels", token)
+    labels = extract_label_names(labels_payload)
     if "approved-to-merge" not in labels:
         return False, "missing approved-to-merge label"
 

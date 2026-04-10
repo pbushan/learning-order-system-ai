@@ -100,6 +100,9 @@ public class Step5IssueExecutionService {
 
         ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.redirectErrorStream(true);
+        if (autoMerge) {
+            processBuilder.environment().put("ALLOW_AUTO_MERGE", "true");
+        }
 
         try {
             log.info("Issue #{}: starting Step 5 execution command (post-pickup).", issueNumber);
