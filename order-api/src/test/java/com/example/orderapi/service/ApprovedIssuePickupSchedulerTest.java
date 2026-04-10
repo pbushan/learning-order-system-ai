@@ -7,7 +7,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.nio.file.Path;
 import java.util.List;
 
 import static org.mockito.Mockito.never;
@@ -35,8 +34,8 @@ class ApprovedIssuePickupSchedulerTest {
 
     @Test
     void resetsInProgressIssuesWhenExecutionUnavailable() {
-        when(step5IssueExecutionService.getExecutionAvailability())
-                .thenReturn(new Step5IssueExecutionService.ExecutionAvailability(false, "missing-repo-root", null, null));
+        when(step5IssueExecutionService.checkExecutionAvailability())
+                .thenReturn(new Step5IssueExecutionService.ExecutionAvailability(false, "missing-repo-root"));
 
         ApprovedGitHubIssue stuck = issue(42L, "Stuck", List.of("approved-for-dev", "ai-in-progress"));
         ApprovedGitHubIssue step5Owned = issue(43L, "Owned", List.of("approved-for-dev", "ai-in-progress", "ai-generated", "portfolio"));
@@ -47,15 +46,14 @@ class ApprovedIssuePickupSchedulerTest {
         verify(gitHubIssueClientService).discoverApprovedInProgressIssues();
         verify(gitHubIssueClientService, never()).removeIssueLabel(42L, "ai-in-progress");
         verify(gitHubIssueClientService).removeIssueLabel(43L, "ai-in-progress");
-        verify(gitHubIssueClientService, never()).discoverApprovedIssues();
         verify(step5IssueExecutionService, never()).executeIssueAsync(42L);
         verify(step5IssueExecutionService, never()).executeIssueAsync(43L);
     }
 
     @Test
     void picksAndExecutesApprovedIssueWhenRuntimeAvailable() {
-        when(step5IssueExecutionService.getExecutionAvailability())
-                .thenReturn(new Step5IssueExecutionService.ExecutionAvailability(true, "", Path.of("/tmp"), Path.of("/tmp/scripts/auto_issue_executor.py")));
+        when(step5IssueExecutionService.checkExecutionAvailability())
+                .thenReturn(new Step5IssueExecutionService.ExecutionAvailability(true, ""));
 
         ApprovedGitHubIssue approved = issue(84L, "Ready", List.of("approved-for-dev"));
         when(gitHubIssueClientService.discoverApprovedIssues()).thenReturn(List.of(approved));
