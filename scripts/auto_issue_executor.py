@@ -325,11 +325,11 @@ def extract_label_names(raw_labels: Any) -> list[str]:
         return names
     for label in raw_labels:
         if isinstance(label, str):
-            text = label.strip()
+            text = label.strip().lower()
             if text:
                 names.append(text)
         elif isinstance(label, dict):
-            text = str(label.get("name", "")).strip()
+            text = str(label.get("name", "")).strip().lower()
             if text:
                 names.append(text)
     return names
@@ -340,7 +340,7 @@ def is_auto_merge_allowed(owner: str, repo: str, token: str, pr_number: int, aut
         return False, "auto-merge flag not requested"
 
     env_flag = str(os.getenv("ALLOW_AUTO_MERGE", "")).strip().lower()
-    if env_flag not in {"1", "true", "yes"}:
+    if env_flag not in {"1", "true", "yes", "on"}:
         return False, "ALLOW_AUTO_MERGE is not enabled"
 
     pr_issue = github_request("GET", owner, repo, f"/issues/{pr_number}", token)
@@ -429,6 +429,19 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
         }
 
         can_merge, merge_skip_reason = is_auto_merge_allowed(owner, repo, token, pr_number, auto_merge)
+        if not can_merge:
+            log(f"Issue #{issue_number}: Merge skipped: human approval required ({merge_skip_reason})")
+            try:
+                post_ready_note(owner, repo, token, pr_number)
+            except Exception as ex:
+                log(f"Issue #{issue_number}: review-note skipped due to error: {ex}")
+            log_step5_event(
+                "issue-pr-awaiting-human-merge",
+                issue_number=issue_number,
+                metadata={"prNumber": pr_number, "reason": merge_skip_reason},
+            )
+            return result
+
         if can_merge:
             log(f"Issue #{issue_number}: posting ready-to-merge note")
             try:
@@ -452,17 +465,6 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
             remove_label(owner, repo, token, issue_number, "ai-in-progress")
             close_issue(owner, repo, token, issue_number)
             log_step5_event("issue-post-merge-cleanup-completed", issue_number=issue_number, metadata={"branch": branch})
-        else:
-            log(f"Issue #{issue_number}: Merge skipped: human approval required ({merge_skip_reason})")
-            try:
-                post_ready_note(owner, repo, token, pr_number)
-            except Exception as ex:
-                log(f"Issue #{issue_number}: review-note skipped due to error: {ex}")
-            log_step5_event(
-                "issue-pr-awaiting-human-merge",
-                issue_number=issue_number,
-                metadata={"prNumber": pr_number, "reason": merge_skip_reason},
-            )
 
         return result
     except Exception:
