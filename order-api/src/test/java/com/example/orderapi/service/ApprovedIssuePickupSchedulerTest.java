@@ -39,14 +39,17 @@ class ApprovedIssuePickupSchedulerTest {
                 .thenReturn(new Step5IssueExecutionService.ExecutionAvailability(false, "missing-repo-root", null, null));
 
         ApprovedGitHubIssue stuck = issue(42L, "Stuck", List.of("approved-for-dev", "ai-in-progress"));
-        when(gitHubIssueClientService.discoverApprovedInProgressIssues()).thenReturn(List.of(stuck));
+        ApprovedGitHubIssue step5Owned = issue(43L, "Owned", List.of("approved-for-dev", "ai-in-progress", "ai-generated", "portfolio"));
+        when(gitHubIssueClientService.discoverApprovedInProgressIssues()).thenReturn(List.of(stuck, step5Owned));
 
         scheduler.pickUpApprovedIssues();
 
         verify(gitHubIssueClientService).discoverApprovedInProgressIssues();
-        verify(gitHubIssueClientService).removeIssueLabel(42L, "ai-in-progress");
+        verify(gitHubIssueClientService, never()).removeIssueLabel(42L, "ai-in-progress");
+        verify(gitHubIssueClientService).removeIssueLabel(43L, "ai-in-progress");
         verify(gitHubIssueClientService, never()).discoverApprovedIssues();
         verify(step5IssueExecutionService, never()).executeIssueAsync(42L);
+        verify(step5IssueExecutionService, never()).executeIssueAsync(43L);
     }
 
     @Test

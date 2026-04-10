@@ -114,6 +114,11 @@ public class ApprovedIssuePickupScheduler {
                 continue;
             }
             long issueNumber = issue.getIssueNumber();
+            if (!isStep5OwnedIssue(issue)) {
+                log.info("Skipping in-progress reset for issue #{} because it is not Step 5-owned.", issueNumber);
+                safeAudit("approved-issue-reset-skipped", issueNumber, Map.of("reason", "not-step5-owned"), "");
+                continue;
+            }
             try {
                 gitHubIssueClientService.removeIssueLabel(issueNumber, "ai-in-progress");
                 recentlyPickedAtMs.remove(issueNumber);
@@ -124,6 +129,16 @@ public class ApprovedIssuePickupScheduler {
                 safeAudit("approved-issue-reset-for-retry-failed", issueNumber, Map.of("reason", reason), ex.getMessage());
             }
         }
+    }
+
+    private boolean isStep5OwnedIssue(ApprovedGitHubIssue issue) {
+        List<String> labels = issue.getLabels();
+        if (labels == null || labels.isEmpty()) {
+            return false;
+        }
+        return labels.contains("approved-for-dev")
+                && labels.contains("ai-generated")
+                && labels.contains("portfolio");
     }
 
     private void safeAudit(String operation, Long issueNumber, Map<String, Object> metadata, String error) {

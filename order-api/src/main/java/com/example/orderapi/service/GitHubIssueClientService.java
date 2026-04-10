@@ -12,7 +12,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.util.UriUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -144,16 +146,33 @@ public class GitHubIssueClientService {
             throw new IllegalArgumentException("label is required");
         }
 
-        try {
-            restClient.delete()
-                    .uri("/repos/{owner}/{repo}/issues/{issueNumber}/labels/{label}",
-                            owner.trim(), repo.trim(), issueNumber, label.trim())
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
-                    .retrieve()
-                    .toBodilessEntity();
-        } catch (RestClientResponseException ex) {
-            if (ex.getStatusCode().value() != 404) {
-                throw ex;
+        String encodedLabel = UriUtils.encodePathSegment(label.trim(), StandardCharsets.UTF_8);
+        int attempts = 0;
+        while (attempts < 2) {
+            attempts++;
+            try {
+                restClient.delete()
+                        .uri("/repos/{owner}/{repo}/issues/{issueNumber}/labels/{label}",
+                                owner.trim(), repo.trim(), issueNumber, encodedLabel)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                        .retrieve()
+                        .toBodilessEntity();
+                return;
+            } catch (RestClientResponseException ex) {
+                int status = ex.getStatusCode().value();
+                if (status == 404) {
+                    return;
+                }
+                boolean transientFailure = status == 429 || (status >= 500 && status <= 599);
+                if (!transientFailure || attempts >= 2) {
+                    throw ex;
+                }
+                try {
+                    Thread.sleep(300);
+                } catch (InterruptedException interruptedException) {
+                    Thread.currentThread().interrupt();
+                    throw ex;
+                }
             }
         }
     }
@@ -222,7 +241,7 @@ public class GitHubIssueClientService {
                 .uri(uriBuilder -> uriBuilder
                         .path("/repos/{owner}/{repo}/issues")
                         .queryParam("state", "open")
-                        .queryParam("labels", "approved-for-dev,ai-in-progress")
+                        .queryParam("labels", "ai-in-progress")
                         .queryParam("per_page", "100")
                         .build(owner.trim(), repo.trim()))
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
@@ -239,7 +258,7 @@ public class GitHubIssueClientService {
                 continue;
             }
             List<String> labels = extractLabelNames(item.getLabels());
-            if (!labels.contains("approved-for-dev") || !labels.contains("ai-in-progress")) {
+            if (!labels.contains("ai-in-progress")) {
                 continue;
             }
             ApprovedGitHubIssue normalized = new ApprovedGitHubIssue();
