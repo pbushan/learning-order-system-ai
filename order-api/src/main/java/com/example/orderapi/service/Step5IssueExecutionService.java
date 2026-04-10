@@ -102,7 +102,7 @@ public class Step5IssueExecutionService {
         processBuilder.redirectErrorStream(true);
 
         try {
-            log.info("Issue #{}: Post-pickup execution started.", issueNumber);
+            log.info("Issue #{}: starting Step 5 execution command (post-pickup).", issueNumber);
             safeAudit("approved-issue-execution-started", issueNumber, Map.of("script", "auto_issue_executor.py"), "");
 
             Process process = processBuilder.start();

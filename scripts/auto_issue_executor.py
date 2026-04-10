@@ -319,7 +319,23 @@ def post_ready_note(owner: str, repo: str, token: str, pr_number: int) -> None:
     github_request("POST", owner, repo, f"/issues/{pr_number}/comments", token, {"body": message})
 
 
-def is_auto_merge_allowed(issue: dict[str, Any], auto_merge_requested: bool) -> tuple[bool, str]:
+def extract_label_names(raw_labels: Any) -> list[str]:
+    names: list[str] = []
+    if not isinstance(raw_labels, list):
+        return names
+    for label in raw_labels:
+        if isinstance(label, str):
+            text = label.strip()
+            if text:
+                names.append(text)
+        elif isinstance(label, dict):
+            text = str(label.get("name", "")).strip()
+            if text:
+                names.append(text)
+    return names
+
+
+def is_auto_merge_allowed(owner: str, repo: str, token: str, pr_number: int, auto_merge_requested: bool) -> tuple[bool, str]:
     if not auto_merge_requested:
         return False, "auto-merge flag not requested"
 
@@ -327,7 +343,8 @@ def is_auto_merge_allowed(issue: dict[str, Any], auto_merge_requested: bool) -> 
     if env_flag not in {"1", "true", "yes"}:
         return False, "ALLOW_AUTO_MERGE is not enabled"
 
-    labels = issue.get("labels", [])
+    pr_issue = github_request("GET", owner, repo, f"/issues/{pr_number}", token)
+    labels = extract_label_names(pr_issue.get("labels"))
     if "approved-to-merge" not in labels:
         return False, "missing approved-to-merge label"
 
@@ -411,7 +428,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
             "merged": False,
         }
 
-        can_merge, merge_skip_reason = is_auto_merge_allowed(issue, auto_merge)
+        can_merge, merge_skip_reason = is_auto_merge_allowed(owner, repo, token, pr_number, auto_merge)
         if can_merge:
             log(f"Issue #{issue_number}: posting ready-to-merge note")
             try:
