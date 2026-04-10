@@ -10,6 +10,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
@@ -183,7 +184,7 @@ public class GitHubIssueClientService {
         if (!StringUtils.hasText(label)) {
             throw new IllegalArgumentException("label is required");
         }
-        List<String> labels = fetchIssueLabelNames(issueNumber);
+        List<String> labels = fetchIssueLabelNamesWithRetry(issueNumber);
         if (labels.isEmpty()) {
             return false;
         }
@@ -195,7 +196,7 @@ public class GitHubIssueClientService {
                     return true;
                 }
                 // Label set may have changed between fetch and delete; retry once with a fresh view.
-                List<String> refreshed = fetchIssueLabelNames(issueNumber);
+                List<String> refreshed = fetchIssueLabelNamesWithRetry(issueNumber);
                 for (String refreshedLabel : refreshed) {
                     if (StringUtils.hasText(refreshedLabel)
                             && refreshedLabel.trim().toLowerCase(Locale.ROOT).equals(target)) {
@@ -387,6 +388,38 @@ public class GitHubIssueClientService {
             return List.of();
         }
         return extractLabelNames(issue.getLabels());
+    }
+
+    private List<String> fetchIssueLabelNamesWithRetry(long issueNumber) {
+        int attempts = 0;
+        while (attempts < 2) {
+            attempts++;
+            try {
+                return fetchIssueLabelNames(issueNumber);
+            } catch (RestClientResponseException ex) {
+                int status = ex.getStatusCode().value();
+                boolean transientFailure = status == 429 || (status >= 500 && status <= 599);
+                if (!transientFailure || attempts >= 2) {
+                    throw ex;
+                }
+                sleepQuietly(300);
+            } catch (ResourceAccessException ex) {
+                if (attempts >= 2) {
+                    throw ex;
+                }
+                sleepQuietly(300);
+            }
+        }
+        return List.of();
+    }
+
+    private void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting for GitHub retry.", interruptedException);
+        }
     }
 
     private List<String> normalizeLabels(List<String> labels) {
