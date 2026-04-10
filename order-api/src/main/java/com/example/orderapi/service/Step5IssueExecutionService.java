@@ -33,6 +33,7 @@ public class Step5IssueExecutionService {
     private final String executorScriptPath;
     private final boolean autoMerge;
     private final long timeoutSeconds;
+    private final GitHubIssueClientService gitHubIssueClientService;
     private final FileAuditLogService fileAuditLogService;
     private final ExecutorService executorService = Executors.newSingleThreadExecutor();
     private final Set<Long> inFlightIssues = ConcurrentHashMap.newKeySet();
@@ -43,6 +44,7 @@ public class Step5IssueExecutionService {
                                       @Value("${app.step5.executor.script-path:../scripts/auto_issue_executor.py}") String executorScriptPath,
                                       @Value("${app.step5.executor.auto-merge:false}") boolean autoMerge,
                                       @Value("${app.step5.executor.timeout-seconds:180}") long timeoutSeconds,
+                                      GitHubIssueClientService gitHubIssueClientService,
                                       FileAuditLogService fileAuditLogService) {
         this.owner = owner;
         this.repo = repo;
@@ -50,7 +52,26 @@ public class Step5IssueExecutionService {
         this.executorScriptPath = executorScriptPath;
         this.autoMerge = autoMerge;
         this.timeoutSeconds = timeoutSeconds;
+        this.gitHubIssueClientService = gitHubIssueClientService;
         this.fileAuditLogService = fileAuditLogService;
+    }
+
+    public record ExecutionAvailability(boolean available, String reason) {
+    }
+
+    public ExecutionAvailability checkExecutionAvailability() {
+        if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
+            return new ExecutionAvailability(false, "missing-owner-repo");
+        }
+        Path repoRoot = resolveRepoRoot(Path.of(System.getProperty("user.dir")).normalize());
+        if (repoRoot == null || !Files.isDirectory(repoRoot)) {
+            return new ExecutionAvailability(false, "missing-repo-root");
+        }
+        Path scriptPath = resolveScriptPath(repoRoot);
+        if (scriptPath == null || !Files.exists(scriptPath)) {
+            return new ExecutionAvailability(false, "missing-script");
+        }
+        return new ExecutionAvailability(true, "");
     }
 
     public void executeIssueAsync(long issueNumber) {
@@ -72,22 +93,20 @@ public class Step5IssueExecutionService {
         if (issueNumber <= 0) {
             return;
         }
-        if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
-            log.warn("Skipping Step 5 execution for #{} because owner/repo are not configured.", issueNumber);
-            safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-owner-repo"), "");
+        ExecutionAvailability availability = checkExecutionAvailability();
+        if (!availability.available()) {
+            log.warn("Skipping Step 5 execution for #{} because {}.", issueNumber, availability.reason());
+            safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", availability.reason()), "");
+            resetIssueForRetry(issueNumber, availability.reason());
             return;
         }
         Path repoRoot = resolveRepoRoot(Path.of(System.getProperty("user.dir")).normalize());
-        if (repoRoot == null || !Files.isDirectory(repoRoot)) {
-            log.warn("Skipping Step 5 execution for #{} because repo root is unavailable from current runtime.", issueNumber);
-            safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-repo-root"), "");
-            return;
-        }
 
         Path scriptPath = resolveScriptPath(repoRoot);
         if (scriptPath == null || !scriptPath.getFileName().toString().equals("auto_issue_executor.py")) {
             log.warn("Skipping Step 5 execution for #{} because script is unavailable under repo scripts directory.", issueNumber);
             safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "missing-script"), "");
+            resetIssueForRetry(issueNumber, "missing-script");
             return;
         }
 
@@ -121,6 +140,7 @@ public class Step5IssueExecutionService {
                 process.destroyForcibly();
                 log.warn("Issue #{}: Step 5 execution timed out after {} seconds.", issueNumber, timeoutSeconds);
                 safeAudit("approved-issue-execution-failed", issueNumber, Map.of("reason", "timeout"), "execution-timeout");
+                resetIssueForRetry(issueNumber, "execution-timeout");
                 return;
             }
             String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
@@ -136,6 +156,7 @@ public class Step5IssueExecutionService {
             } else {
                 log.warn("Issue #{}: Step 5 execution failed. exitCode={}, output={}", issueNumber, exitCode, output);
                 safeAudit("approved-issue-execution-failed", issueNumber, metadata, "execution-command-failed");
+                resetIssueForRetry(issueNumber, "execution-command-failed");
             }
         } catch (IOException | InterruptedException ex) {
             if (ex instanceof InterruptedException) {
@@ -143,6 +164,7 @@ public class Step5IssueExecutionService {
             }
             log.warn("Issue #{}: Step 5 execution error: {}", issueNumber, ex.getMessage());
             safeAudit("approved-issue-execution-failed", issueNumber, Map.of(), ex.getMessage());
+            resetIssueForRetry(issueNumber, "execution-service-exception");
         }
     }
 
@@ -151,6 +173,17 @@ public class Step5IssueExecutionService {
             fileAuditLogService.logStep5LifecycleEntry(operation, "issue-" + issueNumber, issueNumber, metadata, error);
         } catch (Exception ignored) {
             // Audit failures must never fail scheduler flow.
+        }
+    }
+
+    private void resetIssueForRetry(long issueNumber, String reason) {
+        try {
+            gitHubIssueClientService.removeIssueLabel(issueNumber, "ai-in-progress");
+            log.info("Issue #{}: reset ai-in-progress label for retry. reason={}", issueNumber, reason);
+            safeAudit("approved-issue-reset-for-retry", issueNumber, Map.of("reason", reason), "");
+        } catch (Exception ex) {
+            log.warn("Issue #{}: failed to reset ai-in-progress label: {}", issueNumber, ex.getMessage());
+            safeAudit("approved-issue-reset-failed", issueNumber, Map.of("reason", reason), ex.getMessage());
         }
     }
 

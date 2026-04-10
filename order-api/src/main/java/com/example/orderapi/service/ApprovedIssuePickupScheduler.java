@@ -53,6 +53,29 @@ public class ApprovedIssuePickupScheduler {
             log.info("Step 5 poll completed. approvedIssuesFound={}", issues.size());
             safeAudit("approved-issue-poll-ran", null, Map.of("approvedIssuesFound", issues.size()), "");
 
+            Step5IssueExecutionService.ExecutionAvailability availability =
+                    step5IssueExecutionService.checkExecutionAvailability();
+            if (!availability.available()) {
+                log.warn("Step 5 execution unavailable from current runtime. reason={}", availability.reason());
+                safeAudit("approved-issue-execution-unavailable", null, Map.of("reason", availability.reason()), "");
+
+                try {
+                    List<ApprovedGitHubIssue> inProgressIssues = gitHubIssueClientService.discoverApprovedInProgressIssues();
+                    for (ApprovedGitHubIssue inProgressIssue : inProgressIssues) {
+                        if (inProgressIssue == null || inProgressIssue.getIssueNumber() <= 0) {
+                            continue;
+                        }
+                        long issueNumber = inProgressIssue.getIssueNumber();
+                        gitHubIssueClientService.removeIssueLabel(issueNumber, "ai-in-progress");
+                        safeAudit("approved-issue-reset-for-retry", issueNumber, Map.of("reason", availability.reason()), "");
+                    }
+                } catch (Exception ex) {
+                    log.warn("Failed resetting in-progress issues while execution unavailable: {}", ex.getMessage());
+                    safeAudit("approved-issue-reset-failed", null, Map.of("reason", availability.reason()), ex.getMessage());
+                }
+                return;
+            }
+
             for (ApprovedGitHubIssue issue : issues) {
                 if (issue == null || issue.getIssueNumber() <= 0) {
                     log.info("Skipping invalid approved issue payload.");
