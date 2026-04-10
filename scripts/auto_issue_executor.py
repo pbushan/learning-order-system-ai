@@ -397,7 +397,16 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
 
         if auto_merge:
             log(f"Issue #{issue_number}: posting ready-to-merge note")
-            post_ready_note(owner, repo, token, pr_number)
+            try:
+                post_ready_note(owner, repo, token, pr_number)
+            except Exception as ex:
+                log(f"Issue #{issue_number}: ready-note skipped due to error: {ex}")
+                log_step5_event(
+                    "ready-to-merge-note-skipped",
+                    issue_number=issue_number,
+                    metadata={"prNumber": pr_number},
+                    error=str(ex),
+                )
 
             log(f"Issue #{issue_number}: merging PR #{pr_number}")
             merge_pr(owner, repo, token, pr_number)
