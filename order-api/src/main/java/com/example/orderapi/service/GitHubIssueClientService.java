@@ -146,19 +146,34 @@ public class GitHubIssueClientService {
             throw new IllegalArgumentException("label is required");
         }
 
-        try {
-            restClient.delete()
-                    .uri("/repos/{owner}/{repo}/issues/{issueNumber}/labels/{label}",
-                            owner.trim(), repo.trim(), issueNumber, UriUtils.encodePathSegment(label.trim(), StandardCharsets.UTF_8))
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
-                    .retrieve()
-                    .toBodilessEntity();
-        } catch (RestClientResponseException ex) {
-            // Missing label is idempotent success for reset flows.
-            if (ex.getStatusCode().value() == 404) {
+        String encodedLabel = UriUtils.encodePathSegment(label.trim(), StandardCharsets.UTF_8);
+        int attempts = 0;
+        while (attempts < 2) {
+            attempts++;
+            try {
+                restClient.delete()
+                        .uri("/repos/{owner}/{repo}/issues/{issueNumber}/labels/{label}",
+                                owner.trim(), repo.trim(), issueNumber, encodedLabel)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                        .retrieve()
+                        .toBodilessEntity();
                 return;
+            } catch (RestClientResponseException ex) {
+                int status = ex.getStatusCode().value();
+                if (status == 404) {
+                    return;
+                }
+                boolean transientFailure = status == 429 || (status >= 500 && status <= 599);
+                if (!transientFailure || attempts >= 2) {
+                    throw ex;
+                }
+                try {
+                    Thread.sleep(300);
+                } catch (InterruptedException interruptedException) {
+                    Thread.currentThread().interrupt();
+                    throw ex;
+                }
             }
-            throw ex;
         }
     }
 
@@ -226,7 +241,7 @@ public class GitHubIssueClientService {
                 .uri(uriBuilder -> uriBuilder
                         .path("/repos/{owner}/{repo}/issues")
                         .queryParam("state", "open")
-                        .queryParam("labels", "approved-for-dev,ai-in-progress,ai-generated")
+                        .queryParam("labels", "ai-in-progress")
                         .queryParam("per_page", "100")
                         .build(owner.trim(), repo.trim()))
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
@@ -242,11 +257,15 @@ public class GitHubIssueClientService {
             if (item == null || item.getPullRequest() != null) {
                 continue;
             }
+            List<String> labels = extractLabelNames(item.getLabels());
+            if (!labels.contains("ai-in-progress")) {
+                continue;
+            }
             ApprovedGitHubIssue normalized = new ApprovedGitHubIssue();
             normalized.setIssueNumber(item.getNumber());
             normalized.setTitle(item.getTitle());
             normalized.setBody(item.getBody());
-            normalized.setLabels(extractLabelNames(item.getLabels()));
+            normalized.setLabels(labels);
             issues.add(normalized);
         }
         return issues;

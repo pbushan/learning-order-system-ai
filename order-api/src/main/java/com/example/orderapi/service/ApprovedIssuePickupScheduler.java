@@ -118,6 +118,47 @@ public class ApprovedIssuePickupScheduler {
         }
     }
 
+    private void resetStuckInProgressIssues(String reason) {
+        List<ApprovedGitHubIssue> inProgressIssues;
+        try {
+            inProgressIssues = gitHubIssueClientService.discoverApprovedInProgressIssues();
+        } catch (Exception ex) {
+            log.warn("Failed to discover in-progress approved issues for reset: {}", ex.getMessage());
+            safeAudit("approved-issue-reset-for-retry-failed", null, Map.of("reason", reason), ex.getMessage());
+            return;
+        }
+
+        for (ApprovedGitHubIssue issue : inProgressIssues) {
+            if (issue == null || issue.getIssueNumber() <= 0) {
+                continue;
+            }
+            long issueNumber = issue.getIssueNumber();
+            if (!isStep5OwnedIssue(issue)) {
+                log.info("Skipping in-progress reset for issue #{} because it is not Step 5-owned.", issueNumber);
+                safeAudit("approved-issue-reset-skipped", issueNumber, Map.of("reason", "not-step5-owned"), "");
+                continue;
+            }
+            try {
+                gitHubIssueClientService.removeIssueLabel(issueNumber, "ai-in-progress");
+                recentlyPickedAtMs.remove(issueNumber);
+                log.info("Reset issue #{} for retry because Step 5 runtime is unavailable. reason={}", issueNumber, reason);
+                safeAudit("approved-issue-reset-for-retry", issueNumber, Map.of("reason", reason), "");
+            } catch (Exception ex) {
+                log.warn("Failed resetting issue #{} for retry: {}", issueNumber, ex.getMessage());
+                safeAudit("approved-issue-reset-for-retry-failed", issueNumber, Map.of("reason", reason), ex.getMessage());
+            }
+        }
+    }
+
+    private boolean isStep5OwnedIssue(ApprovedGitHubIssue issue) {
+        List<String> labels = issue.getLabels();
+        if (labels == null || labels.isEmpty()) {
+            return false;
+        }
+        return labels.contains("approved-for-dev")
+                && labels.contains("ai-generated")
+                && labels.contains("portfolio");
+    }
     private void safeAudit(String operation, Long issueNumber, Map<String, Object> metadata, String error) {
         try {
             String requestId = issueNumber != null ? "issue-" + issueNumber : "step5-poll";
