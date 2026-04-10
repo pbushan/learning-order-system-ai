@@ -100,13 +100,18 @@ public class Step5IssueExecutionService {
             safeAudit("approved-issue-execution-skipped", issueNumber, Map.of("reason", "already-in-flight"), "");
             return;
         }
-        CompletableFuture.runAsync(() -> {
-            try {
-                executeIssue(issueNumber);
-            } finally {
-                inFlightIssues.remove(issueNumber);
-            }
-        }, executorService);
+        try {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    executeIssue(issueNumber);
+                } finally {
+                    inFlightIssues.remove(issueNumber);
+                }
+            }, executorService);
+        } catch (RuntimeException ex) {
+            inFlightIssues.remove(issueNumber);
+            throw ex;
+        }
     }
 
     public void executeIssue(long issueNumber) {

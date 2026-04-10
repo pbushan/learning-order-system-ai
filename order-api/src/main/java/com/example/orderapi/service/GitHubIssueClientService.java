@@ -12,9 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
-import org.springframework.web.util.UriUtils;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Locale;
 import java.util.LinkedHashMap;
@@ -147,14 +145,13 @@ public class GitHubIssueClientService {
             throw new IllegalArgumentException("label is required");
         }
 
-        String encodedLabel = UriUtils.encodePathSegment(label.trim(), StandardCharsets.UTF_8);
         int attempts = 0;
         while (attempts < 2) {
             attempts++;
             try {
                 restClient.delete()
                         .uri("/repos/{owner}/{repo}/issues/{issueNumber}/labels/{label}",
-                                owner.trim(), repo.trim(), issueNumber, encodedLabel)
+                                owner.trim(), repo.trim(), issueNumber, label.trim())
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
                         .retrieve()
                         .toBodilessEntity();
@@ -193,7 +190,19 @@ public class GitHubIssueClientService {
         String target = label.trim().toLowerCase(Locale.ROOT);
         for (String current : labels) {
             if (StringUtils.hasText(current) && current.trim().toLowerCase(Locale.ROOT).equals(target)) {
-                return removeIssueLabel(issueNumber, current);
+                boolean removed = removeIssueLabel(issueNumber, current);
+                if (removed) {
+                    return true;
+                }
+                // Label set may have changed between fetch and delete; retry once with a fresh view.
+                List<String> refreshed = fetchIssueLabelNames(issueNumber);
+                for (String refreshedLabel : refreshed) {
+                    if (StringUtils.hasText(refreshedLabel)
+                            && refreshedLabel.trim().toLowerCase(Locale.ROOT).equals(target)) {
+                        return removeIssueLabel(issueNumber, refreshedLabel);
+                    }
+                }
+                return false;
             }
         }
         return false;

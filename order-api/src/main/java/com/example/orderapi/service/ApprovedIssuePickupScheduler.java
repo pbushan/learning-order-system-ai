@@ -157,16 +157,10 @@ public class ApprovedIssuePickupScheduler {
                 }
             }
         }
-        boolean hasRequiredLabels = normalized.contains("approved-for-dev") && normalized.contains("portfolio");
-        if (!hasRequiredLabels) {
-            return false;
-        }
-
-        String body = issue.getBody();
-        boolean hasStep5BodyMarkers = body != null
-                && body.contains("## Story ID")
-                && body.contains("## PR Safety");
-        return normalized.contains("ai-generated") || hasStep5BodyMarkers;
+        return normalized.contains("approved-for-dev")
+                && normalized.contains("portfolio")
+                && normalized.contains("ai-generated")
+                && normalized.contains("needs-human-approval");
     }
     private void safeAudit(String operation, Long issueNumber, Map<String, Object> metadata, String error) {
         try {
