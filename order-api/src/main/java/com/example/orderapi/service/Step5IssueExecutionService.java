@@ -31,6 +31,7 @@ public class Step5IssueExecutionService {
     private final String repo;
     private final String pythonCommand;
     private final String executorScriptPath;
+    private final String repoRootOverride;
     private final boolean autoMerge;
     private final long timeoutSeconds;
     private final GitHubIssueClientService gitHubIssueClientService;
@@ -42,6 +43,7 @@ public class Step5IssueExecutionService {
                                       @Value("${app.github.repo:}") String repo,
                                       @Value("${app.step5.executor.python:python3}") String pythonCommand,
                                       @Value("${app.step5.executor.script-path:../scripts/auto_issue_executor.py}") String executorScriptPath,
+                                      @Value("${app.step5.repo-root:}") String repoRootOverride,
                                       @Value("${app.step5.executor.auto-merge:false}") boolean autoMerge,
                                       @Value("${app.step5.executor.timeout-seconds:180}") long timeoutSeconds,
                                       GitHubIssueClientService gitHubIssueClientService,
@@ -50,6 +52,7 @@ public class Step5IssueExecutionService {
         this.repo = repo;
         this.pythonCommand = pythonCommand;
         this.executorScriptPath = executorScriptPath;
+        this.repoRootOverride = repoRootOverride;
         this.autoMerge = autoMerge;
         this.timeoutSeconds = timeoutSeconds;
         this.gitHubIssueClientService = gitHubIssueClientService;
@@ -63,7 +66,7 @@ public class Step5IssueExecutionService {
         if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
             return new ExecutionAvailability(false, "missing-owner-repo");
         }
-        Path repoRoot = resolveRepoRoot(Path.of(System.getProperty("user.dir")).normalize());
+        Path repoRoot = resolveCurrentRepoRoot();
         if (repoRoot == null || !Files.isDirectory(repoRoot)) {
             return new ExecutionAvailability(false, "missing-repo-root");
         }
@@ -100,7 +103,7 @@ public class Step5IssueExecutionService {
             resetIssueForRetry(issueNumber, availability.reason());
             return;
         }
-        Path repoRoot = resolveRepoRoot(Path.of(System.getProperty("user.dir")).normalize());
+        Path repoRoot = resolveCurrentRepoRoot();
 
         Path scriptPath = resolveScriptPath(repoRoot);
         if (scriptPath == null || !scriptPath.getFileName().toString().equals("auto_issue_executor.py")) {
@@ -223,5 +226,15 @@ public class Step5IssueExecutionService {
             current = current.getParent();
         }
         return null;
+    }
+
+    private Path resolveCurrentRepoRoot() {
+        if (StringUtils.hasText(repoRootOverride)) {
+            Path configured = Path.of(repoRootOverride).normalize();
+            if (Files.exists(configured.resolve(".git"))) {
+                return configured;
+            }
+        }
+        return resolveRepoRoot(Path.of(System.getProperty("user.dir")).normalize());
     }
 }

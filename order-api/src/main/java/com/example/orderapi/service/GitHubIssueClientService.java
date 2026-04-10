@@ -12,7 +12,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.util.UriUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -147,7 +149,7 @@ public class GitHubIssueClientService {
         try {
             restClient.delete()
                     .uri("/repos/{owner}/{repo}/issues/{issueNumber}/labels/{label}",
-                            owner.trim(), repo.trim(), issueNumber, label.trim())
+                            owner.trim(), repo.trim(), issueNumber, UriUtils.encodePathSegment(label.trim(), StandardCharsets.UTF_8))
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
                     .retrieve()
                     .toBodilessEntity();
@@ -224,7 +226,7 @@ public class GitHubIssueClientService {
                 .uri(uriBuilder -> uriBuilder
                         .path("/repos/{owner}/{repo}/issues")
                         .queryParam("state", "open")
-                        .queryParam("labels", "approved-for-dev,ai-in-progress")
+                        .queryParam("labels", "approved-for-dev,ai-in-progress,ai-generated")
                         .queryParam("per_page", "100")
                         .build(owner.trim(), repo.trim()))
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())

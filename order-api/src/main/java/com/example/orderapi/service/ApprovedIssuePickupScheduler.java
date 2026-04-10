@@ -66,8 +66,13 @@ public class ApprovedIssuePickupScheduler {
                             continue;
                         }
                         long issueNumber = inProgressIssue.getIssueNumber();
-                        gitHubIssueClientService.removeIssueLabel(issueNumber, "ai-in-progress");
-                        safeAudit("approved-issue-reset-for-retry", issueNumber, Map.of("reason", availability.reason()), "");
+                        try {
+                            gitHubIssueClientService.removeIssueLabel(issueNumber, "ai-in-progress");
+                            safeAudit("approved-issue-reset-for-retry", issueNumber, Map.of("reason", availability.reason()), "");
+                        } catch (Exception ex) {
+                            log.warn("Failed resetting issue #{} while execution unavailable: {}", issueNumber, ex.getMessage());
+                            safeAudit("approved-issue-reset-failed", issueNumber, Map.of("reason", availability.reason()), ex.getMessage());
+                        }
                     }
                 } catch (Exception ex) {
                     log.warn("Failed resetting in-progress issues while execution unavailable: {}", ex.getMessage());
