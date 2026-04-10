@@ -321,6 +321,11 @@ def post_ready_note(owner: str, repo: str, token: str, pr_number: int) -> None:
 
 def extract_label_names(raw_labels: Any) -> list[str]:
     names: list[str] = []
+    if isinstance(raw_labels, dict):
+        if "labels" in raw_labels:
+            raw_labels = raw_labels.get("labels")
+        else:
+            raw_labels = [raw_labels]
     if not isinstance(raw_labels, list):
         return names
     for label in raw_labels:
@@ -343,8 +348,11 @@ def is_auto_merge_allowed(owner: str, repo: str, token: str, pr_number: int, aut
     if env_flag not in {"1", "true", "yes", "on"}:
         return False, "ALLOW_AUTO_MERGE is not enabled"
 
-    labels_payload = github_request("GET", owner, repo, f"/issues/{pr_number}/labels", token)
-    labels = extract_label_names(labels_payload)
+    try:
+        labels_payload = github_request("GET", owner, repo, f"/issues/{pr_number}/labels", token)
+        labels = extract_label_names(labels_payload)
+    except Exception as ex:
+        return False, f"unable to read PR labels: {ex}"
     if "approved-to-merge" not in labels:
         return False, "missing approved-to-merge label"
 
