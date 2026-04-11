@@ -303,21 +303,9 @@ def push_branch(token: str, branch: str) -> None:
             env["GIT_TERMINAL_PROMPT"] = "0"
             env["HOME"] = tmp_home
 
-            config_proc = subprocess.run(
-                ["git", "config", "--global", "credential.helper", "store"],
-                cwd=str(REPO_ROOT),
-                text=True,
-                capture_output=True,
-                check=False,
-                env=env,
-            )
-            if config_proc.returncode != 0:
-                detail = sanitize_git_error((config_proc.stderr or "").strip() or (config_proc.stdout or "").strip(), token)
-                raise RuntimeError(f"failed to configure temporary git credential helper: {detail}")
-
             credential_input = f"protocol=https\nhost={host}\nusername=x-access-token\npassword={token}\n\n"
             approve_proc = subprocess.run(
-                ["git", "credential", "approve"],
+                ["git", "-c", "credential.helper=store", "credential", "approve"],
                 cwd=str(REPO_ROOT),
                 text=True,
                 input=credential_input,
@@ -330,7 +318,7 @@ def push_branch(token: str, branch: str) -> None:
                 raise RuntimeError(f"failed to stage temporary credentials: {detail}")
 
             token_push = subprocess.run(
-                ["git", "push", "-u", "origin", branch],
+                ["git", "-c", "credential.helper=store", "push", "-u", "origin", branch],
                 cwd=str(REPO_ROOT),
                 text=True,
                 capture_output=True,
