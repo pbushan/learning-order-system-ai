@@ -283,7 +283,28 @@ def create_or_reuse_branch(branch: str, base: str) -> None:
     run_cmd("git", "checkout", "-b", branch, base)
 
 
-def commit_and_push(branch: str, issue_number: int, changed_files: list[str]) -> str:
+def push_branch(owner: str, repo: str, token: str, branch: str) -> None:
+    direct_push = run_cmd("git", "push", "-u", "origin", branch, check=False)
+    if direct_push.returncode == 0:
+        return
+    if not token:
+        detail = (direct_push.stderr or "").strip() or (direct_push.stdout or "").strip() or "unknown push error"
+        raise RuntimeError(f"git push failed: {detail}")
+
+    auth_url = f"https://x-access-token:{token}@github.com/{owner}/{repo}.git"
+    token_push = subprocess.run(
+        ["git", "push", "-u", auth_url, f"HEAD:{branch}"],
+        cwd=str(REPO_ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if token_push.returncode != 0:
+        detail = (token_push.stderr or "").strip() or (token_push.stdout or "").strip() or "unknown push error"
+        raise RuntimeError(f"git push failed after token fallback: {detail}")
+
+
+def commit_and_push(owner: str, repo: str, token: str, branch: str, issue_number: int, changed_files: list[str]) -> str:
     if not changed_files:
         raise RuntimeError("No changed files to stage.")
     ensure_git_identity()
@@ -292,7 +313,7 @@ def commit_and_push(branch: str, issue_number: int, changed_files: list[str]) ->
         raise RuntimeError("No staged changes to commit.")
     message = f"Issue #{issue_number}: apply approved update"
     run_cmd("git", "commit", "-m", message)
-    run_cmd("git", "push", "-u", "origin", branch)
+    push_branch(owner, repo, token, branch)
     return message
 
 
@@ -451,7 +472,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
         log_step5_event("issue-implementation-applied", issue_number=issue_number, metadata={"changedFiles": changed_files})
 
         log(f"Issue #{issue_number}: committing and pushing")
-        commit_and_push(branch, issue_number, changed_files)
+        commit_and_push(owner, repo, token, branch, issue_number, changed_files)
 
         log(f"Issue #{issue_number}: creating pull request")
         pr_number, pr_url = create_pr(owner, repo, token, branch, scaffold)
