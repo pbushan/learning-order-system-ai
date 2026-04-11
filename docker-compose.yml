@@ -51,6 +51,8 @@ services:
       context: ./order-api
       dockerfile: Dockerfile
     container_name: learning-order-api
+    env_file:
+      - .env
     environment:
       SPRING_DOCKER_COMPOSE_ENABLED: "false"
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/learning_orders?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
@@ -61,8 +63,8 @@ services:
       APP_LAMBDA_ENDPOINT: http://localstack:4566
       APP_LAMBDA_REGION: us-east-1
       APP_LAMBDA_FUNCTION_NAME: shipping-rule-lambda
-      OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY is required}
-      GITHUB_TOKEN: ${GITHUB_TOKEN:?GITHUB_TOKEN is required}
+      APP_STEP5_REPO_ROOT: /workspace
+      APP_STEP5_EXECUTOR_SCRIPT_PATH: /workspace/scripts/auto_issue_executor.py
     ports:
       - "8080:8080"
     depends_on:
@@ -73,6 +75,8 @@ services:
       localstack:
         condition: service_healthy
     restart: unless-stopped
+    volumes:
+      - ./:/workspace
 
   order-consumer:
     build:
