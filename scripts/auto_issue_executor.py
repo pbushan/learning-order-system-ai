@@ -293,17 +293,44 @@ def push_branch(token: str, branch: str) -> None:
         raise RuntimeError(f"git push failed: {detail}")
 
     origin_url = run_cmd("git", "remote", "get-url", "origin", check=False).stdout.strip()
-    host = parse_remote_host(origin_url) or "github.com"
+    host = parse_remote_host(origin_url)
+    if not host:
+        detail = sanitize_git_error((direct_push.stderr or "").strip() or (direct_push.stdout or "").strip(), token)
+        raise RuntimeError(f"git push failed (unsupported remote for credential fallback; primary={detail})")
     try:
-        with tempfile.TemporaryDirectory(prefix="step5_git_cred_") as tmp_dir:
-            cred_file = Path(tmp_dir) / ".git-credentials"
-            cred_file.write_text(f"https://x-access-token:{token}@{host}\n", encoding="utf-8")
-            os.chmod(cred_file, 0o600)
-
+        with tempfile.TemporaryDirectory(prefix="step5_git_cred_") as tmp_home:
             env = os.environ.copy()
             env["GIT_TERMINAL_PROMPT"] = "0"
+            env["HOME"] = tmp_home
+
+            config_proc = subprocess.run(
+                ["git", "config", "--global", "credential.helper", "store"],
+                cwd=str(REPO_ROOT),
+                text=True,
+                capture_output=True,
+                check=False,
+                env=env,
+            )
+            if config_proc.returncode != 0:
+                detail = sanitize_git_error((config_proc.stderr or "").strip() or (config_proc.stdout or "").strip(), token)
+                raise RuntimeError(f"failed to configure temporary git credential helper: {detail}")
+
+            credential_input = f"protocol=https\nhost={host}\nusername=x-access-token\npassword={token}\n\n"
+            approve_proc = subprocess.run(
+                ["git", "credential", "approve"],
+                cwd=str(REPO_ROOT),
+                text=True,
+                input=credential_input,
+                capture_output=True,
+                check=False,
+                env=env,
+            )
+            if approve_proc.returncode != 0:
+                detail = sanitize_git_error((approve_proc.stderr or "").strip() or (approve_proc.stdout or "").strip(), token)
+                raise RuntimeError(f"failed to stage temporary credentials: {detail}")
+
             token_push = subprocess.run(
-                ["git", "-c", f"credential.helper=store --file {cred_file}", "push", "-u", "origin", branch],
+                ["git", "push", "-u", "origin", branch],
                 cwd=str(REPO_ROOT),
                 text=True,
                 capture_output=True,
@@ -327,6 +354,10 @@ def sanitize_git_error(raw: str, token: str) -> str:
         return "unknown push error"
     if token:
         text = text.replace(token, "***")
+    text = re.sub(r"gh[pousr]_[A-Za-z0-9_]+", "***", text)
+    text = re.sub(r"github_pat_[A-Za-z0-9_]+", "***", text)
+    text = re.sub(r"(?i)(authorization:\s*(?:bearer|token)\s+)[^\s]+", r"\1***", text)
+    text = re.sub(r"(?i)(password=)[^\s]+", r"\1***", text)
     text = re.sub(r"https://[^@\s]+@", "https://***@", text)
     return text
 
