@@ -27,6 +27,10 @@ from step5_audit_log import log_step5_event
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+class NoFileChangeError(RuntimeError):
+    """Raised when an issue instruction results in no file changes."""
+
+
 def log(msg: str) -> None:
     print(msg, flush=True)
 
@@ -198,7 +202,7 @@ def apply_issue_change(issue: dict[str, Any]) -> list[str]:
             changed.append(rel)
 
     if not changed:
-        raise RuntimeError("No file content changed after replacement.")
+        raise NoFileChangeError("No file content changed after replacement.")
 
     return changed
 
@@ -479,7 +483,26 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
             log_step5_event("issue-post-merge-cleanup-completed", issue_number=issue_number, metadata={"branch": branch})
 
         return result
-    except Exception:
+    except Exception as ex:
+        if isinstance(ex, NoFileChangeError):
+            log(f"Issue #{issue_number}: no-op detected, awaiting human review")
+            log_step5_event("approved-issue-no-op", issue_number=issue_number, error=str(ex))
+            try:
+                comment_issue(
+                    owner,
+                    repo,
+                    token,
+                    issue_number,
+                    "Automation detected no code change was needed for this request. "
+                    "This issue appears already satisfied on the current codebase. "
+                    "Please verify manually; if more work is needed, update the issue details and re-add `approved-for-dev`.",
+                )
+            except Exception:
+                pass
+            try:
+                remove_label(owner, repo, token, issue_number, "approved-for-dev")
+            except Exception:
+                pass
         if label_applied:
             try:
                 remove_label(owner, repo, token, issue_number, "ai-in-progress")
