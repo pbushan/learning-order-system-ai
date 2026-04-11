@@ -289,27 +289,33 @@ def push_branch(token: str, branch: str) -> None:
     if direct_push.returncode == 0:
         return
     if not token:
-        detail = (direct_push.stderr or "").strip() or (direct_push.stdout or "").strip() or "unknown push error"
+        detail = sanitize_git_error((direct_push.stderr or "").strip() or (direct_push.stdout or "").strip(), token)
         raise RuntimeError(f"git push failed: {detail}")
 
-    askpass_script = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, prefix="step5_askpass_", suffix=".sh") as handle:
-            askpass_script = handle.name
-            handle.write("#!/bin/sh\n")
-            handle.write("case \"$1\" in\n")
-            handle.write("  *Username*) echo \"x-access-token\" ;;\n")
-            handle.write("  *Password*) echo \"$GIT_PUSH_TOKEN\" ;;\n")
-            handle.write("  *) echo \"\" ;;\n")
-            handle.write("esac\n")
-        os.chmod(askpass_script, 0o700)
+    origin_url = run_cmd("git", "remote", "get-url", "origin", check=False).stdout.strip().lower()
+    if "github.com" not in origin_url:
+        raise RuntimeError("git push fallback supports github.com remotes only.")
 
+    helper_script = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, prefix="step5_git_cred_", suffix=".sh") as handle:
+            helper_script = handle.name
+            handle.write("#!/bin/sh\n")
+            handle.write("if [ \"$1\" = get ]; then\n")
+            handle.write("  while IFS= read -r line; do\n")
+            handle.write("    [ -z \"$line\" ] && break\n")
+            handle.write("  done\n")
+            handle.write("  printf 'username=x-access-token\\n'\n")
+            handle.write("  printf 'password=%s\\n' \"" + token + "\"\n")
+            handle.write("fi\n")
+            handle.write("exit 0\n")
+        os.chmod(helper_script, 0o600)
+
+        helper_cmd = "!" + helper_script
         env = os.environ.copy()
         env["GIT_TERMINAL_PROMPT"] = "0"
-        env["GIT_ASKPASS"] = askpass_script
-        env["GIT_PUSH_TOKEN"] = token
         token_push = subprocess.run(
-            ["git", "push", "-u", "origin", branch],
+            ["git", "-c", f"credential.helper={helper_cmd}", "push", "-u", "origin", branch],
             cwd=str(REPO_ROOT),
             text=True,
             capture_output=True,
@@ -317,14 +323,25 @@ def push_branch(token: str, branch: str) -> None:
             env=env,
         )
         if token_push.returncode != 0:
-            detail = (token_push.stderr or "").strip() or (token_push.stdout or "").strip() or "unknown push error"
-            raise RuntimeError(f"git push failed after token fallback: {detail}")
+            primary = sanitize_git_error((direct_push.stderr or "").strip() or (direct_push.stdout or "").strip(), token)
+            fallback = sanitize_git_error((token_push.stderr or "").strip() or (token_push.stdout or "").strip(), token)
+            raise RuntimeError(f"git push failed (primary={primary}; fallback={fallback})")
     finally:
-        if askpass_script and os.path.exists(askpass_script):
+        if helper_script and os.path.exists(helper_script):
             try:
-                os.remove(askpass_script)
+                os.remove(helper_script)
             except OSError:
                 pass
+
+
+def sanitize_git_error(raw: str, token: str) -> str:
+    text = (raw or "").strip()
+    if not text:
+        return "unknown push error"
+    if token:
+        text = text.replace(token, "***")
+    text = re.sub(r"https://[^@\s]+@", "https://***@", text)
+    return text
 
 
 def commit_and_push(token: str, branch: str, issue_number: int, changed_files: list[str]) -> None:
