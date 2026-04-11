@@ -25,6 +25,7 @@ sys.dont_write_bytecode = True
 from step5_audit_log import log_step5_event
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+STEP5_TARGET_FILES = ["order-ui/index.html"]
 
 
 class NoFileChangeError(RuntimeError):
@@ -36,13 +37,29 @@ def log(msg: str) -> None:
 
 
 def run_cmd(*args: str, check: bool = True, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    proc = subprocess.run(
         list(args),
         cwd=str(cwd or REPO_ROOT),
         text=True,
         capture_output=True,
-        check=check,
+        check=False,
     )
+    if check and proc.returncode != 0:
+        detail = (proc.stderr or "").strip() or (proc.stdout or "").strip() or f"exit status {proc.returncode}"
+        raise RuntimeError(f"Command failed ({' '.join(args)}): {detail}")
+    return proc
+
+
+def ensure_git_identity() -> None:
+    name = run_cmd("git", "config", "--get", "user.name", check=False).stdout.strip()
+    email = run_cmd("git", "config", "--get", "user.email", check=False).stdout.strip()
+    if name and email:
+        return
+    fallback_name = (os.getenv("STEP5_GIT_AUTHOR_NAME") or "codex-step5").strip()
+    fallback_email = (os.getenv("STEP5_GIT_AUTHOR_EMAIL") or "codex-step5@local.invalid").strip()
+    run_cmd("git", "config", "user.name", fallback_name)
+    run_cmd("git", "config", "user.email", fallback_email)
+    log(f"Configured local git author for Step 5 execution: {fallback_name} <{fallback_email}>")
 
 
 def run_cmd_with_gh_auth_fallback(*args: str) -> subprocess.CompletedProcess[str]:
@@ -188,7 +205,7 @@ def apply_issue_change(issue: dict[str, Any]) -> list[str]:
         raise RuntimeError("Rename instruction has identical source and destination values.")
 
     # Keep this intentionally narrow for portfolio safety.
-    files = ["order-ui/index.html"]
+    files = STEP5_TARGET_FILES
     if not (REPO_ROOT / files[0]).exists():
         raise RuntimeError("Expected UI file not found: order-ui/index.html")
 
@@ -232,8 +249,12 @@ def build_pr_scaffold(packet: dict[str, Any]) -> dict[str, Any]:
 
 
 def ensure_clean_and_base(base: str) -> None:
+    # Keep Step 5 resilient in shared/dev runtime: auto-restore only the files this
+    # executor owns so prior partial runs do not block the happy path indefinitely.
+    for rel in STEP5_TARGET_FILES:
+        run_cmd("git", "restore", "--staged", "--worktree", "--source=HEAD", "--", rel, check=False)
     status_lines = [line.strip() for line in run_cmd("git", "status", "--porcelain").stdout.splitlines() if line.strip()]
-    relevant_paths = {"order-ui/index.html"}
+    relevant_paths = set(STEP5_TARGET_FILES)
     for line in status_lines:
         path_part = line[3:] if len(line) > 3 else ""
         candidate_paths = [segment.strip() for segment in path_part.split("->")]
@@ -265,6 +286,7 @@ def create_or_reuse_branch(branch: str, base: str) -> None:
 def commit_and_push(branch: str, issue_number: int, changed_files: list[str]) -> str:
     if not changed_files:
         raise RuntimeError("No changed files to stage.")
+    ensure_git_identity()
     run_cmd("git", "add", "--", *changed_files)
     if run_cmd("git", "diff", "--cached", "--quiet", check=False).returncode == 0:
         raise RuntimeError("No staged changes to commit.")
@@ -403,6 +425,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
     branch = ""
     label_applied = False
     pr_number: int | None = None
+    changed_files: list[str] = []
     log(f"Issue #{issue_number}: picked for execution")
     log_step5_event("approved-issue-picked", issue_number=issue_number, metadata={"title": issue.get("title", "")})
 
@@ -503,6 +526,19 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
                 remove_label(owner, repo, token, issue_number, "approved-for-dev")
             except Exception:
                 pass
+            if label_applied:
+                try:
+                    remove_label(owner, repo, token, issue_number, "ai-in-progress")
+                except Exception:
+                    pass
+            return {
+                "issueNumber": issue_number,
+                "branch": branch,
+                "prNumber": None,
+                "prUrl": "",
+                "changedFiles": [],
+                "merged": False,
+            }
         if label_applied:
             try:
                 remove_label(owner, repo, token, issue_number, "ai-in-progress")
@@ -526,6 +562,8 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
             except Exception:
                 pass
         try:
+            for rel in STEP5_TARGET_FILES:
+                run_cmd("git", "restore", "--staged", "--worktree", "--source=HEAD", "--", rel, check=False)
             run_cmd("git", "checkout", "main", check=False)
         except Exception:
             pass
