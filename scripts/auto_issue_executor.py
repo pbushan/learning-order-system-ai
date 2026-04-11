@@ -284,7 +284,7 @@ def create_or_reuse_branch(branch: str, base: str) -> None:
     run_cmd("git", "checkout", "-b", branch, base)
 
 
-def push_branch(owner: str, repo: str, token: str, branch: str) -> None:
+def push_branch(token: str, branch: str) -> None:
     direct_push = run_cmd("git", "push", "-u", "origin", branch, check=False)
     if direct_push.returncode == 0:
         return
@@ -327,17 +327,15 @@ def push_branch(owner: str, repo: str, token: str, branch: str) -> None:
                 pass
 
 
-def commit_and_push(owner: str, repo: str, token: str, branch: str, issue_number: int, changed_files: list[str]) -> str:
+def commit_and_push(token: str, branch: str, issue_number: int, changed_files: list[str]) -> None:
     if not changed_files:
         raise RuntimeError("No changed files to stage.")
     ensure_git_identity()
     run_cmd("git", "add", "--", *changed_files)
     if run_cmd("git", "diff", "--cached", "--quiet", check=False).returncode == 0:
         raise RuntimeError("No staged changes to commit.")
-    message = f"Issue #{issue_number}: apply approved update"
-    run_cmd("git", "commit", "-m", message)
-    push_branch(owner, repo, token, branch)
-    return message
+    run_cmd("git", "commit", "-m", f"Issue #{issue_number}: apply approved update")
+    push_branch(token, branch)
 
 
 def resolve_open_pr(owner: str, repo: str, token: str, branch: str) -> int | None:
@@ -495,7 +493,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
         log_step5_event("issue-implementation-applied", issue_number=issue_number, metadata={"changedFiles": changed_files})
 
         log(f"Issue #{issue_number}: committing and pushing")
-        commit_and_push(owner, repo, token, branch, issue_number, changed_files)
+        commit_and_push(token, branch, issue_number, changed_files)
 
         log(f"Issue #{issue_number}: creating pull request")
         pr_number, pr_url = create_pr(owner, repo, token, branch, scaffold)
