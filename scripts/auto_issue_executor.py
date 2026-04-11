@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -291,17 +292,39 @@ def push_branch(owner: str, repo: str, token: str, branch: str) -> None:
         detail = (direct_push.stderr or "").strip() or (direct_push.stdout or "").strip() or "unknown push error"
         raise RuntimeError(f"git push failed: {detail}")
 
-    auth_url = f"https://x-access-token:{token}@github.com/{owner}/{repo}.git"
-    token_push = subprocess.run(
-        ["git", "push", "-u", auth_url, f"HEAD:{branch}"],
-        cwd=str(REPO_ROOT),
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if token_push.returncode != 0:
-        detail = (token_push.stderr or "").strip() or (token_push.stdout or "").strip() or "unknown push error"
-        raise RuntimeError(f"git push failed after token fallback: {detail}")
+    askpass_script = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, prefix="step5_askpass_", suffix=".sh") as handle:
+            askpass_script = handle.name
+            handle.write("#!/bin/sh\n")
+            handle.write("case \"$1\" in\n")
+            handle.write("  *Username*) echo \"x-access-token\" ;;\n")
+            handle.write("  *Password*) echo \"$GIT_PUSH_TOKEN\" ;;\n")
+            handle.write("  *) echo \"\" ;;\n")
+            handle.write("esac\n")
+        os.chmod(askpass_script, 0o700)
+
+        env = os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["GIT_ASKPASS"] = askpass_script
+        env["GIT_PUSH_TOKEN"] = token
+        token_push = subprocess.run(
+            ["git", "push", "-u", "origin", branch],
+            cwd=str(REPO_ROOT),
+            text=True,
+            capture_output=True,
+            check=False,
+            env=env,
+        )
+        if token_push.returncode != 0:
+            detail = (token_push.stderr or "").strip() or (token_push.stdout or "").strip() or "unknown push error"
+            raise RuntimeError(f"git push failed after token fallback: {detail}")
+    finally:
+        if askpass_script and os.path.exists(askpass_script):
+            try:
+                os.remove(askpass_script)
+            except OSError:
+                pass
 
 
 def commit_and_push(owner: str, repo: str, token: str, branch: str, issue_number: int, changed_files: list[str]) -> str:
