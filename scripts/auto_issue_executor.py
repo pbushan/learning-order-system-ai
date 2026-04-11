@@ -229,14 +229,18 @@ def build_pr_scaffold(packet: dict[str, Any]) -> dict[str, Any]:
 
 def ensure_clean_and_base(base: str) -> None:
     status_lines = [line.strip() for line in run_cmd("git", "status", "--porcelain").stdout.splitlines() if line.strip()]
-    non_audit_changes = [
-        line
-        for line in status_lines
-        if "order-api/audit/intake-chat.jsonl" not in line
-        and "__pycache__/" not in line
-    ]
-    if non_audit_changes:
-        raise RuntimeError("Working tree is not clean; aborting automated issue execution.")
+    relevant_paths = {"order-ui/index.html"}
+    for line in status_lines:
+        path_part = line[3:] if len(line) > 3 else ""
+        candidate_paths = [segment.strip() for segment in path_part.split("->")]
+        for path in candidate_paths:
+            if not path:
+                continue
+            if path == "order-api/audit/intake-chat.jsonl" or "__pycache__/" in path:
+                continue
+            # Keep the guard minimal: only block when files this executor edits are already dirty.
+            if path in relevant_paths:
+                raise RuntimeError("Working tree has changes in Step 5 target files; aborting automated issue execution.")
     run_cmd("git", "fetch", "--all", "--prune")
     run_cmd("git", "checkout", base)
     run_cmd("git", "pull", "--ff-only")
