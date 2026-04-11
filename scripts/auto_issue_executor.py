@@ -292,46 +292,33 @@ def push_branch(token: str, branch: str) -> None:
         detail = sanitize_git_error((direct_push.stderr or "").strip() or (direct_push.stdout or "").strip(), token)
         raise RuntimeError(f"git push failed: {detail}")
 
-    origin_url = run_cmd("git", "remote", "get-url", "origin", check=False).stdout.strip().lower()
-    if "github.com" not in origin_url:
-        raise RuntimeError("git push fallback supports github.com remotes only.")
-
-    helper_script = None
+    origin_url = run_cmd("git", "remote", "get-url", "origin", check=False).stdout.strip()
+    host = parse_remote_host(origin_url) or "github.com"
     try:
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, prefix="step5_git_cred_", suffix=".sh") as handle:
-            helper_script = handle.name
-            handle.write("#!/bin/sh\n")
-            handle.write("if [ \"$1\" = get ]; then\n")
-            handle.write("  while IFS= read -r line; do\n")
-            handle.write("    [ -z \"$line\" ] && break\n")
-            handle.write("  done\n")
-            handle.write("  printf 'username=x-access-token\\n'\n")
-            handle.write("  printf 'password=%s\\n' \"" + token + "\"\n")
-            handle.write("fi\n")
-            handle.write("exit 0\n")
-        os.chmod(helper_script, 0o600)
+        with tempfile.TemporaryDirectory(prefix="step5_git_cred_") as tmp_dir:
+            cred_file = Path(tmp_dir) / ".git-credentials"
+            cred_file.write_text(f"https://x-access-token:{token}@{host}\n", encoding="utf-8")
+            os.chmod(cred_file, 0o600)
 
-        helper_cmd = "!" + helper_script
-        env = os.environ.copy()
-        env["GIT_TERMINAL_PROMPT"] = "0"
-        token_push = subprocess.run(
-            ["git", "-c", f"credential.helper={helper_cmd}", "push", "-u", "origin", branch],
-            cwd=str(REPO_ROOT),
-            text=True,
-            capture_output=True,
-            check=False,
-            env=env,
-        )
-        if token_push.returncode != 0:
-            primary = sanitize_git_error((direct_push.stderr or "").strip() or (direct_push.stdout or "").strip(), token)
-            fallback = sanitize_git_error((token_push.stderr or "").strip() or (token_push.stdout or "").strip(), token)
-            raise RuntimeError(f"git push failed (primary={primary}; fallback={fallback})")
-    finally:
-        if helper_script and os.path.exists(helper_script):
-            try:
-                os.remove(helper_script)
-            except OSError:
-                pass
+            env = os.environ.copy()
+            env["GIT_TERMINAL_PROMPT"] = "0"
+            token_push = subprocess.run(
+                ["git", "-c", f"credential.helper=store --file {cred_file}", "push", "-u", "origin", branch],
+                cwd=str(REPO_ROOT),
+                text=True,
+                capture_output=True,
+                check=False,
+                env=env,
+            )
+            if token_push.returncode != 0:
+                primary = sanitize_git_error((direct_push.stderr or "").strip() or (direct_push.stdout or "").strip(), token)
+                fallback = sanitize_git_error((token_push.stderr or "").strip() or (token_push.stdout or "").strip(), token)
+                raise RuntimeError(f"git push failed (primary={primary}; fallback={fallback})")
+    except RuntimeError:
+        raise
+    except Exception as ex:
+        primary = sanitize_git_error((direct_push.stderr or "").strip() or (direct_push.stdout or "").strip(), token)
+        raise RuntimeError(f"git push failed (primary={primary}; fallback={type(ex).__name__}: {ex})") from ex
 
 
 def sanitize_git_error(raw: str, token: str) -> str:
@@ -342,6 +329,18 @@ def sanitize_git_error(raw: str, token: str) -> str:
         text = text.replace(token, "***")
     text = re.sub(r"https://[^@\s]+@", "https://***@", text)
     return text
+
+
+def parse_remote_host(remote_url: str) -> str:
+    value = (remote_url or "").strip()
+    if not value:
+        return ""
+    if value.startswith("http://") or value.startswith("https://"):
+        return urllib.parse.urlparse(value).hostname or ""
+    ssh_match = re.match(r"^[^@]+@([^:]+):.*$", value)
+    if ssh_match:
+        return ssh_match.group(1).strip()
+    return ""
 
 
 def commit_and_push(token: str, branch: str, issue_number: int, changed_files: list[str]) -> None:
