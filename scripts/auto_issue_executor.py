@@ -303,6 +303,10 @@ def push_branch(token: str, branch: str) -> None:
     if not host:
         detail = sanitize_git_error(direct_error, token)
         raise RuntimeError(f"git push failed (unsupported remote for credential fallback; primary={detail})")
+    host_name = host.split(":", 1)[0].lower()
+    if host_name != "github.com":
+        detail = sanitize_git_error(direct_error, token)
+        raise RuntimeError(f"git push failed (fallback supports github.com only; primary={detail})")
     try:
         with tempfile.TemporaryDirectory(prefix="step5_git_cred_") as tmp_dir:
             try:
@@ -312,6 +316,10 @@ def push_branch(token: str, branch: str) -> None:
             cred_file = Path(tmp_dir) / ".git-credentials"
             cred_file.touch(mode=0o600, exist_ok=True)
             os.chmod(cred_file, 0o600)
+            if os.name == "posix":
+                mode = cred_file.stat().st_mode & 0o777
+                if mode & 0o077:
+                    raise RuntimeError("credential file permissions are too permissive")
 
             env = os.environ.copy()
             env["GIT_TERMINAL_PROMPT"] = "0"
@@ -323,13 +331,13 @@ def push_branch(token: str, branch: str) -> None:
                 cwd=str(REPO_ROOT),
                 text=True,
                 input=credential_input,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                capture_output=True,
                 check=False,
                 env=env,
             )
             if approve_proc.returncode != 0:
-                raise RuntimeError("failed to stage temporary credentials")
+                detail = sanitize_git_error((approve_proc.stderr or "").strip() or (approve_proc.stdout or "").strip(), token)
+                raise RuntimeError(f"failed to stage temporary credentials: {detail}")
             if not cred_file.exists() or cred_file.stat().st_size == 0:
                 raise RuntimeError("failed to stage temporary credentials: credential store is empty")
 
@@ -362,12 +370,14 @@ def sanitize_git_error(raw: str, token: str) -> str:
         text = text.replace(urllib.parse.quote_plus(token), "***")
         basic = base64.b64encode(f"x-access-token:{token}".encode("utf-8")).decode("ascii")
         text = text.replace(basic, "***")
+    text = re.sub(r"(?i)(x-access-token:)[^\s@]+", r"\1***", text)
     text = re.sub(r"gh[pousr]_[A-Za-z0-9_]+", "***", text)
     text = re.sub(r"github_pat_[A-Za-z0-9_]+", "***", text)
     text = re.sub(r"(?i)(authorization:\s*(?:bearer|token)\s+)[^\s]+", r"\1***", text)
     text = re.sub(r"(?i)(authorization:\s*basic\s+)[^\s]+", r"\1***", text)
     text = re.sub(r"(?i)(password=)[^\s]+", r"\1***", text)
     text = re.sub(r"(?i)(token=)[^\s&]+", r"\1***", text)
+    text = re.sub(r"(?i)((?:access|oauth)_?token[=:])[^\s&]+", r"\1***", text)
     text = re.sub(r"https://[^@\s]+@", "https://***@", text)
     return text
 
@@ -400,6 +410,7 @@ def is_auth_push_error(raw: str) -> bool:
             "invalid username or password",
             "http basic: access denied",
             "bad credentials",
+            "authentication required",
         ]
     )
 
