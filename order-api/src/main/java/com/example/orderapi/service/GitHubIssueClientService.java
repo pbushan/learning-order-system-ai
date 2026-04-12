@@ -355,12 +355,27 @@ public class GitHubIssueClientService {
             item.put("title", pullNode.path("title").asText(""));
             item.put("body", pullNode.path("body").asText(""));
             item.put("state", pullNode.path("state").asText(""));
-            item.put("url", pullNode.path("url").asText(""));
-            item.put("headRefName", pullNode.path("headRefName").asText(""));
-            item.put("headRefOid", pullNode.path("headRefOid").asText(""));
+            String url = pullNode.path("url").asText("");
+            if (!StringUtils.hasText(url)) {
+                url = pullNode.path("html_url").asText("");
+            }
+            item.put("url", url);
+            String headRefName = pullNode.path("headRefName").asText("");
+            if (!StringUtils.hasText(headRefName)) {
+                headRefName = pullNode.path("head").path("ref").asText("");
+            }
+            item.put("headRefName", headRefName);
+            String headRefOid = pullNode.path("headRefOid").asText("");
+            if (!StringUtils.hasText(headRefOid)) {
+                headRefOid = pullNode.path("head").path("sha").asText("");
+            }
+            item.put("headRefOid", headRefOid);
             String author = pullNode.path("author").path("login").asText("");
             if (!StringUtils.hasText(author)) {
                 author = pullNode.path("author").asText("");
+            }
+            if (!StringUtils.hasText(author)) {
+                author = pullNode.path("user").path("login").asText("");
             }
             item.put("author", author);
             pulls.add(item);

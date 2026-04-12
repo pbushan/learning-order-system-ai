@@ -34,6 +34,7 @@ public class Step6PrReviewPollingService {
     private final int maxSelfReviewAttempts;
     private final int waitCyclesBeforeSelfReview;
     private final GitHubIssueClientService gitHubIssueClientService;
+    private final Step5IssueExecutionService step5IssueExecutionService;
     private final FileAuditLogService fileAuditLogService;
     private final AtomicBoolean pollInProgress = new AtomicBoolean(false);
     private final Map<Long, PrState> prStates = new ConcurrentHashMap<>();
@@ -43,12 +44,14 @@ public class Step6PrReviewPollingService {
                                        @Value("${app.step6.max-self-review-attempts:1}") int maxSelfReviewAttempts,
                                        @Value("${app.step6.wait-cycles-before-self-review:2}") int waitCyclesBeforeSelfReview,
                                        GitHubIssueClientService gitHubIssueClientService,
+                                       Step5IssueExecutionService step5IssueExecutionService,
                                        FileAuditLogService fileAuditLogService) {
         this.enabled = enabled;
         this.maxCyclesPerPr = Math.max(1, maxCyclesPerPr);
         this.maxSelfReviewAttempts = Math.max(0, maxSelfReviewAttempts);
         this.waitCyclesBeforeSelfReview = Math.max(1, waitCyclesBeforeSelfReview);
         this.gitHubIssueClientService = gitHubIssueClientService;
+        this.step5IssueExecutionService = step5IssueExecutionService;
         this.fileAuditLogService = fileAuditLogService;
     }
 
@@ -235,6 +238,7 @@ public class Step6PrReviewPollingService {
 
         boolean repeatDetected = false;
         int safeAutoFixCount = 0;
+        int safeAutoFixAttemptCount = 0;
         int acknowledgeOnlyCount = 0;
         int needsHumanCount = 0;
         List<String> repeatedFindingIds = new ArrayList<>();
@@ -254,6 +258,7 @@ public class Step6PrReviewPollingService {
             state.processedItemIds.add(finding.sourceId);
 
             if (finding.classification == Classification.SAFE_AUTO_FIX) {
+                safeAutoFixAttemptCount++;
                 String action = maybeApplySafePullRequestTextFix(prNumber, pull, finding);
                 if (StringUtils.hasText(action)) {
                     safeAutoFixCount++;
@@ -273,7 +278,17 @@ public class Step6PrReviewPollingService {
         log.info("Step 6 PR #{} reconciliation summary: safeAutoFix={}, acknowledgeOnly={}, needsHuman={}, repeatDetected={}",
                 prNumber, safeAutoFixCount, acknowledgeOnlyCount, needsHumanCount, repeatDetected);
 
-        postReconciliationComment(prNumber, state, safeAutoFixCount, acknowledgeOnlyCount, needsHumanCount, safeActions, repeatDetected, repeatedFindingIds);
+        postReconciliationComment(
+                prNumber,
+                state,
+                safeAutoFixCount,
+                safeAutoFixAttemptCount,
+                acknowledgeOnlyCount,
+                needsHumanCount,
+                safeActions,
+                repeatDetected,
+                repeatedFindingIds
+        );
 
         if (repeatDetected) {
             finalizeWithTerminalComment(prNumber, state, "DONE_NEEDS_HUMAN",
@@ -326,23 +341,59 @@ public class Step6PrReviewPollingService {
         if (finding == null || finding.classification != Classification.SAFE_AUTO_FIX) {
             return "";
         }
-        String title = safeText(pull.get("title"));
-        String body = safeText(pull.get("body"));
-        String updatedTitle = title.replace("wrkbench", "workbench");
-        String updatedBody = body.replace("wrkbench", "workbench");
-        if (title.equals(updatedTitle) && body.equals(updatedBody)) {
+
+        String branch = safeText(pull.get("headRefName"));
+        if (!StringUtils.hasText(branch)) {
             return "";
         }
-        gitHubIssueClientService.updatePullRequest(prNumber, updatedTitle, updatedBody);
-        pull.put("title", updatedTitle);
-        pull.put("body", updatedBody);
-        safeAudit("step6-safe-fix-applied", prNumber, Map.of("type", "pr-text-normalization"), "");
-        return "Normalized obvious typo in PR metadata text.";
+
+        Map<String, Object> fixPacket = buildSafeFixPacket(prNumber, branch, finding);
+        if (fixPacket.isEmpty()) {
+            return "";
+        }
+
+        Step5IssueExecutionService.Step6FixExecutionResult executionResult =
+                step5IssueExecutionService.executeStep6SafeFix(prNumber, branch, fixPacket);
+        if (!executionResult.changed()) {
+            safeAudit(
+                    "step6-safe-fix-skipped",
+                    prNumber,
+                    Map.of("branch", branch, "reason", safeText(executionResult.error())),
+                    safeText(executionResult.error())
+            );
+            return "";
+        }
+        safeAudit(
+                "step6-safe-fix-applied",
+                prNumber,
+                Map.of("branch", branch, "commitSha", safeText(executionResult.commitSha()), "action", safeText(fixPacket.get("action"))),
+                ""
+        );
+        return "Code changes pushed on `" + branch + "` (commit " + shortSha(executionResult.commitSha()) + ") for finding `" + finding.sourceId + "`.";
+    }
+
+    private Map<String, Object> buildSafeFixPacket(long prNumber, String branch, Finding finding) {
+        String text = finding.text.toLowerCase(Locale.ROOT);
+        if (!text.contains("wrkbench")) {
+            return Map.of();
+        }
+        Map<String, Object> packet = new LinkedHashMap<>();
+        packet.put("prNumber", prNumber);
+        packet.put("branch", branch);
+        packet.put("findingId", finding.sourceId);
+        packet.put("classification", finding.classification.name());
+        packet.put("findingText", finding.text);
+        packet.put("action", "replace-text");
+        packet.put("fromText", "wrkbench");
+        packet.put("toText", "workbench");
+        packet.put("files", List.of("order-ui/index.html", "order-ui/app.js", "README.md"));
+        return packet;
     }
 
     private void postReconciliationComment(long prNumber,
                                            PrState state,
                                            int safeAutoFixCount,
+                                           int safeAutoFixAttemptCount,
                                            int acknowledgeOnlyCount,
                                            int needsHumanCount,
                                            List<String> safeActions,
@@ -350,7 +401,8 @@ public class Step6PrReviewPollingService {
                                            List<String> repeatedFindingIds) {
         StringBuilder message = new StringBuilder();
         message.append("Step 6 reconciliation cycle ").append(state.cycleCount).append("\n\n");
-        message.append("- Safe auto-fix findings handled: ").append(safeAutoFixCount).append("\n");
+        message.append("- Safe auto-fix findings handled with code changes: ").append(safeAutoFixCount).append("\n");
+        message.append("- Safe auto-fix findings attempted: ").append(safeAutoFixAttemptCount).append("\n");
         message.append("- Acknowledge-only findings: ").append(acknowledgeOnlyCount).append("\n");
         message.append("- Needs-human findings: ").append(needsHumanCount).append("\n");
         if (!safeActions.isEmpty()) {
@@ -369,6 +421,7 @@ public class Step6PrReviewPollingService {
                 Map.of(
                         "cycle", state.cycleCount,
                         "safeAutoFixCount", safeAutoFixCount,
+                        "safeAutoFixAttemptCount", safeAutoFixAttemptCount,
                         "acknowledgeOnlyCount", acknowledgeOnlyCount,
                         "needsHumanCount", needsHumanCount,
                         "repeatDetected", repeatDetected
@@ -474,6 +527,14 @@ public class Step6PrReviewPollingService {
 
     private String safeText(Object value) {
         return value == null ? "" : String.valueOf(value);
+    }
+
+    private String shortSha(String sha) {
+        if (!StringUtils.hasText(sha)) {
+            return "unknown";
+        }
+        String trimmed = sha.trim();
+        return trimmed.length() <= 8 ? trimmed : trimmed.substring(0, 8);
     }
 
     enum Classification {

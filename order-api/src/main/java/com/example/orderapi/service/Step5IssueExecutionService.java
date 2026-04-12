@@ -1,5 +1,7 @@
 package com.example.orderapi.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -37,6 +39,7 @@ public class Step5IssueExecutionService {
     private final long timeoutSeconds;
     private final GitHubIssueClientService gitHubIssueClientService;
     private final FileAuditLogService fileAuditLogService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
     private final ExecutorService executorService = Executors.newSingleThreadExecutor();
     private final Set<Long> inFlightIssues = ConcurrentHashMap.newKeySet();
     private final AtomicReference<String> pausedReason = new AtomicReference<>("");
@@ -62,6 +65,13 @@ public class Step5IssueExecutionService {
     }
 
     public record ExecutionAvailability(boolean available, String reason) {
+    }
+
+    public record Step6FixExecutionResult(boolean changed,
+                                          String commitSha,
+                                          String branch,
+                                          String output,
+                                          String error) {
     }
 
     public void setExecutionPaused(boolean paused, String reason) {
@@ -191,6 +201,89 @@ public class Step5IssueExecutionService {
             safeAudit("approved-issue-execution-failed", issueNumber, Map.of(), ex.getMessage());
             resetIssueForRetry(issueNumber, "execution-service-exception");
         }
+    }
+
+    public Step6FixExecutionResult executeStep6SafeFix(long prNumber, String branch, Map<String, Object> fixPacket) {
+        if (prNumber <= 0 || !StringUtils.hasText(branch) || fixPacket == null || fixPacket.isEmpty()) {
+            return new Step6FixExecutionResult(false, "", branch, "", "invalid-step6-fix-request");
+        }
+
+        ExecutionAvailability availability = checkExecutionAvailability();
+        if (!availability.available()) {
+            return new Step6FixExecutionResult(false, "", branch, "", "execution-unavailable:" + availability.reason());
+        }
+        Path repoRoot = resolveCurrentRepoRoot();
+        Path scriptPath = resolveScriptPath(repoRoot);
+        if (scriptPath == null || !scriptPath.getFileName().toString().equals("auto_issue_executor.py")) {
+            return new Step6FixExecutionResult(false, "", branch, "", "missing-script");
+        }
+
+        String packetJson;
+        try {
+            packetJson = objectMapper.writeValueAsString(fixPacket);
+        } catch (Exception ex) {
+            return new Step6FixExecutionResult(false, "", branch, "", "packet-serialization-failed:" + ex.getMessage());
+        }
+
+        List<String> command = new ArrayList<>();
+        command.add(pythonCommand);
+        command.add(scriptPath.toString());
+        command.add("--owner");
+        command.add(owner.trim());
+        command.add("--repo");
+        command.add(repo.trim());
+        command.add("--step6-pr-number");
+        command.add(String.valueOf(prNumber));
+        command.add("--step6-fix-on-branch");
+        command.add(branch.trim());
+        command.add("--step6-fix-packet-json");
+        command.add(packetJson);
+        command.add("--once");
+
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        processBuilder.redirectErrorStream(true);
+        processBuilder.directory(repoRoot.toFile());
+        processBuilder.environment().put("ALLOW_AUTO_MERGE", "false");
+
+        try {
+            Process process = processBuilder.start();
+            boolean completed = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+            if (!completed) {
+                process.destroyForcibly();
+                return new Step6FixExecutionResult(false, "", branch, "", "step6-fix-timeout");
+            }
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            int exitCode = process.exitValue();
+            if (exitCode != 0) {
+                return new Step6FixExecutionResult(false, "", branch, output, "step6-fix-command-failed");
+            }
+
+            JsonNode parsed = parseResultJson(output);
+            JsonNode resultNode = parsed.path("step6FixResult");
+            boolean changed = resultNode.path("changed").asBoolean(false);
+            String commitSha = resultNode.path("commitSha").asText("");
+            return new Step6FixExecutionResult(changed, commitSha, branch, output, "");
+        } catch (IOException | InterruptedException ex) {
+            if (ex instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            return new Step6FixExecutionResult(false, "", branch, "", "step6-fix-exception:" + ex.getMessage());
+        }
+    }
+
+    private JsonNode parseResultJson(String output) {
+        try {
+            String[] lines = output == null ? new String[0] : output.split("\\R");
+            for (int i = lines.length - 1; i >= 0; i--) {
+                String line = lines[i] == null ? "" : lines[i].trim();
+                if (line.startsWith("{") && line.endsWith("}")) {
+                    return objectMapper.readTree(line);
+                }
+            }
+        } catch (Exception ignored) {
+            // fall through
+        }
+        return objectMapper.createObjectNode();
     }
 
     private void safeAudit(String operation, long issueNumber, Map<String, Object> metadata, String error) {

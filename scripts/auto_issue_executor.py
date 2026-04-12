@@ -565,6 +565,99 @@ def commit_and_push(token: str, branch: str, issue_number: int, changed_files: l
     return message
 
 
+def ensure_clean_for_step6(files: list[str]) -> None:
+    for rel in files:
+        run_cmd("git", "restore", "--staged", "--worktree", "--source=HEAD", "--", rel, check=False)
+    status_lines = [line.strip() for line in run_cmd("git", "status", "--porcelain").stdout.splitlines() if line.strip()]
+    relevant_paths = set(files)
+    for line in status_lines:
+        path_part = line[3:] if len(line) > 3 else ""
+        candidate_paths = [segment.strip() for segment in path_part.split("->")]
+        for path in candidate_paths:
+            if not path:
+                continue
+            if path == "order-api/audit/intake-chat.jsonl" or "__pycache__/" in path:
+                continue
+            if path in relevant_paths:
+                raise RuntimeError("Working tree has changes in Step 6 target files; aborting fix execution.")
+
+
+def apply_step6_fix_packet(packet: dict[str, Any]) -> list[str]:
+    action = str(packet.get("action", "")).strip().lower()
+    if action != "replace-text":
+        raise RuntimeError(f"Unsupported Step 6 action: {action}")
+
+    from_text = str(packet.get("fromText", ""))
+    to_text = str(packet.get("toText", ""))
+    if not from_text or from_text == to_text:
+        raise RuntimeError("Invalid Step 6 replace-text packet.")
+
+    files_raw = packet.get("files")
+    if not isinstance(files_raw, list) or not files_raw:
+        raise RuntimeError("Step 6 packet must include non-empty files list.")
+    files = [str(item).strip() for item in files_raw if str(item).strip()]
+    if not files:
+        raise RuntimeError("Step 6 packet files list is empty.")
+
+    changed: list[str] = []
+    for rel in files:
+        path = REPO_ROOT / rel
+        if not path.exists() or not path.is_file():
+            continue
+        original = path.read_text(encoding="utf-8")
+        updated = original.replace(from_text, to_text)
+        if updated != original:
+            path.write_text(updated, encoding="utf-8")
+            changed.append(rel)
+    return changed
+
+
+def run_step6_fix(owner: str, repo: str, token: str, pr_number: int, branch: str, packet: dict[str, Any]) -> dict[str, Any]:
+    files_raw = packet.get("files")
+    files = [str(item).strip() for item in files_raw] if isinstance(files_raw, list) else []
+    branch = branch.strip()
+    if not branch:
+        raise RuntimeError("Missing Step 6 target branch.")
+
+    run_cmd("git", "fetch", "--all", "--prune")
+    run_cmd("git", "checkout", branch)
+    run_cmd("git", "pull", "--ff-only", "origin", branch)
+    ensure_clean_for_step6(files)
+
+    changed_files = apply_step6_fix_packet(packet)
+    if not changed_files:
+        return {
+            "changed": False,
+            "branch": branch,
+            "changedFiles": [],
+            "commitSha": "",
+        }
+
+    ensure_git_identity()
+    run_cmd("git", "add", "--", *changed_files)
+    if run_cmd("git", "diff", "--cached", "--quiet", check=False).returncode == 0:
+        return {
+            "changed": False,
+            "branch": branch,
+            "changedFiles": [],
+            "commitSha": "",
+        }
+
+    finding_id = str(packet.get("findingId", "")).strip()
+    message = f"PR #{pr_number}: apply Step 6 safe fix"
+    if finding_id:
+        message = f"PR #{pr_number}: apply Step 6 safe fix ({finding_id})"
+    run_cmd("git", "commit", "-m", message)
+    commit_sha = run_cmd("git", "rev-parse", "HEAD").stdout.strip()
+    push_branch(token, branch)
+    return {
+        "changed": True,
+        "branch": branch,
+        "changedFiles": changed_files,
+        "commitSha": commit_sha,
+    }
+
+
 def create_pr(owner: str, repo: str, token: str, branch: str, scaffold: dict[str, Any]) -> tuple[int, str]:
     env_owner, env_repo = repository_from_env()
     resolved_owner = owner or env_owner
@@ -861,6 +954,9 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Allow direct --issue execution even when ai-in-progress is already set.",
     )
+    parser.add_argument("--step6-pr-number", type=int, default=None, help="Step 6: PR number for safe fix execution.")
+    parser.add_argument("--step6-fix-on-branch", default="", help="Step 6: existing PR branch name to update.")
+    parser.add_argument("--step6-fix-packet-json", default="", help="Step 6: JSON packet describing safe fix action.")
     return parser.parse_args()
 
 
@@ -870,6 +966,38 @@ def main() -> int:
     if not token:
         print("Missing APP_GITHUB_TOKEN.", file=sys.stderr)
         return 1
+
+    if args.step6_pr_number is not None:
+        try:
+            if not args.step6_fix_packet_json.strip():
+                raise RuntimeError("Missing Step 6 fix packet JSON.")
+            packet = json.loads(args.step6_fix_packet_json)
+            if not isinstance(packet, dict):
+                raise RuntimeError("Step 6 fix packet must be a JSON object.")
+            result = run_step6_fix(args.owner, args.repo, token, int(args.step6_pr_number), args.step6_fix_on_branch, packet)
+            log_step5_event(
+                "step6-safe-fix-executed",
+                issue_number=None,
+                metadata={
+                    "prNumber": int(args.step6_pr_number),
+                    "branch": result.get("branch", ""),
+                    "changed": bool(result.get("changed", False)),
+                    "changedFiles": result.get("changedFiles", []),
+                    "commitSha": result.get("commitSha", ""),
+                },
+            )
+            print(json.dumps({"step6FixResult": result}, ensure_ascii=True))
+            return 0
+        except Exception as exc:
+            error = str(exc)
+            log_step5_event(
+                "step6-safe-fix-failed",
+                issue_number=None,
+                metadata={"prNumber": args.step6_pr_number, "branch": args.step6_fix_on_branch},
+                error=error,
+            )
+            print(error, file=sys.stderr)
+            return 1
 
     while True:
         try:
