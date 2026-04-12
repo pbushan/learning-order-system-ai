@@ -355,12 +355,27 @@ public class GitHubIssueClientService {
             item.put("title", pullNode.path("title").asText(""));
             item.put("body", pullNode.path("body").asText(""));
             item.put("state", pullNode.path("state").asText(""));
-            item.put("url", pullNode.path("url").asText(""));
-            item.put("headRefName", pullNode.path("headRefName").asText(""));
-            item.put("headRefOid", pullNode.path("headRefOid").asText(""));
+            String url = pullNode.path("url").asText("");
+            if (!StringUtils.hasText(url)) {
+                url = pullNode.path("html_url").asText("");
+            }
+            item.put("url", url);
+            String headRefName = pullNode.path("headRefName").asText("");
+            if (!StringUtils.hasText(headRefName)) {
+                headRefName = pullNode.path("head").path("ref").asText("");
+            }
+            item.put("headRefName", headRefName);
+            String headRefOid = pullNode.path("headRefOid").asText("");
+            if (!StringUtils.hasText(headRefOid)) {
+                headRefOid = pullNode.path("head").path("sha").asText("");
+            }
+            item.put("headRefOid", headRefOid);
             String author = pullNode.path("author").path("login").asText("");
             if (!StringUtils.hasText(author)) {
                 author = pullNode.path("author").asText("");
+            }
+            if (!StringUtils.hasText(author)) {
+                author = pullNode.path("user").path("login").asText("");
             }
             item.put("author", author);
             pulls.add(item);
@@ -379,19 +394,36 @@ public class GitHubIssueClientService {
         }
 
         JsonNode payload = readPullRequestViaMcp("get_reviews", pullNumber);
-        if (!payload.isArray()) {
+        JsonNode source = payload;
+        if (payload.isObject() && payload.path("reviews").isArray()) {
+            source = payload.path("reviews");
+        }
+        if (!source.isArray()) {
             return List.of();
         }
 
         List<Map<String, Object>> reviews = new ArrayList<>();
-        for (JsonNode reviewNode : payload) {
+        for (JsonNode reviewNode : source) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", reviewNode.path("id").asText(""));
-            item.put("author", reviewNode.path("author").path("login").asText(""));
+            String author = reviewNode.path("author").path("login").asText("");
+            if (!StringUtils.hasText(author)) {
+                author = reviewNode.path("user").path("login").asText("");
+            }
+            item.put("author", author);
             item.put("state", reviewNode.path("state").asText(""));
-            item.put("body", reviewNode.path("body").asText(""));
-            item.put("url", reviewNode.path("url").asText(""));
-            item.put("submittedAt", reviewNode.path("submittedAt").asText(""));
+            String body = extractCommentBody(reviewNode);
+            item.put("body", body);
+            String url = reviewNode.path("url").asText("");
+            if (!StringUtils.hasText(url)) {
+                url = reviewNode.path("html_url").asText("");
+            }
+            item.put("url", url);
+            String submittedAt = reviewNode.path("submittedAt").asText("");
+            if (!StringUtils.hasText(submittedAt)) {
+                submittedAt = reviewNode.path("submitted_at").asText("");
+            }
+            item.put("submittedAt", submittedAt);
             reviews.add(item);
         }
         return reviews;
@@ -410,25 +442,70 @@ public class GitHubIssueClientService {
         JsonNode payload = readPullRequestViaMcp("get_review_comments", pullNumber);
         List<Map<String, Object>> comments = new ArrayList<>();
         JsonNode threads = payload.path("review_threads");
-        if (!threads.isArray()) {
+        if (threads.isArray()) {
+            for (JsonNode thread : threads) {
+                JsonNode threadComments = thread.path("comments");
+                if (!threadComments.isArray()) {
+                    continue;
+                }
+                for (JsonNode commentNode : threadComments) {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("id", commentNode.path("id").asText(""));
+                    String author = commentNode.path("author").path("login").asText("");
+                    if (!StringUtils.hasText(author)) {
+                        author = commentNode.path("user").path("login").asText("");
+                    }
+                    item.put("author", author);
+                    String body = extractCommentBody(commentNode);
+                    item.put("body", body);
+                    String url = commentNode.path("url").asText("");
+                    if (!StringUtils.hasText(url)) {
+                        url = commentNode.path("html_url").asText("");
+                    }
+                    item.put("url", url);
+                    item.put("path", commentNode.path("path").asText(""));
+                    item.put("line", commentNode.path("line").asInt(0));
+                    String createdAt = commentNode.path("createdAt").asText("");
+                    if (!StringUtils.hasText(createdAt)) {
+                        createdAt = commentNode.path("created_at").asText("");
+                    }
+                    item.put("createdAt", createdAt);
+                    comments.add(item);
+                }
+            }
             return comments;
         }
-        for (JsonNode thread : threads) {
-            JsonNode threadComments = thread.path("comments");
-            if (!threadComments.isArray()) {
-                continue;
+
+        JsonNode directComments = payload;
+        if (payload.isObject() && payload.path("comments").isArray()) {
+            directComments = payload.path("comments");
+        }
+        if (!directComments.isArray()) {
+            return comments;
+        }
+        for (JsonNode commentNode : directComments) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", commentNode.path("id").asText(""));
+            String author = commentNode.path("author").path("login").asText("");
+            if (!StringUtils.hasText(author)) {
+                author = commentNode.path("user").path("login").asText("");
             }
-            for (JsonNode commentNode : threadComments) {
-                Map<String, Object> item = new LinkedHashMap<>();
-                item.put("id", commentNode.path("id").asText(""));
-                item.put("author", commentNode.path("author").path("login").asText(""));
-                item.put("body", commentNode.path("body").asText(""));
-                item.put("url", commentNode.path("url").asText(""));
-                item.put("path", commentNode.path("path").asText(""));
-                item.put("line", commentNode.path("line").asInt(0));
-                item.put("createdAt", commentNode.path("createdAt").asText(""));
-                comments.add(item);
+            item.put("author", author);
+            String body = extractCommentBody(commentNode);
+            item.put("body", body);
+            String url = commentNode.path("url").asText("");
+            if (!StringUtils.hasText(url)) {
+                url = commentNode.path("html_url").asText("");
             }
+            item.put("url", url);
+            item.put("path", commentNode.path("path").asText(""));
+            item.put("line", commentNode.path("line").asInt(0));
+            String createdAt = commentNode.path("createdAt").asText("");
+            if (!StringUtils.hasText(createdAt)) {
+                createdAt = commentNode.path("created_at").asText("");
+            }
+            item.put("createdAt", createdAt);
+            comments.add(item);
         }
         return comments;
     }
@@ -450,21 +527,58 @@ public class GitHubIssueClientService {
         arguments.put("issue_number", pullNumber);
         JsonNode result = callMcpTool("issue_read", arguments);
         JsonNode payload = parseJson(extractMcpContentText(result));
-        if (!payload.isArray()) {
+        JsonNode source = payload;
+        if (payload.isObject() && payload.path("comments").isArray()) {
+            source = payload.path("comments");
+        }
+        if (!source.isArray()) {
             return List.of();
         }
 
         List<Map<String, Object>> comments = new ArrayList<>();
-        for (JsonNode commentNode : payload) {
+        for (JsonNode commentNode : source) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", commentNode.path("id").asText(""));
-            item.put("author", commentNode.path("author").path("login").asText(""));
-            item.put("body", commentNode.path("body").asText(""));
-            item.put("url", commentNode.path("url").asText(""));
-            item.put("createdAt", commentNode.path("createdAt").asText(""));
+            String author = commentNode.path("author").path("login").asText("");
+            if (!StringUtils.hasText(author)) {
+                author = commentNode.path("user").path("login").asText("");
+            }
+            item.put("author", author);
+            String body = extractCommentBody(commentNode);
+            item.put("body", body);
+            String url = commentNode.path("url").asText("");
+            if (!StringUtils.hasText(url)) {
+                url = commentNode.path("html_url").asText("");
+            }
+            item.put("url", url);
+            String createdAt = commentNode.path("createdAt").asText("");
+            if (!StringUtils.hasText(createdAt)) {
+                createdAt = commentNode.path("created_at").asText("");
+            }
+            item.put("createdAt", createdAt);
             comments.add(item);
         }
         return comments;
+    }
+
+    private String extractCommentBody(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return "";
+        }
+        String body = node.path("body").asText("");
+        if (!StringUtils.hasText(body)) {
+            body = node.path("bodyText").asText("");
+        }
+        if (!StringUtils.hasText(body)) {
+            body = node.path("content").asText("");
+        }
+        if (!StringUtils.hasText(body)) {
+            body = node.path("text").asText("");
+        }
+        if (!StringUtils.hasText(body)) {
+            body = node.toString();
+        }
+        return body;
     }
 
     public void addPullRequestComment(long pullNumber, String body) {

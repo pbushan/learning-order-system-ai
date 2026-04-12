@@ -70,7 +70,7 @@ This repo now includes an end-to-end portfolio workflow from intake to GitHub is
   - [`scripts/prepare_pr_scaffold.py`](scripts/prepare_pr_scaffold.py)
 - Step 5 audit events are written append-only to JSONL.
 
-### Step 6: PR review polling + reconciliation + terminal handoff
+### Step 6A: PR review polling + reconciliation + terminal handoff
 
 - Runtime polling service:
   - [`Step6PrReviewPollingService`](order-api/src/main/java/com/example/orderapi/service/Step6PrReviewPollingService.java)
@@ -81,6 +81,8 @@ This repo now includes an end-to-end portfolio workflow from intake to GitHub is
   - [`scripts/classify_review_comments.py`](scripts/classify_review_comments.py)
   - [`scripts/review_response_templates.py`](scripts/review_response_templates.py)
   - [`scripts/reconcile_after_merge.py`](scripts/reconcile_after_merge.py)
+
+`Step 6A` was implemented in PR #112 and intentionally covered polling/reconciliation/terminal handoff without a full branch file-edit commit/push fix loop.
 
 ### Step 5.5: PR creation via MCP
 
@@ -146,11 +148,11 @@ Do **NOT** use a classic PAT for `APP_GITHUB_TOKEN`.
   - Step 5 PR creation via MCP tool call (`create_pull_request`)
   - Step 6 PR listing + review/comment ingestion + reconciliation comments
 
-## Step 6: PR Review Polling and Reconciliation
+## Step 6A: PR Review Polling and Reconciliation
 
 ### Purpose
 
-Step 6 provides a bounded PR review loop for agent-managed PRs:
+Step 6A provides a bounded PR review loop for agent-managed PRs:
 - polls eligible open PRs
 - ingests human/bot review signals
 - applies only conservative safe follow-ups
@@ -203,7 +205,7 @@ PR opened (agent-managed)
 
 ### Final terminal behavior
 
-Step 6 posts a final terminal handoff comment that states:
+Step 6A posts a final terminal handoff comment that states:
 - polling has stopped for that PR
 - safe automated reconciliation is complete for the bounded loop
 - remaining non-trivial concerns require human review
@@ -234,7 +236,7 @@ Step 6 posts a final terminal handoff comment that states:
 - `APP_STEP6_MAX_SELF_REVIEW_ATTEMPTS=1`
 - `APP_STEP6_WAIT_CYCLES_BEFORE_SELF_REVIEW=2`
 
-### Step 6 testing notes
+### Step 6A testing notes
 
 Validated locally in Docker runtime by:
 - starting compose stack with MCP + order-api
@@ -243,6 +245,26 @@ Validated locally in Docker runtime by:
 - verifying review/comment ingestion through MCP methods
 - verifying self-review fallback when no external feedback is present
 - verifying terminal handoff comment + `step6-terminal` label stop reprocessing
+
+## Step 6B: PR review fix execution loop
+
+Step 6B extends Step 6A with conservative follow-up code execution for `SAFE_AUTO_FIX` findings.
+
+Runtime call chain:
+
+```text
+Step6PrReviewPollingService
+  -> build safe fix packet
+  -> Step5IssueExecutionService.executeStep6SafeFix(...)
+  -> scripts/auto_issue_executor.py (Step 6 mode)
+  -> checkout same PR branch -> apply deterministic text fix -> commit -> push
+  -> Step 6 reconciliation comment with actual changed commit
+```
+
+Step 6B remains conservative:
+- only deterministic safe fix packets are executed
+- no auto-approval and no auto-merge
+- terminal handoff still marks the stop boundary for polling
 
 ---
 
