@@ -285,6 +285,7 @@ def create_or_reuse_branch(branch: str, base: str) -> None:
 
 
 def push_branch(token: str, branch: str) -> None:
+    token = (token or "").strip()
     direct_push = run_cmd("git", "push", "-u", "origin", branch, check=False)
     if direct_push.returncode == 0:
         return
@@ -298,14 +299,20 @@ def push_branch(token: str, branch: str) -> None:
         detail = sanitize_git_error((direct_push.stderr or "").strip() or (direct_push.stdout or "").strip(), token)
         raise RuntimeError(f"git push failed (unsupported remote for credential fallback; primary={detail})")
     try:
-        with tempfile.TemporaryDirectory(prefix="step5_git_cred_") as tmp_home:
+        with tempfile.TemporaryDirectory(prefix="step5_git_cred_") as tmp_dir:
+            cred_file = Path(tmp_dir) / ".git-credentials"
+            cred_file.touch(mode=0o600, exist_ok=True)
+            os.chmod(cred_file, 0o600)
+
             env = os.environ.copy()
             env["GIT_TERMINAL_PROMPT"] = "0"
-            env["HOME"] = tmp_home
+            env["GIT_CONFIG_COUNT"] = "1"
+            env["GIT_CONFIG_KEY_0"] = "credential.helper"
+            env["GIT_CONFIG_VALUE_0"] = f"store --file={cred_file}"
 
             credential_input = f"protocol=https\nhost={host}\nusername=x-access-token\npassword={token}\n\n"
             approve_proc = subprocess.run(
-                ["git", "-c", "credential.helper=store", "credential", "approve"],
+                ["git", "credential", "approve"],
                 cwd=str(REPO_ROOT),
                 text=True,
                 input=credential_input,
@@ -316,9 +323,11 @@ def push_branch(token: str, branch: str) -> None:
             if approve_proc.returncode != 0:
                 detail = sanitize_git_error((approve_proc.stderr or "").strip() or (approve_proc.stdout or "").strip(), token)
                 raise RuntimeError(f"failed to stage temporary credentials: {detail}")
+            if not cred_file.exists() or cred_file.stat().st_size == 0:
+                raise RuntimeError("failed to stage temporary credentials: credential store is empty")
 
             token_push = subprocess.run(
-                ["git", "-c", "credential.helper=store", "push", "-u", "origin", branch],
+                ["git", "push", "-u", "origin", branch],
                 cwd=str(REPO_ROOT),
                 text=True,
                 capture_output=True,
@@ -346,6 +355,7 @@ def sanitize_git_error(raw: str, token: str) -> str:
     text = re.sub(r"github_pat_[A-Za-z0-9_]+", "***", text)
     text = re.sub(r"(?i)(authorization:\s*(?:bearer|token)\s+)[^\s]+", r"\1***", text)
     text = re.sub(r"(?i)(password=)[^\s]+", r"\1***", text)
+    text = re.sub(r"(?i)(token=)[^\s&]+", r"\1***", text)
     text = re.sub(r"https://[^@\s]+@", "https://***@", text)
     return text
 
@@ -354,7 +364,7 @@ def parse_remote_host(remote_url: str) -> str:
     value = (remote_url or "").strip()
     if not value:
         return ""
-    if value.startswith("http://") or value.startswith("https://"):
+    if value.startswith("http://") or value.startswith("https://") or value.startswith("ssh://"):
         return urllib.parse.urlparse(value).hostname or ""
     ssh_match = re.match(r"^[^@]+@([^:]+):.*$", value)
     if ssh_match:
