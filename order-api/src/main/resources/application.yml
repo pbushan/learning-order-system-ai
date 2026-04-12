@@ -44,3 +44,10 @@ app:
     repository: ${APP_GITHUB_REPOSITORY:pbushan/learning-order-system-ai}
     owner: pbushan
     repo: learning-order-system-ai
+  step6:
+    enabled: ${APP_STEP6_ENABLED:true}
+    poll-interval-ms: ${APP_STEP6_POLL_INTERVAL_MS:30000}
+    initial-delay-ms: ${APP_STEP6_INITIAL_DELAY_MS:10000}
+    max-cycles-per-pr: ${APP_STEP6_MAX_CYCLES_PER_PR:3}
+    max-self-review-attempts: ${APP_STEP6_MAX_SELF_REVIEW_ATTEMPTS:1}
+    wait-cycles-before-self-review: ${APP_STEP6_WAIT_CYCLES_BEFORE_SELF_REVIEW:2}

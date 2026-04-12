@@ -70,14 +70,17 @@ This repo now includes an end-to-end portfolio workflow from intake to GitHub is
   - [`scripts/prepare_pr_scaffold.py`](scripts/prepare_pr_scaffold.py)
 - Step 5 audit events are written append-only to JSONL.
 
-### Step 6: PR review intake/reply scaffolding
+### Step 6: PR review polling + reconciliation + terminal handoff
 
-- Review retrieval/classification/template helpers:
+- Runtime polling service:
+  - [`Step6PrReviewPollingService`](order-api/src/main/java/com/example/orderapi/service/Step6PrReviewPollingService.java)
+- GitHub MCP-backed PR review/comment operations are exposed through:
+  - [`GitHubIssueClientService`](order-api/src/main/java/com/example/orderapi/service/GitHubIssueClientService.java)
+- Existing Step 6 helper scripts are retained for ad-hoc/manual use:
   - [`scripts/fetch_pr_review_feedback.py`](scripts/fetch_pr_review_feedback.py)
   - [`scripts/classify_review_comments.py`](scripts/classify_review_comments.py)
   - [`scripts/review_response_templates.py`](scripts/review_response_templates.py)
   - [`scripts/reconcile_after_merge.py`](scripts/reconcile_after_merge.py)
-- Step 6 lifecycle audit entries are append-only via [`scripts/step6_audit_log.py`](scripts/step6_audit_log.py).
 
 ### Step 5.5: PR creation via MCP
 
@@ -100,7 +103,7 @@ This repo now includes an end-to-end portfolio workflow from intake to GitHub is
 ### Architecture (implemented)
 
 ```text
-Step 5 scheduler/executor (order-api + auto_issue_executor.py)
+Step 5 scheduler/executor + Step 6 PR polling (order-api + auto_issue_executor.py)
   -> GitHub MCP tool server (github-mcp container)
   -> GitHub API
 ```
@@ -141,6 +144,105 @@ Do **NOT** use a classic PAT for `APP_GITHUB_TOKEN`.
   - issue label updates
   - approved/in-progress issue discovery
   - Step 5 PR creation via MCP tool call (`create_pull_request`)
+  - Step 6 PR listing + review/comment ingestion + reconciliation comments
+
+## Step 6: PR Review Polling and Reconciliation
+
+### Purpose
+
+Step 6 provides a bounded PR review loop for agent-managed PRs:
+- polls eligible open PRs
+- ingests human/bot review signals
+- applies only conservative safe follow-ups
+- posts reconciliation + terminal handoff comments
+- stops polling explicitly (no infinite loop behavior)
+
+### Runtime/auth separation
+
+- Application runtime path:
+  - `APP_GITHUB_TOKEN` -> GitHub MCP -> GitHub
+  - used by Step 5 and Step 6 runtime services/scripts
+- Local Codex path:
+  - `CODEX_GITHUB_TOKEN` only
+  - unchanged by Step 6
+- Step 6 does not pass `CODEX_GITHUB_TOKEN` into containers.
+
+### Runtime flow
+
+```text
+PR opened (agent-managed)
+-> Step 6 waits/polls for review feedback
+-> If review/comment exists: ingest + classify + reconcile
+-> If no feedback after wait window: post lightweight self-review
+-> Apply conservative safe follow-up only when deterministic
+-> Post reconciliation comment
+-> Post terminal handoff comment + terminal label
+-> Stop polling this PR
+-> Human reviews and merges
+```
+
+### Review sources ingested
+
+- review summaries (`pull_request_read method=get_reviews`)
+- review comments/threads (`pull_request_read method=get_review_comments`)
+- top-level PR comments (`issue_read method=get_comments` on PR issue number)
+- Step 6 self-review comments (explicit marker)
+
+### Guardrails
+
+- max cycles per PR (`APP_STEP6_MAX_CYCLES_PER_PR`, default `3`)
+- max self-review attempts (`APP_STEP6_MAX_SELF_REVIEW_ATTEMPTS`, default `1`)
+- processed item tracking (review/comment IDs)
+- no-op stop when no actionable changes are found
+- repeat-finding detection escalation to human review
+- terminal marker label (`step6-terminal`) prevents re-polling
+- open-PR only polling
+- conservative classification bias:
+  - ambiguous/risky findings -> `NEEDS_HUMAN`
+- no auto-approval and no auto-merge in Step 6
+
+### Final terminal behavior
+
+Step 6 posts a final terminal handoff comment that states:
+- polling has stopped for that PR
+- safe automated reconciliation is complete for the bounded loop
+- remaining non-trivial concerns require human review
+- PR is ready for human merge review when appropriate
+
+### What Step 6 automates
+
+- PR polling for agent-managed open PRs
+- review/comment ingestion and normalization
+- deterministic finding classification
+- conservative safe follow-up actions
+- reconciliation summary comment
+- explicit terminal handoff and stop marker
+
+### What Step 6 does not automate
+
+- infinite monitoring
+- auto-merge
+- auto-approval
+- replacement of human review judgment
+- broad autonomous refactors
+
+### Step 6 config
+
+- `APP_STEP6_ENABLED=true`
+- `APP_STEP6_POLL_INTERVAL_MS=30000`
+- `APP_STEP6_MAX_CYCLES_PER_PR=3`
+- `APP_STEP6_MAX_SELF_REVIEW_ATTEMPTS=1`
+- `APP_STEP6_WAIT_CYCLES_BEFORE_SELF_REVIEW=2`
+
+### Step 6 testing notes
+
+Validated locally in Docker runtime by:
+- starting compose stack with MCP + order-api
+- confirming Step 5 PR creation still works through MCP
+- running Step 6 poller against open agent-managed PRs
+- verifying review/comment ingestion through MCP methods
+- verifying self-review fallback when no external feedback is present
+- verifying terminal handoff comment + `step6-terminal` label stop reprocessing
 
 ---
 

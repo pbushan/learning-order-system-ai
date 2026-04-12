@@ -19,10 +19,12 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -321,6 +323,215 @@ public class GitHubIssueClientService {
         return issues;
     }
 
+    public List<Map<String, Object>> listOpenPullRequests() {
+        validateTokenConfigured();
+        validateRepositoryConfigured();
+        if (!useMcpProvider()) {
+            throw new IllegalStateException("Step 6 pull request polling requires app.github.provider=mcp");
+        }
+
+        Map<String, Object> arguments = new LinkedHashMap<>();
+        arguments.put("owner", owner.trim());
+        arguments.put("repo", repo.trim());
+        arguments.put("state", "open");
+        arguments.put("perPage", 100);
+        JsonNode result = callMcpTool("list_pull_requests", arguments);
+        JsonNode payload = parseJson(extractMcpContentText(result));
+        JsonNode pullRequestsNode = payload;
+        if (!pullRequestsNode.isArray()) {
+            pullRequestsNode = payload.path("pullRequests");
+        }
+        if (!pullRequestsNode.isArray()) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> pulls = new ArrayList<>();
+        for (JsonNode pullNode : pullRequestsNode) {
+            if (pullNode == null || pullNode.isNull()) {
+                continue;
+            }
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("number", pullNode.path("number").asLong(0));
+            item.put("title", pullNode.path("title").asText(""));
+            item.put("body", pullNode.path("body").asText(""));
+            item.put("state", pullNode.path("state").asText(""));
+            item.put("url", pullNode.path("url").asText(""));
+            item.put("headRefName", pullNode.path("headRefName").asText(""));
+            item.put("headRefOid", pullNode.path("headRefOid").asText(""));
+            String author = pullNode.path("author").path("login").asText("");
+            if (!StringUtils.hasText(author)) {
+                author = pullNode.path("author").asText("");
+            }
+            item.put("author", author);
+            pulls.add(item);
+        }
+        return pulls;
+    }
+
+    public List<Map<String, Object>> getPullRequestReviews(long pullNumber) {
+        validateTokenConfigured();
+        validateRepositoryConfigured();
+        if (pullNumber <= 0) {
+            return List.of();
+        }
+        if (!useMcpProvider()) {
+            throw new IllegalStateException("Step 6 pull request review ingestion requires app.github.provider=mcp");
+        }
+
+        JsonNode payload = readPullRequestViaMcp("get_reviews", pullNumber);
+        if (!payload.isArray()) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> reviews = new ArrayList<>();
+        for (JsonNode reviewNode : payload) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", reviewNode.path("id").asText(""));
+            item.put("author", reviewNode.path("author").path("login").asText(""));
+            item.put("state", reviewNode.path("state").asText(""));
+            item.put("body", reviewNode.path("body").asText(""));
+            item.put("url", reviewNode.path("url").asText(""));
+            item.put("submittedAt", reviewNode.path("submittedAt").asText(""));
+            reviews.add(item);
+        }
+        return reviews;
+    }
+
+    public List<Map<String, Object>> getPullRequestReviewComments(long pullNumber) {
+        validateTokenConfigured();
+        validateRepositoryConfigured();
+        if (pullNumber <= 0) {
+            return List.of();
+        }
+        if (!useMcpProvider()) {
+            throw new IllegalStateException("Step 6 review comment ingestion requires app.github.provider=mcp");
+        }
+
+        JsonNode payload = readPullRequestViaMcp("get_review_comments", pullNumber);
+        List<Map<String, Object>> comments = new ArrayList<>();
+        JsonNode threads = payload.path("review_threads");
+        if (!threads.isArray()) {
+            return comments;
+        }
+        for (JsonNode thread : threads) {
+            JsonNode threadComments = thread.path("comments");
+            if (!threadComments.isArray()) {
+                continue;
+            }
+            for (JsonNode commentNode : threadComments) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("id", commentNode.path("id").asText(""));
+                item.put("author", commentNode.path("author").path("login").asText(""));
+                item.put("body", commentNode.path("body").asText(""));
+                item.put("url", commentNode.path("url").asText(""));
+                item.put("path", commentNode.path("path").asText(""));
+                item.put("line", commentNode.path("line").asInt(0));
+                item.put("createdAt", commentNode.path("createdAt").asText(""));
+                comments.add(item);
+            }
+        }
+        return comments;
+    }
+
+    public List<Map<String, Object>> getPullRequestIssueComments(long pullNumber) {
+        validateTokenConfigured();
+        validateRepositoryConfigured();
+        if (pullNumber <= 0) {
+            return List.of();
+        }
+        if (!useMcpProvider()) {
+            throw new IllegalStateException("Step 6 issue comment ingestion requires app.github.provider=mcp");
+        }
+
+        Map<String, Object> arguments = new LinkedHashMap<>();
+        arguments.put("method", "get_comments");
+        arguments.put("owner", owner.trim());
+        arguments.put("repo", repo.trim());
+        arguments.put("issue_number", pullNumber);
+        JsonNode result = callMcpTool("issue_read", arguments);
+        JsonNode payload = parseJson(extractMcpContentText(result));
+        if (!payload.isArray()) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> comments = new ArrayList<>();
+        for (JsonNode commentNode : payload) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", commentNode.path("id").asText(""));
+            item.put("author", commentNode.path("author").path("login").asText(""));
+            item.put("body", commentNode.path("body").asText(""));
+            item.put("url", commentNode.path("url").asText(""));
+            item.put("createdAt", commentNode.path("createdAt").asText(""));
+            comments.add(item);
+        }
+        return comments;
+    }
+
+    public void addPullRequestComment(long pullNumber, String body) {
+        validateTokenConfigured();
+        validateRepositoryConfigured();
+        if (pullNumber <= 0) {
+            throw new IllegalArgumentException("pullNumber must be > 0");
+        }
+        if (!StringUtils.hasText(body)) {
+            throw new IllegalArgumentException("body is required");
+        }
+
+        if (!useMcpProvider()) {
+            throw new IllegalStateException("Step 6 pull request commenting requires app.github.provider=mcp");
+        }
+
+        Map<String, Object> arguments = new LinkedHashMap<>();
+        arguments.put("owner", owner.trim());
+        arguments.put("repo", repo.trim());
+        arguments.put("issue_number", pullNumber);
+        arguments.put("body", body.trim());
+        callMcpTool("add_issue_comment", arguments);
+    }
+
+    public void updatePullRequest(long pullNumber, String title, String body) {
+        validateTokenConfigured();
+        validateRepositoryConfigured();
+        if (pullNumber <= 0) {
+            throw new IllegalArgumentException("pullNumber must be > 0");
+        }
+
+        Map<String, Object> updateFields = new LinkedHashMap<>();
+        if (StringUtils.hasText(title)) {
+            updateFields.put("title", title.trim());
+        }
+        if (body != null) {
+            updateFields.put("body", body);
+        }
+        if (updateFields.isEmpty()) {
+            return;
+        }
+        if (!useMcpProvider()) {
+            throw new IllegalStateException("Step 6 pull request updates require app.github.provider=mcp");
+        }
+
+        Map<String, Object> arguments = new LinkedHashMap<>();
+        arguments.put("owner", owner.trim());
+        arguments.put("repo", repo.trim());
+        arguments.put("pullNumber", pullNumber);
+        arguments.putAll(updateFields);
+        callMcpTool("update_pull_request", arguments);
+    }
+
+    public Set<String> fetchIssueLabelNamesCaseInsensitive(long issueNumber) {
+        List<String> labels = fetchIssueLabelNamesWithRetry(issueNumber);
+        if (labels.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> normalized = new HashSet<>();
+        for (String label : labels) {
+            if (StringUtils.hasText(label)) {
+                normalized.add(label.trim().toLowerCase(Locale.ROOT));
+            }
+        }
+        return normalized;
+    }
+
     private GitHubIssueSummary createIssueForStoryDirect(DecompositionStory story, List<String> labels) {
         CreateIssueRequest request = new CreateIssueRequest();
         request.setTitle(story.getTitle().trim());
@@ -589,6 +800,16 @@ public class GitHubIssueClientService {
             }
         }
         return issues;
+    }
+
+    private JsonNode readPullRequestViaMcp(String method, long pullNumber) {
+        Map<String, Object> arguments = new LinkedHashMap<>();
+        arguments.put("method", method);
+        arguments.put("owner", owner.trim());
+        arguments.put("repo", repo.trim());
+        arguments.put("pullNumber", pullNumber);
+        JsonNode result = callMcpTool("pull_request_read", arguments);
+        return parseJson(extractMcpContentText(result));
     }
 
     private List<String> extractMcpLabelNames(JsonNode labelsNode) {
