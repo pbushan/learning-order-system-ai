@@ -288,7 +288,9 @@ def create_or_reuse_branch(branch: str, base: str) -> None:
 def push_branch(token: str, branch: str) -> None:
     token = (token or "").strip()
     direct_push = run_cmd("git", "push", "-u", "origin", branch, check=False)
-    direct_error_raw = (direct_push.stderr or "").strip() or (direct_push.stdout or "").strip()
+    direct_stdout = (direct_push.stdout or "").strip()
+    direct_stderr = (direct_push.stderr or "").strip()
+    direct_error_raw = "\n".join([part for part in [direct_stderr, direct_stdout] if part]).strip()
     direct_error = sanitize_git_error(direct_error_raw, token)
     if direct_push.returncode == 0:
         return
@@ -298,12 +300,9 @@ def push_branch(token: str, branch: str) -> None:
         raise RuntimeError(f"git push failed: {direct_error}")
 
     origin_url = run_cmd("git", "remote", "get-url", "origin", check=False).stdout.strip()
-    host, path = parse_remote_credential_fields(origin_url)
-    if not host:
+    host_name = "github.com" if "github.com" in origin_url.lower() else ""
+    if not host_name:
         raise RuntimeError(f"git push failed (unsupported remote for credential fallback; primary={direct_error})")
-    host_name = host.split(":", 1)[0].lower()
-    if host_name != "github.com":
-        raise RuntimeError(f"git push failed (fallback supports github.com only; primary={direct_error})")
     try:
         with tempfile.TemporaryDirectory(prefix="step5_git_cred_") as tmp_dir:
             try:
@@ -326,12 +325,10 @@ def push_branch(token: str, branch: str) -> None:
 
             credential_lines = [
                 "protocol=https",
-                f"host={host}",
+                f"host={host_name}",
                 f"username={username}",
                 f"password={token}",
             ]
-            if path:
-                credential_lines.append(f"path={path}")
             credential_input = "\n".join(credential_lines) + "\n\n"
             approve_proc = subprocess.run(
                 ["git", "-c", "credential.helper=", "-c", f"credential.helper={helper_value}", "credential", "approve"],
