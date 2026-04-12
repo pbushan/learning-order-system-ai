@@ -306,13 +306,11 @@ def push_branch(token: str, branch: str) -> None:
 
             env = os.environ.copy()
             env["GIT_TERMINAL_PROMPT"] = "0"
-            env["GIT_CONFIG_COUNT"] = "1"
-            env["GIT_CONFIG_KEY_0"] = "credential.helper"
-            env["GIT_CONFIG_VALUE_0"] = f"store --file={cred_file}"
+            helper_value = f"store --file={cred_file}"
 
             credential_input = f"protocol=https\nhost={host}\nusername=x-access-token\npassword={token}\n\n"
             approve_proc = subprocess.run(
-                ["git", "credential", "approve"],
+                ["git", "-c", "credential.helper=", "-c", f"credential.helper={helper_value}", "credential", "approve"],
                 cwd=str(REPO_ROOT),
                 text=True,
                 input=credential_input,
@@ -327,7 +325,7 @@ def push_branch(token: str, branch: str) -> None:
                 raise RuntimeError("failed to stage temporary credentials: credential store is empty")
 
             token_push = subprocess.run(
-                ["git", "push", "-u", "origin", branch],
+                ["git", "-c", "credential.helper=", "-c", f"credential.helper={helper_value}", "push", "-u", "origin", branch],
                 cwd=str(REPO_ROOT),
                 text=True,
                 capture_output=True,
@@ -351,6 +349,8 @@ def sanitize_git_error(raw: str, token: str) -> str:
         return "unknown push error"
     if token:
         text = text.replace(token, "***")
+        text = text.replace(urllib.parse.quote(token, safe=""), "***")
+        text = text.replace(urllib.parse.quote_plus(token), "***")
     text = re.sub(r"gh[pousr]_[A-Za-z0-9_]+", "***", text)
     text = re.sub(r"github_pat_[A-Za-z0-9_]+", "***", text)
     text = re.sub(r"(?i)(authorization:\s*(?:bearer|token)\s+)[^\s]+", r"\1***", text)
@@ -365,7 +365,13 @@ def parse_remote_host(remote_url: str) -> str:
     if not value:
         return ""
     if value.startswith("http://") or value.startswith("https://") or value.startswith("ssh://"):
-        return urllib.parse.urlparse(value).hostname or ""
+        parsed = urllib.parse.urlparse(value)
+        host = parsed.hostname or ""
+        if not host:
+            return ""
+        if parsed.port:
+            return f"{host}:{parsed.port}"
+        return host
     ssh_match = re.match(r"^[^@]+@([^:]+):.*$", value)
     if ssh_match:
         return ssh_match.group(1).strip()
