@@ -295,8 +295,12 @@ def push_branch(token: str, branch: str) -> None:
         return
     if not token:
         raise RuntimeError("git push failed: missing token for auth fallback")
+    if is_known_non_auth_push_error(direct_error_raw):
+        snippet = direct_error[:180]
+        raise RuntimeError(f"git push failed: non-auth push rejection ({snippet})")
     if not is_auth_push_error(direct_error_raw):
-        raise RuntimeError("git push failed: non-auth error from origin push")
+        snippet = direct_error[:180]
+        raise RuntimeError(f"git push failed: unsupported auth failure signature ({snippet})")
 
     origin_url = run_cmd("git", "remote", "get-url", "origin", check=False).stdout.strip()
     host_name = "github.com" if "github.com" in origin_url.lower() else ""
@@ -308,15 +312,16 @@ def push_branch(token: str, branch: str) -> None:
                 raise RuntimeError("git push failed: auth fallback requires POSIX permissions support")
             try:
                 os.chmod(tmp_dir, 0o700)
-            except OSError:
-                pass
+            except OSError as ex:
+                raise RuntimeError(f"git push failed: could not secure temp credential directory ({ex})") from ex
             cred_file = os.path.join(tmp_dir, ".git-credentials")
             with open(cred_file, "a", encoding="utf-8"):
                 pass
             os.chmod(cred_file, 0o600)
             if os.name == "posix":
-                mode = os.stat(cred_file).st_mode & 0o777
-                if mode & 0o077:
+                dir_mode = os.stat(tmp_dir).st_mode & 0o777
+                file_mode = os.stat(cred_file).st_mode & 0o777
+                if dir_mode != 0o700 or file_mode != 0o600:
                     raise RuntimeError("credential file permissions are too permissive")
 
             env = os.environ.copy()
@@ -384,27 +389,6 @@ def sanitize_git_error(raw: str, token: str) -> str:
     return text
 
 
-def parse_remote_credential_fields(remote_url: str) -> tuple[str, str]:
-    value = (remote_url or "").strip()
-    if not value:
-        return "", ""
-    if value.startswith("http://") or value.startswith("https://") or value.startswith("ssh://"):
-        parsed = urllib.parse.urlparse(value)
-        host = parsed.hostname or ""
-        if not host:
-            return "", ""
-        if parsed.port:
-            host = f"{host}:{parsed.port}"
-        path = (parsed.path or "").lstrip("/")
-        return host, path
-    ssh_match = re.match(r"^[^@]+@([^:]+):.*$", value)
-    if ssh_match:
-        host = ssh_match.group(1).strip()
-        path_part = value.split(":", 1)[1].strip() if ":" in value else ""
-        return host, path_part
-    return "", ""
-
-
 def is_auth_push_error(raw: str) -> bool:
     text = (raw or "").lower()
     return any(
@@ -422,15 +406,30 @@ def is_auth_push_error(raw: str) -> bool:
     )
 
 
-def commit_and_push(token: str, branch: str, issue_number: int, changed_files: list[str]) -> None:
+def is_known_non_auth_push_error(raw: str) -> bool:
+    text = (raw or "").lower()
+    return any(
+        marker in text
+        for marker in [
+            "non-fast-forward",
+            "failed to push some refs",
+            "protected branch hook declined",
+            "[rejected]",
+        ]
+    )
+
+
+def commit_and_push(token: str, branch: str, issue_number: int, changed_files: list[str]) -> str:
     if not changed_files:
         raise RuntimeError("No changed files to stage.")
     ensure_git_identity()
     run_cmd("git", "add", "--", *changed_files)
     if run_cmd("git", "diff", "--cached", "--quiet", check=False).returncode == 0:
         raise RuntimeError("No staged changes to commit.")
-    run_cmd("git", "commit", "-m", f"Issue #{issue_number}: apply approved update")
+    message = f"Issue #{issue_number}: apply approved update"
+    run_cmd("git", "commit", "-m", message)
     push_branch(token, branch)
+    return message
 
 
 def resolve_open_pr(owner: str, repo: str, token: str, branch: str) -> int | None:
