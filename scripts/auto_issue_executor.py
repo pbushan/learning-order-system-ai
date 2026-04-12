@@ -492,7 +492,21 @@ def push_branch(token: str, branch: str) -> None:
                 env=env,
             )
             if token_push.returncode != 0:
-                raise RuntimeError("git push failed: auth fallback push failed")
+                token_url = authenticated_remote_url(origin_url, username, token)
+                token_url_push = subprocess.run(
+                    ["git", "push", "-u", token_url, branch],
+                    cwd=str(REPO_ROOT),
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    env=env,
+                )
+                if token_url_push.returncode != 0:
+                    details = sanitize_git_error(
+                        "\n".join([token_push.stderr or "", token_push.stdout or "", token_url_push.stderr or "", token_url_push.stdout or ""]),
+                        token,
+                    )
+                    raise RuntimeError(f"git push failed: auth fallback push failed ({details[:220]})")
     except RuntimeError:
         raise
     except Exception as ex:
@@ -520,6 +534,16 @@ def sanitize_git_error(raw: str, token: str) -> str:
     text = re.sub(r"(?i)([?&](?:access_token|token|auth|password)=)[^&\s]+", r"\1***", text)
     text = re.sub(r"https://[^@\s]+@", "https://***@", text)
     return text
+
+
+def authenticated_remote_url(origin_url: str, username: str, token: str) -> str:
+    parsed = urllib.parse.urlparse((origin_url or "").strip())
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise RuntimeError("git push failed: unsupported remote URL for token push fallback")
+    safe_user = urllib.parse.quote((username or "x-access-token"), safe="")
+    safe_token = urllib.parse.quote(token, safe="")
+    netloc = f"{safe_user}:{safe_token}@{parsed.netloc}"
+    return urllib.parse.urlunparse((parsed.scheme, netloc, parsed.path, "", "", ""))
 
 
 def is_auth_push_error(raw: str) -> bool:

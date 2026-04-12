@@ -218,7 +218,7 @@ public class Step6PrReviewPollingService {
                     "runtime crash", "nullpointer", "regression", "happy path", "contract break", "breaking")) {
                 classification = Classification.NEEDS_HUMAN;
                 reason = "Potential blocking risk under portfolio criteria.";
-            } else if (containsAny(bodyLower, "typo", "spelling", "wording", "rename label", "copy fix")) {
+            } else if (containsAny(bodyLower, "typo", "spelling", "wording", "rename label", "copy fix", "wrkbench")) {
                 classification = Classification.SAFE_AUTO_FIX;
                 reason = "Small textual consistency fix.";
             } else {
