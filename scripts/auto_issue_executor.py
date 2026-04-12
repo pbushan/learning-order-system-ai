@@ -291,20 +291,21 @@ def push_branch(token: str, branch: str) -> None:
     direct_stdout = (direct_push.stdout or "").strip()
     direct_stderr = (direct_push.stderr or "").strip()
     direct_error_raw = "\n".join([part for part in [direct_stderr, direct_stdout] if part]).strip()
-    direct_error = sanitize_git_error(direct_error_raw, token)
     if direct_push.returncode == 0:
         return
     if not token:
-        raise RuntimeError(f"git push failed: {direct_error}")
+        raise RuntimeError("git push failed: missing token for auth fallback")
     if not is_auth_push_error(direct_error_raw):
-        raise RuntimeError(f"git push failed: {direct_error}")
+        raise RuntimeError("git push failed: non-auth error from origin push")
 
     origin_url = run_cmd("git", "remote", "get-url", "origin", check=False).stdout.strip()
     host_name = "github.com" if "github.com" in origin_url.lower() else ""
     if not host_name:
-        raise RuntimeError(f"git push failed (unsupported remote for credential fallback; primary={direct_error})")
+        raise RuntimeError("git push failed: unsupported remote for auth fallback")
     try:
         with tempfile.TemporaryDirectory(prefix="step5_git_cred_") as tmp_dir:
+            if os.name != "posix":
+                raise RuntimeError("git push failed: auth fallback requires POSIX permissions support")
             try:
                 os.chmod(tmp_dir, 0o700)
             except OSError:
@@ -340,8 +341,7 @@ def push_branch(token: str, branch: str) -> None:
                 env=env,
             )
             if approve_proc.returncode != 0:
-                detail = sanitize_git_error((approve_proc.stderr or "").strip() or (approve_proc.stdout or "").strip(), token)
-                raise RuntimeError(f"failed to stage temporary credentials: {detail}")
+                raise RuntimeError("git push failed: could not stage temporary credentials")
             if (not os.path.exists(cred_file)) or os.path.getsize(cred_file) == 0:
                 raise RuntimeError("failed to stage temporary credentials: credential store is empty")
 
@@ -354,12 +354,11 @@ def push_branch(token: str, branch: str) -> None:
                 env=env,
             )
             if token_push.returncode != 0:
-                fallback = sanitize_git_error((token_push.stderr or "").strip() or (token_push.stdout or "").strip(), token)
-                raise RuntimeError(f"git push failed (primary={direct_error}; fallback={fallback})")
+                raise RuntimeError("git push failed: auth fallback push failed")
     except RuntimeError:
         raise
     except Exception as ex:
-        raise RuntimeError(f"git push failed (primary={direct_error}; fallback={type(ex).__name__}: {ex})") from ex
+        raise RuntimeError(f"git push failed: fallback exception ({type(ex).__name__})") from ex
 
 
 def sanitize_git_error(raw: str, token: str) -> str:
@@ -419,7 +418,6 @@ def is_auth_push_error(raw: str) -> bool:
             "authentication required",
             "requested url returned error: 401",
             "requested url returned error: 403",
-            "fatal: unable to access",
         ]
     )
 
