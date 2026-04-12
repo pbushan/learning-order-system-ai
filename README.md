@@ -79,6 +79,14 @@ This repo now includes an end-to-end portfolio workflow from intake to GitHub is
   - [`scripts/reconcile_after_merge.py`](scripts/reconcile_after_merge.py)
 - Step 6 lifecycle audit entries are append-only via [`scripts/step6_audit_log.py`](scripts/step6_audit_log.py).
 
+### Step 5.5: PR creation via MCP
+
+- Step 5 executor keeps local branch + commit + push behavior.
+- Pull request creation is delegated to GitHub MCP (`create_pull_request` tool).
+- Runtime flow:
+  - `auto_issue_executor.py` -> GitHub MCP -> GitHub
+- This keeps PR creation on the MCP tool boundary while preserving the existing Step 5 orchestrator structure.
+
 ### Governance and scope boundaries
 
 - This remains a portfolio project:
