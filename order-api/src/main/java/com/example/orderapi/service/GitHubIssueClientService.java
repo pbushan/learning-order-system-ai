@@ -419,33 +419,47 @@ public class GitHubIssueClientService {
     }
 
     private JsonNode callMcpTool(String toolName, Map<String, Object> arguments) {
-        String sessionId = initializeMcpSession();
-        sendMcpInitializedNotification(sessionId);
+        RuntimeException last = null;
+        long waitMillis = 250L;
+        for (int attempt = 1; attempt <= 4; attempt++) {
+            try {
+                String sessionId = initializeMcpSession();
+                sendMcpInitializedNotification(sessionId);
 
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("jsonrpc", "2.0");
-        payload.put("id", 2);
-        payload.put("method", "tools/call");
-        payload.put("params", Map.of("name", toolName, "arguments", arguments));
+                Map<String, Object> payload = new LinkedHashMap<>();
+                payload.put("jsonrpc", "2.0");
+                payload.put("id", 2);
+                payload.put("method", "tools/call");
+                payload.put("params", Map.of("name", toolName, "arguments", arguments));
 
-        String responseBody = mcpRestClient.post()
-                .uri("/")
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
-                .header("Mcp-Session-Id", sessionId)
-                .body(payload)
-                .retrieve()
-                .body(String.class);
+                String responseBody = mcpRestClient.post()
+                        .uri("/")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                        .header("Mcp-Session-Id", sessionId)
+                        .body(payload)
+                        .retrieve()
+                        .body(String.class);
 
-        JsonNode envelope = parseMcpEnvelope(responseBody);
-        JsonNode result = envelope.path("result");
-        if (result.path("isError").asBoolean(false)) {
-            String message = extractMcpContentText(result);
-            throw new IllegalStateException("GitHub MCP call failed: " + message);
+                JsonNode envelope = parseMcpEnvelope(responseBody);
+                JsonNode result = envelope.path("result");
+                if (result.path("isError").asBoolean(false)) {
+                    String message = extractMcpContentText(result);
+                    throw new IllegalStateException("GitHub MCP call failed: " + message);
+                }
+                if (result.isMissingNode()) {
+                    throw new IllegalStateException("GitHub MCP call failed: empty result.");
+                }
+                return result;
+            } catch (RuntimeException ex) {
+                last = ex;
+                if (attempt >= 4 || !isRetryableMcpError(ex)) {
+                    throw ex;
+                }
+                sleepQuietly(waitMillis);
+                waitMillis = Math.min(waitMillis * 2, 2000L);
+            }
         }
-        if (result.isMissingNode()) {
-            throw new IllegalStateException("GitHub MCP call failed: empty result.");
-        }
-        return result;
+        throw last != null ? last : new IllegalStateException("GitHub MCP call failed.");
     }
 
     private String initializeMcpSession() {
@@ -726,6 +740,26 @@ public class GitHubIssueClientService {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted while waiting for GitHub retry.", interruptedException);
         }
+    }
+
+    private boolean isRetryableMcpError(RuntimeException ex) {
+        if (ex instanceof ResourceAccessException) {
+            return true;
+        }
+        if (ex instanceof RestClientResponseException responseException) {
+            int status = responseException.getStatusCode().value();
+            return status == 429 || (status >= 500 && status <= 599);
+        }
+        String message = ex.getMessage();
+        if (!StringUtils.hasText(message)) {
+            return false;
+        }
+        String text = message.toLowerCase(Locale.ROOT);
+        return text.contains("connection refused")
+                || text.contains("connect timed out")
+                || text.contains("read timed out")
+                || text.contains("unexpected end of file")
+                || text.contains("empty response body");
     }
 
     private List<String> normalizeLabels(List<String> labels) {

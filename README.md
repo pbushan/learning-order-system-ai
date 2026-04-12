@@ -95,87 +95,52 @@ This repo now includes an end-to-end portfolio workflow from intake to GitHub is
   - defer non-critical hardening when happy-path behavior is already correct
 - Security-sensitive fixes were applied in Step 5 fallback paths to avoid token-in-argv exposure and improve failure handling clarity.
 
-## GitHub MCP Runtime Integration (App Path)
+## GitHub MCP Integration (Step 5 Extension)
 
-### Architecture
+### Architecture (implemented)
 
-- App-owned GitHub operations now run through a Dockerized GitHub MCP service:
-  - `order-api` -> `github-mcp` -> GitHub
-- Codex GitHub usage remains separate and unchanged:
-  - Codex uses `CODEX_GITHUB_TOKEN` only for Codex workflows
-  - App runtime does not use `CODEX_GITHUB_TOKEN`
-
-### Why MCP in this project
-
-- Introduces a bounded tool layer between app logic and GitHub operations
-- Demonstrates MCP in an agentic workflow with explicit runtime boundaries
-- Supports least-privilege app auth with a fine-grained token scoped to one repository
-- Keeps the implementation small and interview-friendly
-
-### Required fine-grained PAT for app runtime
-
-Set `APP_GITHUB_TOKEN` to a fine-grained PAT configured with:
-
-- Repository access:
-  - `Only select repositories`
-  - `pbushan/learning-order-system-ai`
-- Minimum repository permissions:
-  - `Metadata`: Read
-  - `Contents`: Read and write
-  - `Pull requests`: Read and write
-  - `Issues`: Read and write
-
-Use a fine-grained PAT for the app path. Do not use a broad classic PAT for app runtime.
-
-### Environment setup
-
-1. Copy `.env.example` to `.env`
-2. Set:
-   - `OPENAI_API_KEY=...`
-   - `APP_GITHUB_TOKEN=...`
-3. Optional for Codex-only workflows:
-   - `CODEX_GITHUB_TOKEN=...` (not used by app runtime)
-
-### Local startup
-
-```bash
-docker compose up --build
+```text
+Step 5 scheduler/executor (order-api + auto_issue_executor.py)
+  -> GitHub MCP tool server (github-mcp container)
+  -> GitHub API
 ```
 
-### Runtime path
+MCP is used as a tool server boundary for runtime GitHub operations. This keeps app orchestration logic in the existing services/scripts while avoiding direct ad-hoc GitHub API coupling in the PR-creation step.
 
-- App-owned GitHub operations are handled by `GitHubIssueClientService` in MCP provider mode (`APP_GITHUB_PROVIDER=mcp`)
-- The app connects to `APP_GITHUB_MCP_BASE_URL` (default: `http://github-mcp:8082`)
-- The MCP container authenticates with `APP_GITHUB_TOKEN` via `GITHUB_PERSONAL_ACCESS_TOKEN`
+### Auth separation
 
-### Supported app GitHub operations through MCP
+- `APP_GITHUB_TOKEN`
+  - used by application runtime
+  - used by MCP server (`GITHUB_PERSONAL_ACCESS_TOKEN`)
+  - fine-grained PAT
+  - restricted to `pbushan/learning-order-system-ai`
+- `CODEX_GITHUB_TOKEN`
+  - used only by local Codex workflows
+  - not used by application runtime
+  - not passed into containers
 
-- Issue creation from decomposition/intake flow
-- Issue label add/remove used by Step 5 pickup/reset behavior
-- Approved/open issue discovery used by scheduler paths
+### Setting up APP_GITHUB_TOKEN (Required)
 
-### Troubleshooting
+1. Create a **fine-grained** PAT.
+2. Restrict repository access to:
+   - `pbushan/learning-order-system-ai`
+3. Grant minimum permissions:
+   - Issues: Read and write
+   - Pull requests: Read and write
+   - Contents: Read and write
+   - Metadata: Read
 
-- `401 Unauthorized`:
-  - verify `APP_GITHUB_TOKEN` is set
-  - verify token is fine-grained and not expired
-  - verify the token includes this repository in selected repositories
-- Missing permissions:
-  - confirm Issues/Pull requests/Contents/Metadata permissions match this README
-- MCP unreachable:
-  - confirm `github-mcp` container is running
-  - confirm `APP_GITHUB_MCP_BASE_URL=http://github-mcp:8082` in compose runtime
-- Repository mismatch:
-  - confirm `APP_GITHUB_REPOSITORY=pbushan/learning-order-system-ai`
-- Port conflicts:
-  - app/UI remain on host ports `8080`/`8081`
-  - MCP uses container-to-container access and does not require host port exposure
-- Auth diagnostics:
-  - check container logs without printing token values
+Do **NOT** use a classic PAT for `APP_GITHUB_TOKEN`.
 
-### Portfolio framing
+### Runtime notes
 
-This setup demonstrates MCP as a minimal, explicit integration boundary for agentic workflows while preserving human-in-the-loop governance and clean separation between app runtime auth and Codex auth.
+- Internal MCP URL: `http://github-mcp:8082`
+- MCP runs on an internal Docker network and does not expose ports to avoid conflicts.
+- Current app-side MCP operations:
+  - issue creation
+  - issue label updates
+  - approved/in-progress issue discovery
+  - Step 5 PR creation via MCP tool call (`create_pull_request`)
 
 ---
 
