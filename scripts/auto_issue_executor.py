@@ -291,6 +291,7 @@ def push_branch(token: str, branch: str) -> None:
     direct_stdout = (direct_push.stdout or "").strip()
     direct_stderr = (direct_push.stderr or "").strip()
     direct_error_raw = "\n".join([part for part in [direct_stderr, direct_stdout] if part]).strip()
+    direct_error = sanitize_git_error(direct_error_raw, token)
     if direct_push.returncode == 0:
         return
     if not token:
@@ -349,6 +350,18 @@ def push_branch(token: str, branch: str) -> None:
                 raise RuntimeError("git push failed: could not stage temporary credentials")
             if (not os.path.exists(cred_file)) or os.path.getsize(cred_file) == 0:
                 raise RuntimeError("failed to stage temporary credentials: credential store is empty")
+            verify_input = "\n".join(["protocol=https", f"host={host_name}"]) + "\n\n"
+            fill_proc = subprocess.run(
+                ["git", "-c", "credential.helper=", "-c", f"credential.helper={helper_value}", "credential", "fill"],
+                cwd=str(REPO_ROOT),
+                text=True,
+                input=verify_input,
+                capture_output=True,
+                check=False,
+                env=env,
+            )
+            if fill_proc.returncode != 0 or "username=" not in (fill_proc.stdout or ""):
+                raise RuntimeError("git push failed: credential helper verification failed")
 
             token_push = subprocess.run(
                 ["git", "-c", "credential.helper=", "-c", f"credential.helper={helper_value}", "push", "-u", "origin", branch],
