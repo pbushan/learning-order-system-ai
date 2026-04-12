@@ -288,25 +288,22 @@ def create_or_reuse_branch(branch: str, base: str) -> None:
 def push_branch(token: str, branch: str) -> None:
     token = (token or "").strip()
     direct_push = run_cmd("git", "push", "-u", "origin", branch, check=False)
-    direct_error = (direct_push.stderr or "").strip() or (direct_push.stdout or "").strip()
+    direct_error_raw = (direct_push.stderr or "").strip() or (direct_push.stdout or "").strip()
+    direct_error = sanitize_git_error(direct_error_raw, token)
     if direct_push.returncode == 0:
         return
     if not token:
-        detail = sanitize_git_error(direct_error, token)
-        raise RuntimeError(f"git push failed: {detail}")
-    if not is_auth_push_error(direct_error):
-        detail = sanitize_git_error(direct_error, token)
-        raise RuntimeError(f"git push failed: {detail}")
+        raise RuntimeError(f"git push failed: {direct_error}")
+    if not is_auth_push_error(direct_error_raw):
+        raise RuntimeError(f"git push failed: {direct_error}")
 
     origin_url = run_cmd("git", "remote", "get-url", "origin", check=False).stdout.strip()
-    host = parse_remote_host(origin_url)
+    host, path = parse_remote_credential_fields(origin_url)
     if not host:
-        detail = sanitize_git_error(direct_error, token)
-        raise RuntimeError(f"git push failed (unsupported remote for credential fallback; primary={detail})")
+        raise RuntimeError(f"git push failed (unsupported remote for credential fallback; primary={direct_error})")
     host_name = host.split(":", 1)[0].lower()
     if host_name != "github.com":
-        detail = sanitize_git_error(direct_error, token)
-        raise RuntimeError(f"git push failed (fallback supports github.com only; primary={detail})")
+        raise RuntimeError(f"git push failed (fallback supports github.com only; primary={direct_error})")
     try:
         with tempfile.TemporaryDirectory(prefix="step5_git_cred_") as tmp_dir:
             try:
@@ -324,8 +321,17 @@ def push_branch(token: str, branch: str) -> None:
             env = os.environ.copy()
             env["GIT_TERMINAL_PROMPT"] = "0"
             helper_value = f"store --file={cred_file}"
+            username = (os.getenv("STEP5_GIT_HTTP_USERNAME") or "x-access-token").strip() or "x-access-token"
 
-            credential_input = f"protocol=https\nhost={host}\nusername=x-access-token\npassword={token}\n\n"
+            credential_lines = [
+                "protocol=https",
+                f"host={host}",
+                f"username={username}",
+                f"password={token}",
+            ]
+            if path:
+                credential_lines.append(f"path={path}")
+            credential_input = "\n".join(credential_lines) + "\n\n"
             approve_proc = subprocess.run(
                 ["git", "-c", "credential.helper=", "-c", f"credential.helper={helper_value}", "credential", "approve"],
                 cwd=str(REPO_ROOT),
@@ -350,14 +356,12 @@ def push_branch(token: str, branch: str) -> None:
                 env=env,
             )
             if token_push.returncode != 0:
-                primary = sanitize_git_error(direct_error, token)
                 fallback = sanitize_git_error((token_push.stderr or "").strip() or (token_push.stdout or "").strip(), token)
-                raise RuntimeError(f"git push failed (primary={primary}; fallback={fallback})")
+                raise RuntimeError(f"git push failed (primary={direct_error}; fallback={fallback})")
     except RuntimeError:
         raise
     except Exception as ex:
-        primary = sanitize_git_error(direct_error, token)
-        raise RuntimeError(f"git push failed (primary={primary}; fallback={type(ex).__name__}: {ex})") from ex
+        raise RuntimeError(f"git push failed (primary={direct_error}; fallback={type(ex).__name__}: {ex})") from ex
 
 
 def sanitize_git_error(raw: str, token: str) -> str:
@@ -382,22 +386,25 @@ def sanitize_git_error(raw: str, token: str) -> str:
     return text
 
 
-def parse_remote_host(remote_url: str) -> str:
+def parse_remote_credential_fields(remote_url: str) -> tuple[str, str]:
     value = (remote_url or "").strip()
     if not value:
-        return ""
+        return "", ""
     if value.startswith("http://") or value.startswith("https://") or value.startswith("ssh://"):
         parsed = urllib.parse.urlparse(value)
         host = parsed.hostname or ""
         if not host:
-            return ""
+            return "", ""
         if parsed.port:
-            return f"{host}:{parsed.port}"
-        return host
+            host = f"{host}:{parsed.port}"
+        path = (parsed.path or "").lstrip("/")
+        return host, path
     ssh_match = re.match(r"^[^@]+@([^:]+):.*$", value)
     if ssh_match:
-        return ssh_match.group(1).strip()
-    return ""
+        host = ssh_match.group(1).strip()
+        path_part = value.split(":", 1)[1].strip() if ":" in value else ""
+        return host, path_part
+    return "", ""
 
 
 def is_auth_push_error(raw: str) -> bool:
