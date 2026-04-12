@@ -310,11 +310,12 @@ def push_branch(token: str, branch: str) -> None:
                 os.chmod(tmp_dir, 0o700)
             except OSError:
                 pass
-            cred_file = Path(tmp_dir) / ".git-credentials"
-            cred_file.touch(mode=0o600, exist_ok=True)
+            cred_file = os.path.join(tmp_dir, ".git-credentials")
+            with open(cred_file, "a", encoding="utf-8"):
+                pass
             os.chmod(cred_file, 0o600)
             if os.name == "posix":
-                mode = cred_file.stat().st_mode & 0o777
+                mode = os.stat(cred_file).st_mode & 0o777
                 if mode & 0o077:
                     raise RuntimeError("credential file permissions are too permissive")
 
@@ -344,7 +345,7 @@ def push_branch(token: str, branch: str) -> None:
             if approve_proc.returncode != 0:
                 detail = sanitize_git_error((approve_proc.stderr or "").strip() or (approve_proc.stdout or "").strip(), token)
                 raise RuntimeError(f"failed to stage temporary credentials: {detail}")
-            if not cred_file.exists() or cred_file.stat().st_size == 0:
+            if (not os.path.exists(cred_file)) or os.path.getsize(cred_file) == 0:
                 raise RuntimeError("failed to stage temporary credentials: credential store is empty")
 
             token_push = subprocess.run(
@@ -382,6 +383,7 @@ def sanitize_git_error(raw: str, token: str) -> str:
     text = re.sub(r"(?i)(password=)[^\s]+", r"\1***", text)
     text = re.sub(r"(?i)(token=)[^\s&]+", r"\1***", text)
     text = re.sub(r"(?i)((?:access|oauth)_?token[=:])[^\s&]+", r"\1***", text)
+    text = re.sub(r"(?i)([?&](?:access_token|token|auth|password)=)[^&\s]+", r"\1***", text)
     text = re.sub(r"https://[^@\s]+@", "https://***@", text)
     return text
 
@@ -418,6 +420,9 @@ def is_auth_push_error(raw: str) -> bool:
             "http basic: access denied",
             "bad credentials",
             "authentication required",
+            "requested url returned error: 401",
+            "requested url returned error: 403",
+            "fatal: unable to access",
         ]
     )
 
