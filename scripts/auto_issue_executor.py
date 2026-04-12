@@ -8,11 +8,13 @@ approved issue -> ai-in-progress -> patch -> branch/commit/push -> PR -> merge -
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -283,7 +285,154 @@ def create_or_reuse_branch(branch: str, base: str) -> None:
     run_cmd("git", "checkout", "-b", branch, base)
 
 
-def commit_and_push(branch: str, issue_number: int, changed_files: list[str]) -> str:
+def push_branch(token: str, branch: str) -> None:
+    token = (token or "").strip()
+    direct_push = run_cmd("git", "push", "-u", "origin", branch, check=False)
+    direct_stdout = (direct_push.stdout or "").strip()
+    direct_stderr = (direct_push.stderr or "").strip()
+    direct_error_raw = "\n".join([part for part in [direct_stderr, direct_stdout] if part]).strip()
+    direct_error = sanitize_git_error(direct_error_raw, token)
+    if direct_push.returncode == 0:
+        return
+    if not token:
+        raise RuntimeError("git push failed: missing token for auth fallback")
+    if is_known_non_auth_push_error(direct_error_raw):
+        snippet = direct_error[:180]
+        raise RuntimeError(f"git push failed: non-auth push rejection ({snippet})")
+    if not is_auth_push_error(direct_error_raw):
+        snippet = direct_error[:180]
+        raise RuntimeError(f"git push failed: unsupported auth failure signature ({snippet})")
+
+    origin_url = run_cmd("git", "remote", "get-url", "origin", check=False).stdout.strip()
+    host_name = "github.com" if "github.com" in origin_url.lower() else ""
+    if not host_name:
+        raise RuntimeError("git push failed: unsupported remote for auth fallback")
+    try:
+        with tempfile.TemporaryDirectory(prefix="step5_git_cred_") as tmp_dir:
+            if os.name != "posix":
+                raise RuntimeError("git push failed: auth fallback requires POSIX permissions support")
+            try:
+                os.chmod(tmp_dir, 0o700)
+            except OSError as ex:
+                raise RuntimeError(f"git push failed: could not secure temp credential directory ({ex})") from ex
+            cred_file = os.path.join(tmp_dir, ".git-credentials")
+            with open(cred_file, "a", encoding="utf-8"):
+                pass
+            os.chmod(cred_file, 0o600)
+            if os.name == "posix":
+                dir_mode = os.stat(tmp_dir).st_mode & 0o777
+                file_mode = os.stat(cred_file).st_mode & 0o777
+                if dir_mode != 0o700 or file_mode != 0o600:
+                    raise RuntimeError("credential file permissions are too permissive")
+
+            env = os.environ.copy()
+            env["GIT_TERMINAL_PROMPT"] = "0"
+            helper_value = f"store --file={cred_file}"
+            username = (os.getenv("STEP5_GIT_HTTP_USERNAME") or "x-access-token").strip() or "x-access-token"
+
+            credential_lines = [
+                "protocol=https",
+                f"host={host_name}",
+                f"username={username}",
+                f"password={token}",
+            ]
+            credential_input = "\n".join(credential_lines) + "\n\n"
+            approve_proc = subprocess.run(
+                ["git", "-c", "credential.helper=", "-c", f"credential.helper={helper_value}", "credential", "approve"],
+                cwd=str(REPO_ROOT),
+                text=True,
+                input=credential_input,
+                capture_output=True,
+                check=False,
+                env=env,
+            )
+            if approve_proc.returncode != 0:
+                raise RuntimeError("git push failed: could not stage temporary credentials")
+            if (not os.path.exists(cred_file)) or os.path.getsize(cred_file) == 0:
+                raise RuntimeError("failed to stage temporary credentials: credential store is empty")
+            verify_input = "\n".join(["protocol=https", f"host={host_name}"]) + "\n\n"
+            fill_proc = subprocess.run(
+                ["git", "-c", "credential.helper=", "-c", f"credential.helper={helper_value}", "credential", "fill"],
+                cwd=str(REPO_ROOT),
+                text=True,
+                input=verify_input,
+                capture_output=True,
+                check=False,
+                env=env,
+            )
+            if fill_proc.returncode != 0 or "username=" not in (fill_proc.stdout or ""):
+                raise RuntimeError("git push failed: credential helper verification failed")
+
+            token_push = subprocess.run(
+                ["git", "-c", "credential.helper=", "-c", f"credential.helper={helper_value}", "push", "-u", "origin", branch],
+                cwd=str(REPO_ROOT),
+                text=True,
+                capture_output=True,
+                check=False,
+                env=env,
+            )
+            if token_push.returncode != 0:
+                raise RuntimeError("git push failed: auth fallback push failed")
+    except RuntimeError:
+        raise
+    except Exception as ex:
+        raise RuntimeError(f"git push failed: fallback exception ({type(ex).__name__})") from ex
+
+
+def sanitize_git_error(raw: str, token: str) -> str:
+    text = (raw or "").strip()
+    if not text:
+        return "unknown push error"
+    if token:
+        text = text.replace(token, "***")
+        text = text.replace(urllib.parse.quote(token, safe=""), "***")
+        text = text.replace(urllib.parse.quote_plus(token), "***")
+        basic = base64.b64encode(f"x-access-token:{token}".encode("utf-8")).decode("ascii")
+        text = text.replace(basic, "***")
+    text = re.sub(r"(?i)(x-access-token:)[^\s@]+", r"\1***", text)
+    text = re.sub(r"gh[pousr]_[A-Za-z0-9_]+", "***", text)
+    text = re.sub(r"github_pat_[A-Za-z0-9_]+", "***", text)
+    text = re.sub(r"(?i)(authorization:\s*(?:bearer|token)\s+)[^\s]+", r"\1***", text)
+    text = re.sub(r"(?i)(authorization:\s*basic\s+)[^\s]+", r"\1***", text)
+    text = re.sub(r"(?i)(password=)[^\s]+", r"\1***", text)
+    text = re.sub(r"(?i)(token=)[^\s&]+", r"\1***", text)
+    text = re.sub(r"(?i)((?:access|oauth)_?token[=:])[^\s&]+", r"\1***", text)
+    text = re.sub(r"(?i)([?&](?:access_token|token|auth|password)=)[^&\s]+", r"\1***", text)
+    text = re.sub(r"https://[^@\s]+@", "https://***@", text)
+    return text
+
+
+def is_auth_push_error(raw: str) -> bool:
+    text = (raw or "").lower()
+    return any(
+        marker in text
+        for marker in [
+            "authentication failed",
+            "could not read username",
+            "invalid username or password",
+            "http basic: access denied",
+            "bad credentials",
+            "authentication required",
+            "requested url returned error: 401",
+            "requested url returned error: 403",
+        ]
+    )
+
+
+def is_known_non_auth_push_error(raw: str) -> bool:
+    text = (raw or "").lower()
+    return any(
+        marker in text
+        for marker in [
+            "non-fast-forward",
+            "failed to push some refs",
+            "protected branch hook declined",
+            "[rejected]",
+        ]
+    )
+
+
+def commit_and_push(token: str, branch: str, issue_number: int, changed_files: list[str]) -> str:
     if not changed_files:
         raise RuntimeError("No changed files to stage.")
     ensure_git_identity()
@@ -292,7 +441,7 @@ def commit_and_push(branch: str, issue_number: int, changed_files: list[str]) ->
         raise RuntimeError("No staged changes to commit.")
     message = f"Issue #{issue_number}: apply approved update"
     run_cmd("git", "commit", "-m", message)
-    run_cmd("git", "push", "-u", "origin", branch)
+    push_branch(token, branch)
     return message
 
 
@@ -451,7 +600,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
         log_step5_event("issue-implementation-applied", issue_number=issue_number, metadata={"changedFiles": changed_files})
 
         log(f"Issue #{issue_number}: committing and pushing")
-        commit_and_push(branch, issue_number, changed_files)
+        commit_and_push(token, branch, issue_number, changed_files)
 
         log(f"Issue #{issue_number}: creating pull request")
         pr_number, pr_url = create_pr(owner, repo, token, branch, scaffold)
