@@ -1165,3 +1165,5 @@ Another test checks multiple layers working together."
 8. Show the queue, Lambda, and fulfillment record flow
 
 ---
+
+Step6B live test typo: wrkbench
