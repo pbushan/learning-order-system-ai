@@ -27,6 +27,68 @@ It is a **sandbox for exploring how AI can:**
 
 ---
 
+## 📌 Current Status (Steps 1–6)
+
+This repo now includes an end-to-end portfolio workflow from intake to GitHub issue creation, plus repo-side scaffolding for approved issue pickup and PR-review handling.
+
+### Step 1: Intake chat (backend + UI)
+
+- Intake chat endpoint: `POST /api/intake/chat`
+- LLM classifies requests as `bug` or `feature` and returns structured intake data.
+- Intake requests/responses are logged as append-only JSONL audit entries.
+
+### Step 2: Decomposition
+
+- Decomposition endpoint: `POST /api/intake/decompose`
+- Splits intake into PR-safe stories (small, explicit slices).
+- Decomposition lifecycle is audit-logged.
+
+### Step 3: GitHub issue creation
+
+- Direct issue endpoint: `POST /api/github/issues/create-from-decomposition`
+- Orchestrated endpoint used by UI: `POST /api/intake/complete-to-github`
+- UI flow in `order-ui` now triggers complete-to-github automatically when intake completes (no manual Decompose button in the normal flow).
+- Created issues include normalized metadata and labels:
+  - `ai-generated`
+  - `needs-human-approval`
+  - `bug` or `feature`
+  - `portfolio`
+- GitHub issue creation audit events are append-only and non-blocking on logger failures.
+
+### Step 5: Approved issue pickup and execution scaffolding
+
+- Approval conventions documented in [`docs/step5-approval-and-execution-conventions.md`](docs/step5-approval-and-execution-conventions.md).
+- Scheduler discovers approved issues and applies label-driven eligibility:
+  - required: `approved-for-dev`
+  - excluded: `ai-in-progress`
+- Step 5 runtime services:
+  - [`ApprovedIssuePickupScheduler`](order-api/src/main/java/com/example/orderapi/service/ApprovedIssuePickupScheduler.java)
+  - [`Step5IssueExecutionService`](order-api/src/main/java/com/example/orderapi/service/Step5IssueExecutionService.java)
+  - [`scripts/auto_issue_executor.py`](scripts/auto_issue_executor.py)
+- Work packet + PR scaffolding helpers:
+  - [`scripts/build_work_packet.py`](scripts/build_work_packet.py)
+  - [`scripts/prepare_pr_scaffold.py`](scripts/prepare_pr_scaffold.py)
+- Step 5 audit events are written append-only to JSONL.
+
+### Step 6: PR review intake/reply scaffolding
+
+- Review retrieval/classification/template helpers:
+  - [`scripts/fetch_pr_review_feedback.py`](scripts/fetch_pr_review_feedback.py)
+  - [`scripts/classify_review_comments.py`](scripts/classify_review_comments.py)
+  - [`scripts/review_response_templates.py`](scripts/review_response_templates.py)
+  - [`scripts/reconcile_after_merge.py`](scripts/reconcile_after_merge.py)
+- Step 6 lifecycle audit entries are append-only via [`scripts/step6_audit_log.py`](scripts/step6_audit_log.py).
+
+### Governance and scope boundaries
+
+- This remains a portfolio project:
+  - optimize for readable, reviewable, small-scope behavior
+  - keep human-in-the-loop governance for normal merge decisions
+  - defer non-critical hardening when happy-path behavior is already correct
+- Security-sensitive fixes were applied in Step 5 fallback paths to avoid token-in-argv exposure and improve failure handling clarity.
+
+---
+
 ## 🤖 Agentic Build Showcase
 
 This repository now also serves as a portfolio example of **agentic software delivery**.
