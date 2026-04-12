@@ -46,6 +46,15 @@ services:
       timeout: 5s
       retries: 20
 
+  github-mcp:
+    image: ghcr.io/github/github-mcp-server:latest
+    container_name: learning-github-mcp
+    command: ["http", "--port", "8082"]
+    environment:
+      GITHUB_PERSONAL_ACCESS_TOKEN: ${APP_GITHUB_TOKEN}
+      GITHUB_TOOLSETS: issues,labels,pull_requests
+    restart: unless-stopped
+
   order-api:
     build:
       context: ./order-api
@@ -55,6 +64,7 @@ services:
       - .env
     environment:
       SPRING_DOCKER_COMPOSE_ENABLED: "false"
+      APP_GITHUB_TOKEN: ${APP_GITHUB_TOKEN}
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/learning_orders?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: appuser
       SPRING_DATASOURCE_PASSWORD: apppass
@@ -63,6 +73,9 @@ services:
       APP_LAMBDA_ENDPOINT: http://localstack:4566
       APP_LAMBDA_REGION: us-east-1
       APP_LAMBDA_FUNCTION_NAME: shipping-rule-lambda
+      APP_GITHUB_PROVIDER: ${APP_GITHUB_PROVIDER:-mcp}
+      APP_GITHUB_MCP_BASE_URL: ${APP_GITHUB_MCP_BASE_URL:-http://github-mcp:8082}
+      APP_GITHUB_REPOSITORY: ${APP_GITHUB_REPOSITORY:-pbushan/learning-order-system-ai}
       APP_STEP5_REPO_ROOT: /workspace
       APP_STEP5_EXECUTOR_SCRIPT_PATH: /workspace/scripts/auto_issue_executor.py
     ports:
@@ -74,6 +87,8 @@ services:
         condition: service_healthy
       localstack:
         condition: service_healthy
+      github-mcp:
+        condition: service_started
     restart: unless-stopped
     volumes:
       - ./:/workspace

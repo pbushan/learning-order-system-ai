@@ -38,6 +38,9 @@ app:
       max-subtasks: 5
     audit-log-path: order-api/audit/intake-chat.jsonl
   github:
-    token: ${GITHUB_TOKEN:}
+    token: ${APP_GITHUB_TOKEN:}
+    provider: ${APP_GITHUB_PROVIDER:mcp}
+    mcp-base-url: ${APP_GITHUB_MCP_BASE_URL:http://github-mcp:8082}
+    repository: ${APP_GITHUB_REPOSITORY:pbushan/learning-order-system-ai}
     owner: pbushan
     repo: learning-order-system-ai

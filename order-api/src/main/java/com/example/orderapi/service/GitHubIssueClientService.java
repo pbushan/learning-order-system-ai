@@ -4,9 +4,13 @@ import com.example.orderapi.dto.ApprovedGitHubIssue;
 import com.example.orderapi.dto.DecompositionStory;
 import com.example.orderapi.dto.GitHubIssueSummary;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -15,28 +19,54 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.util.ArrayList;
-import java.util.Locale;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class GitHubIssueClientService {
 
+    private static final Pattern ISSUE_URL_PATTERN = Pattern.compile("/issues/(\\d+)$");
+
     private final String token;
     private final String owner;
     private final String repo;
+    private final String provider;
     private final FileAuditLogService fileAuditLogService;
     private final RestClient restClient;
+    private final RestClient mcpRestClient;
+    private final ObjectMapper objectMapper;
 
     public GitHubIssueClientService(@Value("${app.github.token:}") String token,
                                     @Value("${app.github.owner:}") String owner,
                                     @Value("${app.github.repo:}") String repo,
+                                    @Value("${app.github.repository:}") String repository,
+                                    @Value("${app.github.provider:mcp}") String provider,
+                                    @Value("${app.github.mcp-base-url:http://github-mcp:8082}") String mcpBaseUrl,
                                     FileAuditLogService fileAuditLogService) {
         this.token = token;
-        this.owner = owner;
-        this.repo = repo;
+        this.provider = StringUtils.hasText(provider) ? provider.trim().toLowerCase(Locale.ROOT) : "mcp";
         this.fileAuditLogService = fileAuditLogService;
+        this.objectMapper = new ObjectMapper();
+
+        String resolvedOwner = owner;
+        String resolvedRepo = repo;
+        if ((!StringUtils.hasText(resolvedOwner) || !StringUtils.hasText(resolvedRepo))
+                && StringUtils.hasText(repository)
+                && repository.contains("/")) {
+            String[] parts = repository.trim().split("/", 2);
+            if (!StringUtils.hasText(resolvedOwner)) {
+                resolvedOwner = parts[0];
+            }
+            if (!StringUtils.hasText(resolvedRepo) && parts.length > 1) {
+                resolvedRepo = parts[1];
+            }
+        }
+        this.owner = resolvedOwner;
+        this.repo = resolvedRepo;
 
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(5000);
@@ -48,15 +78,18 @@ public class GitHubIssueClientService {
                 .defaultHeader(HttpHeaders.ACCEPT, "application/vnd.github+json")
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .build();
+
+        this.mcpRestClient = RestClient.builder()
+                .baseUrl(mcpBaseUrl)
+                .requestFactory(requestFactory)
+                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .defaultHeader(HttpHeaders.ACCEPT, "application/json, text/event-stream")
+                .build();
     }
 
     public GitHubIssueSummary createIssueForStory(String sourceType, DecompositionStory story) {
-        if (!StringUtils.hasText(token)) {
-            throw new IllegalStateException("GitHub token is not configured. Set app.github.token or GITHUB_TOKEN.");
-        }
-        if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
-            throw new IllegalStateException("GitHub repository is not configured. Set app.github.owner and app.github.repo.");
-        }
+        validateTokenConfigured();
+        validateRepositoryConfigured();
         if (story == null || !StringUtils.hasText(story.getTitle())) {
             throw new IllegalArgumentException("story.title is required");
         }
@@ -64,7 +97,7 @@ public class GitHubIssueClientService {
             throw new IllegalArgumentException("sourceType is required");
         }
 
-        String normalizedSourceType = sourceType.trim().toLowerCase();
+        String normalizedSourceType = sourceType.trim().toLowerCase(Locale.ROOT);
         List<String> labels = List.of(
                 "ai-generated",
                 "needs-human-approval",
@@ -72,42 +105,25 @@ public class GitHubIssueClientService {
                 "portfolio"
         );
 
-        CreateIssueRequest request = new CreateIssueRequest();
-        request.setTitle(story.getTitle().trim());
-        request.setBody(buildIssueBody(story));
-        request.setLabels(labels);
-
-        GitHubIssueResponse response = restClient.post()
-                .uri("/repos/{owner}/{repo}/issues", owner.trim(), repo.trim())
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
-                .body(request)
-                .retrieve()
-                .body(GitHubIssueResponse.class);
-
-        if (response == null) {
-            throw new IllegalStateException("GitHub issue creation failed: empty response.");
+        if (useMcpProvider()) {
+            return createIssueForStoryViaMcp(story, labels);
         }
-
-        GitHubIssueSummary summary = new GitHubIssueSummary();
-        summary.setIssueNumber(response.getNumber());
-        summary.setIssueUrl(response.getHtmlUrl());
-        summary.setTitle(response.getTitle());
-        summary.setLabels(extractLabelNames(response.getLabels()));
-        return summary;
+        return createIssueForStoryDirect(story, labels);
     }
 
     public void addIssueLabel(long issueNumber, String label) {
-        if (!StringUtils.hasText(token)) {
-            throw new IllegalStateException("GitHub token is not configured. Set app.github.token or GITHUB_TOKEN.");
-        }
-        if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
-            throw new IllegalStateException("GitHub repository is not configured. Set app.github.owner and app.github.repo.");
-        }
+        validateTokenConfigured();
+        validateRepositoryConfigured();
         if (issueNumber <= 0) {
             throw new IllegalArgumentException("issueNumber must be > 0");
         }
         if (!StringUtils.hasText(label)) {
             throw new IllegalArgumentException("label is required");
+        }
+
+        if (useMcpProvider()) {
+            addIssueLabelViaMcp(issueNumber, label.trim());
+            return;
         }
 
         Map<String, Object> body = new LinkedHashMap<>();
@@ -124,7 +140,7 @@ public class GitHubIssueClientService {
             String responseBody = ex.getResponseBodyAsString();
             if (ex.getStatusCode().value() == 422
                     && responseBody != null
-                    && (responseBody.contains("already_exists") || responseBody.toLowerCase().contains("already exists"))) {
+                    && (responseBody.contains("already_exists") || responseBody.toLowerCase(Locale.ROOT).contains("already exists"))) {
                 // Treat label-already-present responses as idempotent success for pickup.
                 return;
             }
@@ -133,17 +149,17 @@ public class GitHubIssueClientService {
     }
 
     public boolean removeIssueLabel(long issueNumber, String label) {
-        if (!StringUtils.hasText(token)) {
-            throw new IllegalStateException("GitHub token is not configured. Set app.github.token or GITHUB_TOKEN.");
-        }
-        if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
-            throw new IllegalStateException("GitHub repository is not configured. Set app.github.owner and app.github.repo.");
-        }
+        validateTokenConfigured();
+        validateRepositoryConfigured();
         if (issueNumber <= 0) {
             throw new IllegalArgumentException("issueNumber must be > 0");
         }
         if (!StringUtils.hasText(label)) {
             throw new IllegalArgumentException("label is required");
+        }
+
+        if (useMcpProvider()) {
+            return removeIssueLabelViaMcp(issueNumber, label.trim());
         }
 
         int attempts = 0;
@@ -210,17 +226,18 @@ public class GitHubIssueClientService {
     }
 
     public List<ApprovedGitHubIssue> discoverApprovedIssues() {
-        if (!StringUtils.hasText(token)) {
-            throw new IllegalStateException("GitHub token is not configured. Set app.github.token or GITHUB_TOKEN.");
-        }
-        if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
-            throw new IllegalStateException("GitHub repository is not configured. Set app.github.owner and app.github.repo.");
-        }
+        validateTokenConfigured();
+        validateRepositoryConfigured();
 
         List<ApprovedGitHubIssue> issues = new ArrayList<>();
         String error = null;
 
         try {
+            if (useMcpProvider()) {
+                issues = discoverIssuesViaMcp(List.of("approved-for-dev"), true);
+                return issues;
+            }
+
             GitHubIssueListItem[] response = restClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path("/repos/{owner}/{repo}/issues")
@@ -263,11 +280,11 @@ public class GitHubIssueClientService {
     }
 
     public List<ApprovedGitHubIssue> discoverApprovedInProgressIssues() {
-        if (!StringUtils.hasText(token)) {
-            throw new IllegalStateException("GitHub token is not configured. Set app.github.token or GITHUB_TOKEN.");
-        }
-        if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
-            throw new IllegalStateException("GitHub repository is not configured. Set app.github.owner and app.github.repo.");
+        validateTokenConfigured();
+        validateRepositoryConfigured();
+
+        if (useMcpProvider()) {
+            return discoverIssuesViaMcp(List.of("ai-in-progress"), false);
         }
 
         GitHubIssueListItem[] response = restClient.get()
@@ -302,6 +319,284 @@ public class GitHubIssueClientService {
             issues.add(normalized);
         }
         return issues;
+    }
+
+    private GitHubIssueSummary createIssueForStoryDirect(DecompositionStory story, List<String> labels) {
+        CreateIssueRequest request = new CreateIssueRequest();
+        request.setTitle(story.getTitle().trim());
+        request.setBody(buildIssueBody(story));
+        request.setLabels(labels);
+
+        GitHubIssueResponse response = restClient.post()
+                .uri("/repos/{owner}/{repo}/issues", owner.trim(), repo.trim())
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                .body(request)
+                .retrieve()
+                .body(GitHubIssueResponse.class);
+
+        if (response == null) {
+            throw new IllegalStateException("GitHub issue creation failed: empty response.");
+        }
+
+        GitHubIssueSummary summary = new GitHubIssueSummary();
+        summary.setIssueNumber(response.getNumber());
+        summary.setIssueUrl(response.getHtmlUrl());
+        summary.setTitle(response.getTitle());
+        summary.setLabels(extractLabelNames(response.getLabels()));
+        return summary;
+    }
+
+    private GitHubIssueSummary createIssueForStoryViaMcp(DecompositionStory story, List<String> labels) {
+        Map<String, Object> arguments = new LinkedHashMap<>();
+        arguments.put("method", "create");
+        arguments.put("owner", owner.trim());
+        arguments.put("repo", repo.trim());
+        arguments.put("title", story.getTitle().trim());
+        arguments.put("body", buildIssueBody(story));
+        arguments.put("labels", labels);
+
+        JsonNode result = callMcpTool("issue_write", arguments);
+        String contentText = extractMcpContentText(result);
+        JsonNode issueResponse = parseJson(contentText);
+
+        String issueUrl = issueResponse.path("url").asText("");
+        long issueNumber = extractIssueNumber(issueUrl);
+        if (issueNumber <= 0) {
+            throw new IllegalStateException("GitHub issue creation failed: MCP response missing issue number.");
+        }
+
+        GitHubIssueSummary summary = new GitHubIssueSummary();
+        summary.setIssueNumber(issueNumber);
+        summary.setIssueUrl(issueUrl);
+        summary.setTitle(story.getTitle().trim());
+        summary.setLabels(labels);
+        return summary;
+    }
+
+    private void addIssueLabelViaMcp(long issueNumber, String label) {
+        List<String> labels = fetchIssueLabelNamesWithRetry(issueNumber);
+        for (String existing : labels) {
+            if (StringUtils.hasText(existing)
+                    && existing.trim().equalsIgnoreCase(label)) {
+                return;
+            }
+        }
+        List<String> updated = new ArrayList<>(labels);
+        updated.add(label);
+        updateIssueLabelsViaMcp(issueNumber, updated);
+    }
+
+    private boolean removeIssueLabelViaMcp(long issueNumber, String label) {
+        List<String> labels = fetchIssueLabelNamesWithRetry(issueNumber);
+        if (labels.isEmpty()) {
+            return false;
+        }
+        List<String> updated = new ArrayList<>();
+        boolean removed = false;
+        for (String existing : labels) {
+            if (StringUtils.hasText(existing)
+                    && existing.trim().equals(label)) {
+                removed = true;
+                continue;
+            }
+            updated.add(existing);
+        }
+        if (!removed) {
+            return false;
+        }
+        updateIssueLabelsViaMcp(issueNumber, updated);
+        return true;
+    }
+
+    private void updateIssueLabelsViaMcp(long issueNumber, List<String> labels) {
+        Map<String, Object> arguments = new LinkedHashMap<>();
+        arguments.put("method", "update");
+        arguments.put("owner", owner.trim());
+        arguments.put("repo", repo.trim());
+        arguments.put("issue_number", issueNumber);
+        arguments.put("labels", labels);
+        callMcpTool("issue_write", arguments);
+    }
+
+    private JsonNode callMcpTool(String toolName, Map<String, Object> arguments) {
+        String sessionId = initializeMcpSession();
+        sendMcpInitializedNotification(sessionId);
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("jsonrpc", "2.0");
+        payload.put("id", 2);
+        payload.put("method", "tools/call");
+        payload.put("params", Map.of("name", toolName, "arguments", arguments));
+
+        String responseBody = mcpRestClient.post()
+                .uri("/")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                .header("Mcp-Session-Id", sessionId)
+                .body(payload)
+                .retrieve()
+                .body(String.class);
+
+        JsonNode envelope = parseMcpEnvelope(responseBody);
+        JsonNode result = envelope.path("result");
+        if (result.path("isError").asBoolean(false)) {
+            String message = extractMcpContentText(result);
+            throw new IllegalStateException("GitHub MCP call failed: " + message);
+        }
+        if (result.isMissingNode()) {
+            throw new IllegalStateException("GitHub MCP call failed: empty result.");
+        }
+        return result;
+    }
+
+    private String initializeMcpSession() {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("jsonrpc", "2.0");
+        payload.put("id", 1);
+        payload.put("method", "initialize");
+        payload.put("params", Map.of(
+                "protocolVersion", "2025-03-26",
+                "capabilities", Map.of(),
+                "clientInfo", Map.of("name", "order-api", "version", "1.0")
+        ));
+
+        ResponseEntity<String> response = mcpRestClient.post()
+                .uri("/")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                .body(payload)
+                .retrieve()
+                .toEntity(String.class);
+
+        String sessionId = response.getHeaders().getFirst("Mcp-Session-Id");
+        if (!StringUtils.hasText(sessionId)) {
+            throw new IllegalStateException("GitHub MCP session initialization failed: missing Mcp-Session-Id header.");
+        }
+        return sessionId;
+    }
+
+    private void sendMcpInitializedNotification(String sessionId) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("jsonrpc", "2.0");
+        payload.put("method", "notifications/initialized");
+        payload.put("params", Map.of());
+
+        mcpRestClient.post()
+                .uri("/")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                .header("Mcp-Session-Id", sessionId)
+                .body(payload)
+                .retrieve()
+                .toBodilessEntity();
+    }
+
+    private JsonNode parseMcpEnvelope(String rawBody) {
+        if (!StringUtils.hasText(rawBody)) {
+            throw new IllegalStateException("GitHub MCP call failed: empty response body.");
+        }
+
+        String trimmed = rawBody.trim();
+        if (trimmed.startsWith("{")) {
+            return parseJson(trimmed);
+        }
+
+        for (String line : rawBody.split("\\n")) {
+            if (line.startsWith("data: ")) {
+                return parseJson(line.substring(6).trim());
+            }
+        }
+
+        throw new IllegalStateException("GitHub MCP call failed: unsupported response format.");
+    }
+
+    private String extractMcpContentText(JsonNode resultNode) {
+        JsonNode contentArray = resultNode.path("content");
+        if (!contentArray.isArray() || contentArray.isEmpty()) {
+            return "";
+        }
+        JsonNode textNode = contentArray.get(0).path("text");
+        return textNode.asText("");
+    }
+
+    private JsonNode parseJson(String json) {
+        try {
+            return objectMapper.readTree(json);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("Failed to parse GitHub response payload.", ex);
+        }
+    }
+
+    private long extractIssueNumber(String issueUrl) {
+        if (!StringUtils.hasText(issueUrl)) {
+            return 0L;
+        }
+        Matcher matcher = ISSUE_URL_PATTERN.matcher(issueUrl.trim());
+        if (!matcher.find()) {
+            return 0L;
+        }
+        return Long.parseLong(matcher.group(1));
+    }
+
+    private List<ApprovedGitHubIssue> discoverIssuesViaMcp(List<String> labels, boolean excludeInProgress) {
+        Map<String, Object> arguments = new LinkedHashMap<>();
+        arguments.put("owner", owner.trim());
+        arguments.put("repo", repo.trim());
+        arguments.put("state", "OPEN");
+        arguments.put("perPage", 100);
+        if (labels != null && !labels.isEmpty()) {
+            arguments.put("labels", labels);
+        }
+
+        JsonNode result = callMcpTool("list_issues", arguments);
+        String contentText = extractMcpContentText(result);
+        JsonNode payload = parseJson(contentText);
+        JsonNode issuesNode = payload.path("issues");
+
+        if (!issuesNode.isArray() || issuesNode.isEmpty()) {
+            return List.of();
+        }
+
+        List<ApprovedGitHubIssue> issues = new ArrayList<>();
+        for (JsonNode issueNode : issuesNode) {
+            if (issueNode == null || issueNode.path("pull_request").isObject()) {
+                continue;
+            }
+            List<String> issueLabels = extractMcpLabelNames(issueNode.path("labels"));
+            List<String> normalizedLabels = normalizeLabels(issueLabels);
+            if (excludeInProgress && normalizedLabels.contains("ai-in-progress")) {
+                continue;
+            }
+
+            ApprovedGitHubIssue normalized = new ApprovedGitHubIssue();
+            normalized.setIssueNumber(issueNode.path("number").asLong(0));
+            normalized.setTitle(issueNode.path("title").asText(""));
+            normalized.setBody(issueNode.path("body").asText(""));
+            normalized.setLabels(issueLabels);
+            if (normalized.getIssueNumber() > 0) {
+                issues.add(normalized);
+            }
+        }
+        return issues;
+    }
+
+    private List<String> extractMcpLabelNames(JsonNode labelsNode) {
+        if (labelsNode == null || labelsNode.isMissingNode() || !labelsNode.isArray()) {
+            return List.of();
+        }
+        List<String> labels = new ArrayList<>();
+        for (JsonNode labelNode : labelsNode) {
+            if (labelNode == null || labelNode.isNull()) {
+                continue;
+            }
+            if (labelNode.isTextual()) {
+                if (StringUtils.hasText(labelNode.asText())) {
+                    labels.add(labelNode.asText());
+                }
+                continue;
+            }
+            if (labelNode.isObject() && StringUtils.hasText(labelNode.path("name").asText())) {
+                labels.add(labelNode.path("name").asText());
+            }
+        }
+        return labels;
     }
 
     private void safeAuditApprovedIssueSelection(List<ApprovedGitHubIssue> issues, String error) {
@@ -379,6 +674,17 @@ public class GitHubIssueClientService {
     }
 
     private List<String> fetchIssueLabelNames(long issueNumber) {
+        if (useMcpProvider()) {
+            Map<String, Object> arguments = new LinkedHashMap<>();
+            arguments.put("method", "get");
+            arguments.put("owner", owner.trim());
+            arguments.put("repo", repo.trim());
+            arguments.put("issue_number", issueNumber);
+            JsonNode result = callMcpTool("issue_read", arguments);
+            JsonNode payload = parseJson(extractMcpContentText(result));
+            return extractMcpLabelNames(payload.path("labels"));
+        }
+
         GitHubIssueListItem issue = restClient.get()
                 .uri("/repos/{owner}/{repo}/issues/{issueNumber}", owner.trim(), repo.trim(), issueNumber)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
@@ -434,6 +740,22 @@ public class GitHubIssueClientService {
             normalized.add(label.trim().toLowerCase(Locale.ROOT));
         }
         return normalized;
+    }
+
+    private void validateTokenConfigured() {
+        if (!StringUtils.hasText(token)) {
+            throw new IllegalStateException("GitHub token is not configured. Set app.github.token or APP_GITHUB_TOKEN.");
+        }
+    }
+
+    private void validateRepositoryConfigured() {
+        if (!StringUtils.hasText(owner) || !StringUtils.hasText(repo)) {
+            throw new IllegalStateException("GitHub repository is not configured. Set app.github.owner/app.github.repo or APP_GITHUB_REPOSITORY.");
+        }
+    }
+
+    private boolean useMcpProvider() {
+        return "mcp".equals(provider);
     }
 
     static class CreateIssueRequest {

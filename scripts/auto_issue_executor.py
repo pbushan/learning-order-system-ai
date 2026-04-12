@@ -83,7 +83,7 @@ def run_cmd_with_gh_auth_fallback(*args: str) -> subprocess.CompletedProcess[str
         return proc_with_env
 
     env = os.environ.copy()
-    env.pop("GITHUB_TOKEN", None)
+    env.pop("APP_GITHUB_TOKEN", None)
     env.pop("CODEX_GITHUB_TOKEN", None)
     return subprocess.run(
         cmd,
@@ -96,7 +96,7 @@ def run_cmd_with_gh_auth_fallback(*args: str) -> subprocess.CompletedProcess[str
 
 
 def token_from_env() -> str:
-    return (os.getenv("CODEX_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN") or "").strip()
+    return (os.getenv("APP_GITHUB_TOKEN") or "").strip()
 
 
 def github_request(method: str, owner: str, repo: str, path: str, token: str, body: Any | None = None) -> Any:
@@ -739,7 +739,7 @@ def main() -> int:
     args = parse_args()
     token = token_from_env()
     if not token:
-        print("Missing CODEX_GITHUB_TOKEN or GITHUB_TOKEN.", file=sys.stderr)
+        print("Missing APP_GITHUB_TOKEN.", file=sys.stderr)
         return 1
 
     while True:
