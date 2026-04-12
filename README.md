@@ -79,6 +79,14 @@ This repo now includes an end-to-end portfolio workflow from intake to GitHub is
   - [`scripts/reconcile_after_merge.py`](scripts/reconcile_after_merge.py)
 - Step 6 lifecycle audit entries are append-only via [`scripts/step6_audit_log.py`](scripts/step6_audit_log.py).
 
+### Step 5.5: PR creation via MCP
+
+- Step 5 executor keeps local branch + commit + push behavior.
+- Pull request creation is delegated to GitHub MCP (`create_pull_request` tool).
+- Runtime flow:
+  - `auto_issue_executor.py` -> GitHub MCP -> GitHub
+- This keeps PR creation on the MCP tool boundary while preserving the existing Step 5 orchestrator structure.
+
 ### Governance and scope boundaries
 
 - This remains a portfolio project:
@@ -86,6 +94,53 @@ This repo now includes an end-to-end portfolio workflow from intake to GitHub is
   - keep human-in-the-loop governance for normal merge decisions
   - defer non-critical hardening when happy-path behavior is already correct
 - Security-sensitive fixes were applied in Step 5 fallback paths to avoid token-in-argv exposure and improve failure handling clarity.
+
+## GitHub MCP Integration (Step 5 Extension)
+
+### Architecture (implemented)
+
+```text
+Step 5 scheduler/executor (order-api + auto_issue_executor.py)
+  -> GitHub MCP tool server (github-mcp container)
+  -> GitHub API
+```
+
+MCP is used as a tool server boundary for runtime GitHub operations. This keeps app orchestration logic in the existing services/scripts while avoiding direct ad-hoc GitHub API coupling in the PR-creation step.
+
+### Auth separation
+
+- `APP_GITHUB_TOKEN`
+  - used by application runtime
+  - used by MCP server (`GITHUB_PERSONAL_ACCESS_TOKEN`)
+  - fine-grained PAT
+  - restricted to `pbushan/learning-order-system-ai`
+- `CODEX_GITHUB_TOKEN`
+  - used only by local Codex workflows
+  - not used by application runtime
+  - not passed into containers
+
+### Setting up APP_GITHUB_TOKEN (Required)
+
+1. Create a **fine-grained** PAT.
+2. Restrict repository access to:
+   - `pbushan/learning-order-system-ai`
+3. Grant minimum permissions:
+   - Issues: Read and write
+   - Pull requests: Read and write
+   - Contents: Read and write
+   - Metadata: Read
+
+Do **NOT** use a classic PAT for `APP_GITHUB_TOKEN`.
+
+### Runtime notes
+
+- Internal MCP URL: `http://github-mcp:8082`
+- MCP runs on an internal Docker network and does not expose ports to avoid conflicts.
+- Current app-side MCP operations:
+  - issue creation
+  - issue label updates
+  - approved/in-progress issue discovery
+  - Step 5 PR creation via MCP tool call (`create_pull_request`)
 
 ---
 

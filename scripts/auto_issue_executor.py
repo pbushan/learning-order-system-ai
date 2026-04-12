@@ -83,8 +83,7 @@ def run_cmd_with_gh_auth_fallback(*args: str) -> subprocess.CompletedProcess[str
         return proc_with_env
 
     env = os.environ.copy()
-    env.pop("GITHUB_TOKEN", None)
-    env.pop("CODEX_GITHUB_TOKEN", None)
+    env.pop("APP_GITHUB_TOKEN", None)
     return subprocess.run(
         cmd,
         cwd=str(REPO_ROOT),
@@ -96,7 +95,19 @@ def run_cmd_with_gh_auth_fallback(*args: str) -> subprocess.CompletedProcess[str
 
 
 def token_from_env() -> str:
-    return (os.getenv("CODEX_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN") or "").strip()
+    return (os.getenv("APP_GITHUB_TOKEN") or "").strip()
+
+
+def mcp_base_url() -> str:
+    return (os.getenv("APP_GITHUB_MCP_BASE_URL") or "http://github-mcp:8082").rstrip("/")
+
+
+def repository_from_env() -> tuple[str, str]:
+    value = (os.getenv("APP_GITHUB_REPOSITORY") or "").strip()
+    if not value or "/" not in value:
+        return "", ""
+    owner, repo = value.split("/", 1)
+    return owner.strip(), repo.strip()
 
 
 def github_request(method: str, owner: str, repo: str, path: str, token: str, body: Any | None = None) -> Any:
@@ -116,6 +127,115 @@ def github_request(method: str, owner: str, repo: str, path: str, token: str, bo
     with urllib.request.urlopen(req, timeout=30) as resp:
         raw = resp.read().decode("utf-8")
         return json.loads(raw) if raw else {}
+
+
+def mcp_request(url: str, token: str, body: dict[str, Any], session_id: str | None = None) -> tuple[dict[str, str], str]:
+    data = json.dumps(body, ensure_ascii=True).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "Authorization": f"Bearer {token}",
+    }
+    if session_id:
+        headers["Mcp-Session-Id"] = session_id
+
+    req = urllib.request.Request(url=url, method="POST", data=data, headers=headers)
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        raw = resp.read().decode("utf-8")
+        return dict(resp.headers.items()), raw
+
+
+def parse_mcp_envelope(raw: str) -> dict[str, Any]:
+    text = (raw or "").strip()
+    if not text:
+        raise RuntimeError("empty MCP response body")
+    if text.startswith("{"):
+        return json.loads(text)
+    for line in text.splitlines():
+        if line.startswith("data: "):
+            payload = line[len("data: "):].strip()
+            if payload:
+                return json.loads(payload)
+    raise RuntimeError(f"unsupported MCP response format: {text[:200]}")
+
+
+def extract_mcp_text(envelope: dict[str, Any]) -> str:
+    result = envelope.get("result") if isinstance(envelope, dict) else None
+    if not isinstance(result, dict):
+        return ""
+    content = result.get("content")
+    if not isinstance(content, list) or not content:
+        return ""
+    first = content[0]
+    if isinstance(first, dict):
+        return str(first.get("text", "")).strip()
+    return ""
+
+
+def call_mcp_tool(tool_name: str, arguments: dict[str, Any], token: str) -> dict[str, Any]:
+    base_url = mcp_base_url()
+    endpoint = f"{base_url}/"
+    last_error = ""
+    delay = 1.0
+
+    for attempt in range(1, 4):
+        try:
+            init_headers, _ = mcp_request(
+                endpoint,
+                token,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-03-26",
+                        "capabilities": {},
+                        "clientInfo": {"name": "step5-auto-issue-executor", "version": "1.0"},
+                    },
+                },
+            )
+            session_id = init_headers.get("Mcp-Session-Id") or init_headers.get("mcp-session-id")
+            if not session_id:
+                raise RuntimeError("MCP session initialization did not return Mcp-Session-Id")
+
+            mcp_request(
+                endpoint,
+                token,
+                {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/initialized",
+                    "params": {},
+                },
+                session_id=session_id,
+            )
+
+            _, tool_raw = mcp_request(
+                endpoint,
+                token,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {"name": tool_name, "arguments": arguments},
+                },
+                session_id=session_id,
+            )
+            envelope = parse_mcp_envelope(tool_raw)
+            result = envelope.get("result") if isinstance(envelope, dict) else None
+            if isinstance(result, dict) and result.get("isError"):
+                message = extract_mcp_text(envelope) or str(result)
+                raise RuntimeError(message)
+            if not isinstance(result, dict):
+                raise RuntimeError(f"missing MCP result payload: {envelope}")
+            return result
+        except Exception as ex:
+            last_error = str(ex)
+            if attempt == 3:
+                break
+            time.sleep(delay)
+            delay *= 2
+
+    raise RuntimeError(f"MCP tool call failed ({tool_name}): {last_error}")
 
 
 def discover_eligible_issues(owner: str, repo: str, token: str) -> list[dict[str, Any]]:
@@ -445,52 +565,61 @@ def commit_and_push(token: str, branch: str, issue_number: int, changed_files: l
     return message
 
 
-def resolve_open_pr(owner: str, repo: str, token: str, branch: str) -> int | None:
-    query = urllib.parse.urlencode({"state": "open", "head": f"{owner}:{branch}", "per_page": "1"})
-    prs = github_request("GET", owner, repo, f"/pulls?{query}", token)
-    if prs:
-        return int(prs[0]["number"])
-    return None
-
-
 def create_pr(owner: str, repo: str, token: str, branch: str, scaffold: dict[str, Any]) -> tuple[int, str]:
-    existing = resolve_open_pr(owner, repo, token, branch)
-    if existing is not None:
-        pr = github_request("GET", owner, repo, f"/pulls/{existing}", token)
-        return int(pr["number"]), pr.get("html_url", "")
+    env_owner, env_repo = repository_from_env()
+    resolved_owner = owner or env_owner
+    resolved_repo = repo or env_repo
+    if not resolved_owner or not resolved_repo:
+        raise RuntimeError("Missing repository owner/repo for MCP pull request creation.")
 
-    body = {
-        "title": scaffold["prTitle"],
-        "head": branch,
-        "base": "main",
-        "body": scaffold["prBody"],
-    }
-    try:
-        pr = github_request("POST", owner, repo, "/pulls", token, body)
-        return int(pr["number"]), pr.get("html_url", "")
-    except urllib.error.HTTPError as exc:
-        if exc.code != 403:
-            raise
-        proc = run_cmd_with_gh_auth_fallback(
-            "gh",
-            "pr",
-            "create",
-            "--base",
-            "main",
-            "--head",
-            branch,
-            "--title",
-            scaffold["prTitle"],
-            "--body",
-            scaffold["prBody"],
-        )
-        if proc.returncode != 0:
-            raise RuntimeError(f"PR creation failed: {proc.stderr.strip() or proc.stdout.strip() or 'unknown error'}")
-        pr_url = (proc.stdout.strip().splitlines() or [""])[-1].strip()
-        pr_number = int(pr_url.rstrip("/").split("/")[-1]) if pr_url else resolve_open_pr(owner, repo, token, branch)
-        if not pr_number:
-            raise RuntimeError("PR created via gh but could not resolve PR number.")
-        return int(pr_number), pr_url
+    result = call_mcp_tool(
+        "create_pull_request",
+        {
+            "owner": resolved_owner,
+            "repo": resolved_repo,
+            "title": scaffold["prTitle"],
+            "head": branch,
+            "base": "main",
+            "body": scaffold["prBody"],
+        },
+        token,
+    )
+    text = ""
+    content = result.get("content")
+    if isinstance(content, list) and content:
+        first = content[0]
+        if isinstance(first, dict):
+            text = str(first.get("text", "")).strip()
+
+    payload: dict[str, Any] = {}
+    if text.startswith("{"):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                payload = parsed
+        except json.JSONDecodeError:
+            payload = {}
+
+    pr_url = str(payload.get("url") or payload.get("html_url") or "").strip()
+    if not pr_url and "http" in text:
+        match = re.search(r"(https://github\\.com/[^\\s]+/pull/\\d+)", text)
+        if match:
+            pr_url = match.group(1)
+
+    pr_number = 0
+    if "number" in payload:
+        try:
+            pr_number = int(payload.get("number") or 0)
+        except (TypeError, ValueError):
+            pr_number = 0
+    if pr_number <= 0 and pr_url:
+        tail = pr_url.rstrip("/").split("/")[-1]
+        if tail.isdigit():
+            pr_number = int(tail)
+
+    if pr_number <= 0:
+        raise RuntimeError(f"MCP create_pull_request response missing PR number. raw={text[:300]}")
+    return pr_number, pr_url
 
 
 def post_ready_note(owner: str, repo: str, token: str, pr_number: int) -> None:
@@ -739,7 +868,7 @@ def main() -> int:
     args = parse_args()
     token = token_from_env()
     if not token:
-        print("Missing CODEX_GITHUB_TOKEN or GITHUB_TOKEN.", file=sys.stderr)
+        print("Missing APP_GITHUB_TOKEN.", file=sys.stderr)
         return 1
 
     while True:
