@@ -8,6 +8,7 @@ approved issue -> ai-in-progress -> patch -> branch/commit/push -> PR -> merge -
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -287,19 +288,27 @@ def create_or_reuse_branch(branch: str, base: str) -> None:
 def push_branch(token: str, branch: str) -> None:
     token = (token or "").strip()
     direct_push = run_cmd("git", "push", "-u", "origin", branch, check=False)
+    direct_error = (direct_push.stderr or "").strip() or (direct_push.stdout or "").strip()
     if direct_push.returncode == 0:
         return
     if not token:
-        detail = sanitize_git_error((direct_push.stderr or "").strip() or (direct_push.stdout or "").strip(), token)
+        detail = sanitize_git_error(direct_error, token)
+        raise RuntimeError(f"git push failed: {detail}")
+    if not is_auth_push_error(direct_error):
+        detail = sanitize_git_error(direct_error, token)
         raise RuntimeError(f"git push failed: {detail}")
 
     origin_url = run_cmd("git", "remote", "get-url", "origin", check=False).stdout.strip()
     host = parse_remote_host(origin_url)
     if not host:
-        detail = sanitize_git_error((direct_push.stderr or "").strip() or (direct_push.stdout or "").strip(), token)
+        detail = sanitize_git_error(direct_error, token)
         raise RuntimeError(f"git push failed (unsupported remote for credential fallback; primary={detail})")
     try:
         with tempfile.TemporaryDirectory(prefix="step5_git_cred_") as tmp_dir:
+            try:
+                os.chmod(tmp_dir, 0o700)
+            except OSError:
+                pass
             cred_file = Path(tmp_dir) / ".git-credentials"
             cred_file.touch(mode=0o600, exist_ok=True)
             os.chmod(cred_file, 0o600)
@@ -314,13 +323,13 @@ def push_branch(token: str, branch: str) -> None:
                 cwd=str(REPO_ROOT),
                 text=True,
                 input=credential_input,
-                capture_output=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 check=False,
                 env=env,
             )
             if approve_proc.returncode != 0:
-                detail = sanitize_git_error((approve_proc.stderr or "").strip() or (approve_proc.stdout or "").strip(), token)
-                raise RuntimeError(f"failed to stage temporary credentials: {detail}")
+                raise RuntimeError("failed to stage temporary credentials")
             if not cred_file.exists() or cred_file.stat().st_size == 0:
                 raise RuntimeError("failed to stage temporary credentials: credential store is empty")
 
@@ -333,13 +342,13 @@ def push_branch(token: str, branch: str) -> None:
                 env=env,
             )
             if token_push.returncode != 0:
-                primary = sanitize_git_error((direct_push.stderr or "").strip() or (direct_push.stdout or "").strip(), token)
+                primary = sanitize_git_error(direct_error, token)
                 fallback = sanitize_git_error((token_push.stderr or "").strip() or (token_push.stdout or "").strip(), token)
                 raise RuntimeError(f"git push failed (primary={primary}; fallback={fallback})")
     except RuntimeError:
         raise
     except Exception as ex:
-        primary = sanitize_git_error((direct_push.stderr or "").strip() or (direct_push.stdout or "").strip(), token)
+        primary = sanitize_git_error(direct_error, token)
         raise RuntimeError(f"git push failed (primary={primary}; fallback={type(ex).__name__}: {ex})") from ex
 
 
@@ -351,9 +360,12 @@ def sanitize_git_error(raw: str, token: str) -> str:
         text = text.replace(token, "***")
         text = text.replace(urllib.parse.quote(token, safe=""), "***")
         text = text.replace(urllib.parse.quote_plus(token), "***")
+        basic = base64.b64encode(f"x-access-token:{token}".encode("utf-8")).decode("ascii")
+        text = text.replace(basic, "***")
     text = re.sub(r"gh[pousr]_[A-Za-z0-9_]+", "***", text)
     text = re.sub(r"github_pat_[A-Za-z0-9_]+", "***", text)
     text = re.sub(r"(?i)(authorization:\s*(?:bearer|token)\s+)[^\s]+", r"\1***", text)
+    text = re.sub(r"(?i)(authorization:\s*basic\s+)[^\s]+", r"\1***", text)
     text = re.sub(r"(?i)(password=)[^\s]+", r"\1***", text)
     text = re.sub(r"(?i)(token=)[^\s&]+", r"\1***", text)
     text = re.sub(r"https://[^@\s]+@", "https://***@", text)
@@ -376,6 +388,20 @@ def parse_remote_host(remote_url: str) -> str:
     if ssh_match:
         return ssh_match.group(1).strip()
     return ""
+
+
+def is_auth_push_error(raw: str) -> bool:
+    text = (raw or "").lower()
+    return any(
+        marker in text
+        for marker in [
+            "authentication failed",
+            "could not read username",
+            "invalid username or password",
+            "http basic: access denied",
+            "bad credentials",
+        ]
+    )
 
 
 def commit_and_push(token: str, branch: str, issue_number: int, changed_files: list[str]) -> None:
