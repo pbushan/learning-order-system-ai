@@ -142,18 +142,26 @@ def github_request(method: str, owner: str, repo: str, path: str, token: str, bo
         except Exception:
             raw = ""
         detail = ""
+        parsed_error: dict[str, Any] = {}
         if raw:
             try:
-                parsed = json.loads(raw)
-                detail = str(parsed.get("message") or "").strip()
+                parsed_candidate = json.loads(raw)
+                if isinstance(parsed_candidate, dict):
+                    parsed_error = parsed_candidate
+                detail = str(parsed_error.get("message") or "").strip()
             except Exception:
                 detail = raw.strip()
-        if exc.code == 403 and is_permission_blocked_message(detail):
-            raise GitHubPermissionError(
-                "APP_GITHUB_TOKEN lacks required write permissions for this operation. "
-                "Grant fine-grained token access to this repository with Contents: Read and write, "
-                "Pull requests: Read and write, Issues: Read and write, Metadata: Read."
-            ) from exc
+        if exc.code == 403:
+            forbidden_type = classify_github_forbidden(detail, parsed_error, dict(exc.headers.items()) if exc.headers else {})
+            if forbidden_type == "permission":
+                raise GitHubPermissionError(
+                    "APP_GITHUB_TOKEN lacks required write permissions for this operation. "
+                    "Grant fine-grained token access to this repository with Contents: Read and write, "
+                    "Pull requests: Read and write, Issues: Read and write, Metadata: Read."
+                ) from exc
+            if forbidden_type == "transient":
+                suffix = f": {detail}" if detail else ""
+                raise RuntimeError(f"GitHub API {method} {path} temporarily denied request (403){suffix}") from exc
         suffix = f": {detail}" if detail else ""
         raise RuntimeError(f"GitHub API {method} {path} failed with {exc.code}{suffix}") from exc
 
@@ -171,6 +179,33 @@ def is_permission_blocked_message(detail: str) -> bool:
             "must have admin rights",
         ]
     )
+
+
+def classify_github_forbidden(detail: str, parsed: dict[str, Any], headers: dict[str, str]) -> str:
+    lower = (detail or "").lower()
+    if is_permission_blocked_message(detail):
+        return "permission"
+
+    documentation_url = str(parsed.get("documentation_url") or "").lower()
+    errors = parsed.get("errors")
+    errors_text = json.dumps(errors, ensure_ascii=True).lower() if isinstance(errors, list) else ""
+    header_map = {str(k).lower(): str(v).lower() for k, v in (headers or {}).items()}
+    rate_remaining = header_map.get("x-ratelimit-remaining", "")
+
+    transient_markers = [
+        "secondary rate limit",
+        "abuse detection",
+        "temporarily blocked",
+        "saml",
+        "sso",
+        "rate limit",
+    ]
+    combined = " ".join([lower, documentation_url, errors_text])
+    if rate_remaining == "0":
+        return "transient"
+    if any(marker in combined for marker in transient_markers):
+        return "transient"
+    return "unknown"
 
 
 def github_repo_details(owner: str, repo: str, token: str) -> dict[str, Any]:
@@ -398,6 +433,8 @@ def parse_rename_instruction(text: str) -> tuple[str, str] | None:
     patterns = [
         r"from\s+'([^']+)'\s+to\s+'([^']+)'",
         r'from\s+"([^"]+)"\s+to\s+"([^"]+)"',
+        r"rename\s+'([^']+)'\s+to\s+'([^']+)'",
+        r'rename\s+"([^"]+)"\s+to\s+"([^"]+)"',
         r"spelling\s+of\s+'([^']+)'\s+to\s+'([^']+)'",
         r'spelling\s+of\s+"([^"]+)"\s+to\s+"([^"]+)"',
         r"correct(?:\s+the)?\s+spelling\s+of\s+'([^']+)'\s+to\s+'([^']+)'",
@@ -655,6 +692,9 @@ def delete_branch_if_exists(branch: str) -> None:
     current_branch = run_cmd("git", "branch", "--show-current", check=False).stdout.strip()
     if current_branch == branch:
         run_cmd("git", "checkout", "main", check=False)
+        current_branch = run_cmd("git", "branch", "--show-current", check=False).stdout.strip()
+    if current_branch == branch:
+        run_cmd("git", "checkout", "-B", "main", "origin/main", check=False)
         current_branch = run_cmd("git", "branch", "--show-current", check=False).stdout.strip()
     if current_branch == branch:
         log(f"Branch cleanup skipped: still on {branch}.")
