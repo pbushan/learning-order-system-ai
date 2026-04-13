@@ -14,7 +14,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -163,9 +162,9 @@ def validate_repo_permissions(owner: str, repo: str, token: str) -> None:
     details = github_request("GET", owner, repo, "", token)
     permissions = details.get("permissions") if isinstance(details, dict) else {}
     if not isinstance(permissions, dict):
-        raise RuntimeError("Unable to determine repository permissions for APP_GITHUB_TOKEN.")
+        raise GitHubPermissionError("Unable to determine repository permissions for APP_GITHUB_TOKEN.")
     if not bool(permissions.get("push")):
-        raise RuntimeError(
+        raise GitHubPermissionError(
             "APP_GITHUB_TOKEN does not have push permission for repository contents. "
             "Grant Contents: Read and write for this repo."
         )
@@ -367,17 +366,17 @@ def parse_rename_instruction(text: str) -> tuple[str, str] | None:
 def apply_issue_change(issue: dict[str, Any]) -> list[str]:
     title = str(issue.get("title") or "")
     text = f"{title}\n{issue.get('body', '')}"
-    lower = text.lower()
-    if "identify where" in lower or "read-only code inspection" in lower:
-        raise UnsupportedInstructionError(
-            "Issue requests inspection/planning only; Step 5 auto-execution currently applies code edits only."
-        )
-    if "automated ui tests" in lower or "tests verify" in lower:
-        raise UnsupportedInstructionError(
-            "Issue requests broader test work outside the minimal Step 5 text-replace automation scope."
-        )
     rename = parse_rename_instruction(text)
     if not rename:
+        title_lower = title.lower()
+        if title_lower.startswith("locate the source") or "read-only code inspection" in text.lower():
+            raise UnsupportedInstructionError(
+                "Issue requests inspection/planning only; Step 5 auto-execution currently applies code edits only."
+            )
+        if title_lower.startswith("add or update automated ui tests") or "ui tests" in title_lower:
+            raise UnsupportedInstructionError(
+                "Issue requests broader test work outside the minimal Step 5 text-replace automation scope."
+            )
         raise UnsupportedInstructionError("No supported rename instruction found in issue title/body.")
 
     old_value, new_value = rename
@@ -456,14 +455,14 @@ def create_or_reuse_branch(branch: str, base: str) -> None:
     remote_exists = (
         run_cmd("git", "ls-remote", "--exit-code", "--heads", "origin", branch, check=False).returncode == 0
     )
+    if exists and remote_exists:
+        run_cmd("git", "checkout", branch)
+        run_cmd("git", "reset", "--hard", f"origin/{branch}")
+        return
     if exists and not remote_exists:
-        current = run_cmd("git", "branch", "--show-current", check=False).stdout.strip()
-        if current == branch:
-            run_cmd("git", "checkout", base, check=False)
-        run_cmd("git", "branch", "-D", branch, check=False)
-        exists = False
-    if exists:
-        raise RuntimeError(f"Local branch already exists: {branch}")
+        run_cmd("git", "checkout", branch)
+        run_cmd("git", "reset", "--hard", base)
+        return
     if remote_exists:
         run_cmd("git", "checkout", "-b", branch, "--track", f"origin/{branch}")
         return
@@ -546,55 +545,6 @@ def authenticated_remote_url(origin_url: str, username: str, token: str) -> str:
     return urllib.parse.urlunparse((parsed.scheme, netloc, parsed.path, "", "", ""))
 
 
-def push_changes_via_contents_api(token: str, branch: str, issue_number: int, changed_files: list[str]) -> None:
-    owner, repo = repository_from_env()
-    if not owner or not repo:
-        raise RuntimeError("APP_GITHUB_REPOSITORY must be set as owner/repo for API push fallback.")
-
-    ref = github_request("GET", owner, repo, "/git/ref/heads/main", token)
-    base_sha = ((ref or {}).get("object") or {}).get("sha")
-    if not base_sha:
-        raise RuntimeError("Unable to resolve main branch SHA for API push fallback.")
-
-    try:
-        github_request(
-            "POST",
-            owner,
-            repo,
-            "/git/refs",
-            token,
-            {"ref": f"refs/heads/{branch}", "sha": base_sha},
-        )
-    except urllib.error.HTTPError as exc:
-        if exc.code != 422:
-            raise
-
-    message = f"Issue #{issue_number}: apply approved update"
-    for rel in changed_files:
-        path = REPO_ROOT / rel
-        if not path.exists():
-            continue
-        content_raw = path.read_bytes()
-        encoded = base64.b64encode(content_raw).decode("ascii")
-        api_path = urllib.parse.quote(rel, safe="/")
-        existing_sha = None
-        try:
-            existing = github_request("GET", owner, repo, f"/contents/{api_path}?ref={urllib.parse.quote(branch)}", token)
-            if isinstance(existing, dict):
-                existing_sha = existing.get("sha")
-        except urllib.error.HTTPError as exc:
-            if exc.code != 404:
-                raise
-        payload = {
-            "message": message,
-            "content": encoded,
-            "branch": branch,
-        }
-        if existing_sha:
-            payload["sha"] = existing_sha
-        github_request("PUT", owner, repo, f"/contents/{api_path}", token, payload)
-
-
 def is_auth_push_error(raw: str) -> bool:
     text = (raw or "").lower()
     return any(
@@ -640,10 +590,10 @@ def commit_and_push(token: str, branch: str, issue_number: int, changed_files: l
         failure = str(ex)
         if "git push failed" not in failure:
             raise
-        log(
-            f"Issue #{issue_number}: git push failed; using GitHub Contents API fallback for branch sync."
-        )
-        push_changes_via_contents_api(token, branch, issue_number, changed_files)
+        raise GitHubPermissionError(
+            "APP_GITHUB_TOKEN cannot push branch updates from runtime (git transport denied). "
+            "Ensure the fine-grained token has Contents: Read and write and repository access to this repo."
+        ) from ex
     return message
 
 
@@ -1031,7 +981,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
                 "changedFiles": [],
                 "merged": False,
             }
-        if isinstance(ex, GitHubPermissionError) or "APP_GITHUB_TOKEN lacks required write permissions" in str(ex):
+        if isinstance(ex, GitHubPermissionError):
             log(f"Issue #{issue_number}: token permission blocker, deferring until credentials are fixed")
             log_step5_event("approved-issue-permission-blocked", issue_number=issue_number, error=str(ex))
             try:
