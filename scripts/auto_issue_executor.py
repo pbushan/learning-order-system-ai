@@ -159,7 +159,7 @@ def github_request(method: str, owner: str, repo: str, path: str, token: str, bo
 
 
 def validate_repo_permissions(owner: str, repo: str, token: str) -> None:
-    details = github_request("GET", owner, repo, "", token)
+    details = github_request("GET", owner, repo, "/", token)
     permissions = details.get("permissions") if isinstance(details, dict) else {}
     if not isinstance(permissions, dict):
         raise GitHubPermissionError("Unable to determine repository permissions for APP_GITHUB_TOKEN.")
@@ -479,7 +479,7 @@ def push_branch(token: str, branch: str) -> None:
     if direct_push.returncode == 0:
         return
     if not token:
-        raise RuntimeError("git push failed: missing token for auth fallback")
+        raise GitHubPermissionError("APP_GITHUB_TOKEN is missing for git push auth fallback.")
     if is_known_non_auth_push_error(direct_error_raw):
         snippet = direct_error[:180]
         raise RuntimeError(f"git push failed: non-auth push rejection ({snippet})")
@@ -505,7 +505,10 @@ def push_branch(token: str, branch: str) -> None:
         )
         if token_push.returncode != 0:
             details = sanitize_git_error("\n".join([token_push.stderr or "", token_push.stdout or ""]), token)
-            raise RuntimeError(f"git push failed: auth fallback push failed ({details[:220]})")
+            raise GitHubPermissionError(
+                "APP_GITHUB_TOKEN cannot push branch updates from runtime (git transport denied). "
+                f"push failure details: {details[:220]}"
+            )
     except RuntimeError:
         raise
     except Exception as ex:
@@ -584,17 +587,20 @@ def commit_and_push(token: str, branch: str, issue_number: int, changed_files: l
         raise RuntimeError("No staged changes to commit.")
     message = f"Issue #{issue_number}: apply approved update"
     run_cmd("git", "commit", "-m", message)
-    try:
-        push_branch(token, branch)
-    except RuntimeError as ex:
-        failure = str(ex)
-        if "git push failed" not in failure:
-            raise
-        raise GitHubPermissionError(
-            "APP_GITHUB_TOKEN cannot push branch updates from runtime (git transport denied). "
-            "Ensure the fine-grained token has Contents: Read and write and repository access to this repo."
-        ) from ex
+    push_branch(token, branch)
     return message
+
+
+def delete_branch_if_exists(branch: str) -> None:
+    if not branch:
+        return
+    run_cmd("git", "checkout", "main", check=False)
+    remote_exists = run_cmd("git", "ls-remote", "--exit-code", "--heads", "origin", branch, check=False).returncode == 0
+    if remote_exists:
+        run_cmd("git", "push", "origin", "--delete", branch, check=False)
+    local_exists = run_cmd("git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}", check=False).returncode == 0
+    if local_exists:
+        run_cmd("git", "branch", "-D", branch, check=False)
 
 
 def ensure_clean_for_step6(files: list[str]) -> None:
@@ -969,8 +975,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
                     pass
             if branch:
                 try:
-                    run_cmd("git", "checkout", "main", check=False)
-                    run_cmd("git", "branch", "-D", branch, check=False)
+                    delete_branch_if_exists(branch)
                 except Exception:
                     pass
             return {
@@ -1008,9 +1013,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
                     pass
             if branch:
                 try:
-                    run_cmd("git", "checkout", "main", check=False)
-                    run_cmd("git", "push", "origin", "--delete", branch, check=False)
-                    run_cmd("git", "branch", "-D", branch, check=False)
+                    delete_branch_if_exists(branch)
                 except Exception:
                     pass
             return {
@@ -1039,9 +1042,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
                 pass
         elif branch:
             try:
-                run_cmd("git", "checkout", "main", check=False)
-                run_cmd("git", "push", "origin", "--delete", branch, check=False)
-                run_cmd("git", "branch", "-D", branch, check=False)
+                delete_branch_if_exists(branch)
             except Exception:
                 pass
         try:
