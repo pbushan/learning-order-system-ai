@@ -148,7 +148,7 @@ def github_request(method: str, owner: str, repo: str, path: str, token: str, bo
                 detail = str(parsed.get("message") or "").strip()
             except Exception:
                 detail = raw.strip()
-        if exc.code == 403 and "Resource not accessible by personal access token" in detail:
+        if exc.code == 403 and is_permission_blocked_message(detail):
             raise GitHubPermissionError(
                 "APP_GITHUB_TOKEN lacks required write permissions for this operation. "
                 "Grant fine-grained token access to this repository with Contents: Read and write, "
@@ -156,6 +156,21 @@ def github_request(method: str, owner: str, repo: str, path: str, token: str, bo
             ) from exc
         suffix = f": {detail}" if detail else ""
         raise RuntimeError(f"GitHub API {method} {path} failed with {exc.code}{suffix}") from exc
+
+
+def is_permission_blocked_message(detail: str) -> bool:
+    lower = (detail or "").lower()
+    return any(
+        marker in lower
+        for marker in [
+            "resource not accessible by personal access token",
+            "resource not accessible by integration",
+            "insufficient permission",
+            "permission to",
+            "write access to repository not granted",
+            "must have admin rights",
+        ]
+    )
 
 
 def github_repo_details(owner: str, repo: str, token: str) -> dict[str, Any]:
@@ -387,8 +402,6 @@ def parse_rename_instruction(text: str) -> tuple[str, str] | None:
         r'spelling\s+of\s+"([^"]+)"\s+to\s+"([^"]+)"',
         r"correct(?:\s+the)?\s+spelling\s+of\s+'([^']+)'\s+to\s+'([^']+)'",
         r'correct(?:\s+the)?\s+spelling\s+of\s+"([^"]+)"\s+to\s+"([^"]+)"',
-        r"'([^']+)'\s+should\s+be\s+'([^']+)'",
-        r'"([^"]+)"\s+should\s+be\s+"([^"]+)"',
     ]
     for pattern in patterns:
         m = re.search(pattern, text, flags=re.IGNORECASE)
@@ -400,7 +413,10 @@ def parse_rename_instruction(text: str) -> tuple[str, str] | None:
 def apply_issue_change(issue: dict[str, Any]) -> list[str]:
     title = str(issue.get("title") or "")
     text = f"{title}\n{issue.get('body', '')}"
-    rename = parse_rename_instruction(text)
+    rename = parse_rename_instruction(title)
+    if not rename:
+        # Keep matching conservative: only look at explicit "from ... to ..." instructions in body.
+        rename = parse_rename_instruction(str(issue.get("body") or ""))
     if not rename:
         title_lower = title.lower()
         if title_lower.startswith("locate the source") or "read-only code inspection" in text.lower():
@@ -600,6 +616,9 @@ def is_auth_push_error(raw: str) -> bool:
             "authentication required",
             "requested url returned error: 401",
             "requested url returned error: 403",
+            "permission to",
+            "write access to repository not granted",
+            "resource not accessible by personal access token",
         ]
     )
 
