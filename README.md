@@ -148,6 +148,20 @@ Do **NOT** use a classic PAT for `APP_GITHUB_TOKEN`.
   - Step 5 PR creation via MCP tool call (`create_pull_request`)
   - Step 6 PR listing + review/comment ingestion + reconciliation comments
 
+### Token troubleshooting (Step 5/6 write path)
+
+- If issue automation comments show `Resource not accessible by personal access token` or repeated `403` during branch push/write:
+  - your `APP_GITHUB_TOKEN` does not currently have enough effective write scope for repository updates.
+- Recreate `APP_GITHUB_TOKEN` as fine-grained and ensure:
+  - repository access is restricted to `pbushan/learning-order-system-ai`
+  - Contents: Read and write
+  - Pull requests: Read and write
+  - Issues: Read and write
+  - Metadata: Read
+- After updating `.env`, restart runtime:
+  - `docker compose up -d --build`
+- Then re-add `approved-for-dev` to any deferred issue you want retried.
+
 ## Step 6A: PR Review Polling and Reconciliation
 
 ### Purpose

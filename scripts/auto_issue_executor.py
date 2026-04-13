@@ -34,6 +34,14 @@ class NoFileChangeError(RuntimeError):
     """Raised when an issue instruction results in no file changes."""
 
 
+class UnsupportedInstructionError(RuntimeError):
+    """Raised when an issue is valid but outside the minimal Step 5 auto-fix scope."""
+
+
+class GitHubPermissionError(RuntimeError):
+    """Raised when token permissions are insufficient for Step 5 write operations."""
+
+
 def log(msg: str) -> None:
     print(msg, flush=True)
 
@@ -124,9 +132,43 @@ def github_request(method: str, owner: str, repo: str, path: str, token: str, bo
             "User-Agent": "step5-auto-issue-executor",
         },
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        raw = resp.read().decode("utf-8")
-        return json.loads(raw) if raw else {}
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as exc:
+        raw = ""
+        try:
+            raw = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            raw = ""
+        detail = ""
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                detail = str(parsed.get("message") or "").strip()
+            except Exception:
+                detail = raw.strip()
+        if exc.code == 403 and "Resource not accessible by personal access token" in detail:
+            raise GitHubPermissionError(
+                "APP_GITHUB_TOKEN lacks required write permissions for this operation. "
+                "Grant fine-grained token access to this repository with Contents: Read and write, "
+                "Pull requests: Read and write, Issues: Read and write, Metadata: Read."
+            ) from exc
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"GitHub API {method} {path} failed with {exc.code}{suffix}") from exc
+
+
+def validate_repo_permissions(owner: str, repo: str, token: str) -> None:
+    details = github_request("GET", owner, repo, "", token)
+    permissions = details.get("permissions") if isinstance(details, dict) else {}
+    if not isinstance(permissions, dict):
+        raise RuntimeError("Unable to determine repository permissions for APP_GITHUB_TOKEN.")
+    if not bool(permissions.get("push")):
+        raise RuntimeError(
+            "APP_GITHUB_TOKEN does not have push permission for repository contents. "
+            "Grant Contents: Read and write for this repo."
+        )
 
 
 def mcp_request(url: str, token: str, body: dict[str, Any], session_id: str | None = None) -> tuple[dict[str, str], str]:
@@ -308,6 +350,12 @@ def parse_rename_instruction(text: str) -> tuple[str, str] | None:
     patterns = [
         r"from\s+'([^']+)'\s+to\s+'([^']+)'",
         r'from\s+"([^"]+)"\s+to\s+"([^"]+)"',
+        r"spelling\s+of\s+'([^']+)'\s+to\s+'([^']+)'",
+        r'spelling\s+of\s+"([^"]+)"\s+to\s+"([^"]+)"',
+        r"correct(?:\s+the)?\s+spelling\s+of\s+'([^']+)'\s+to\s+'([^']+)'",
+        r'correct(?:\s+the)?\s+spelling\s+of\s+"([^"]+)"\s+to\s+"([^"]+)"',
+        r"'([^']+)'\s+should\s+be\s+'([^']+)'",
+        r'"([^"]+)"\s+should\s+be\s+"([^"]+)"',
     ]
     for pattern in patterns:
         m = re.search(pattern, text, flags=re.IGNORECASE)
@@ -317,10 +365,20 @@ def parse_rename_instruction(text: str) -> tuple[str, str] | None:
 
 
 def apply_issue_change(issue: dict[str, Any]) -> list[str]:
-    text = f"{issue.get('title', '')}\n{issue.get('body', '')}"
+    title = str(issue.get("title") or "")
+    text = f"{title}\n{issue.get('body', '')}"
+    lower = text.lower()
+    if "identify where" in lower or "read-only code inspection" in lower:
+        raise UnsupportedInstructionError(
+            "Issue requests inspection/planning only; Step 5 auto-execution currently applies code edits only."
+        )
+    if "automated ui tests" in lower or "tests verify" in lower:
+        raise UnsupportedInstructionError(
+            "Issue requests broader test work outside the minimal Step 5 text-replace automation scope."
+        )
     rename = parse_rename_instruction(text)
     if not rename:
-        raise RuntimeError("No supported rename instruction found in issue title/body.")
+        raise UnsupportedInstructionError("No supported rename instruction found in issue title/body.")
 
     old_value, new_value = rename
     if old_value == new_value:
@@ -395,13 +453,20 @@ def ensure_clean_and_base(base: str) -> None:
 
 def create_or_reuse_branch(branch: str, base: str) -> None:
     exists = run_cmd("git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}", check=False).returncode == 0
-    if exists:
-        raise RuntimeError(f"Local branch already exists: {branch}")
     remote_exists = (
         run_cmd("git", "ls-remote", "--exit-code", "--heads", "origin", branch, check=False).returncode == 0
     )
+    if exists and not remote_exists:
+        current = run_cmd("git", "branch", "--show-current", check=False).stdout.strip()
+        if current == branch:
+            run_cmd("git", "checkout", base, check=False)
+        run_cmd("git", "branch", "-D", branch, check=False)
+        exists = False
+    if exists:
+        raise RuntimeError(f"Local branch already exists: {branch}")
     if remote_exists:
-        raise RuntimeError(f"Remote branch already exists: {branch}")
+        run_cmd("git", "checkout", "-b", branch, "--track", f"origin/{branch}")
+        return
     run_cmd("git", "checkout", "-b", branch, base)
 
 
@@ -428,85 +493,20 @@ def push_branch(token: str, branch: str) -> None:
     if not host_name:
         raise RuntimeError("git push failed: unsupported remote for auth fallback")
     try:
-        with tempfile.TemporaryDirectory(prefix="step5_git_cred_") as tmp_dir:
-            if os.name != "posix":
-                raise RuntimeError("git push failed: auth fallback requires POSIX permissions support")
-            try:
-                os.chmod(tmp_dir, 0o700)
-            except OSError as ex:
-                raise RuntimeError(f"git push failed: could not secure temp credential directory ({ex})") from ex
-            cred_file = os.path.join(tmp_dir, ".git-credentials")
-            with open(cred_file, "a", encoding="utf-8"):
-                pass
-            os.chmod(cred_file, 0o600)
-            if os.name == "posix":
-                dir_mode = os.stat(tmp_dir).st_mode & 0o777
-                file_mode = os.stat(cred_file).st_mode & 0o777
-                if dir_mode != 0o700 or file_mode != 0o600:
-                    raise RuntimeError("credential file permissions are too permissive")
-
-            env = os.environ.copy()
-            env["GIT_TERMINAL_PROMPT"] = "0"
-            helper_value = f"store --file={cred_file}"
-            username = (os.getenv("STEP5_GIT_HTTP_USERNAME") or "x-access-token").strip() or "x-access-token"
-
-            credential_lines = [
-                "protocol=https",
-                f"host={host_name}",
-                f"username={username}",
-                f"password={token}",
-            ]
-            credential_input = "\n".join(credential_lines) + "\n\n"
-            approve_proc = subprocess.run(
-                ["git", "-c", "credential.helper=", "-c", f"credential.helper={helper_value}", "credential", "approve"],
-                cwd=str(REPO_ROOT),
-                text=True,
-                input=credential_input,
-                capture_output=True,
-                check=False,
-                env=env,
-            )
-            if approve_proc.returncode != 0:
-                raise RuntimeError("git push failed: could not stage temporary credentials")
-            if (not os.path.exists(cred_file)) or os.path.getsize(cred_file) == 0:
-                raise RuntimeError("failed to stage temporary credentials: credential store is empty")
-            verify_input = "\n".join(["protocol=https", f"host={host_name}"]) + "\n\n"
-            fill_proc = subprocess.run(
-                ["git", "-c", "credential.helper=", "-c", f"credential.helper={helper_value}", "credential", "fill"],
-                cwd=str(REPO_ROOT),
-                text=True,
-                input=verify_input,
-                capture_output=True,
-                check=False,
-                env=env,
-            )
-            if fill_proc.returncode != 0 or "username=" not in (fill_proc.stdout or ""):
-                raise RuntimeError("git push failed: credential helper verification failed")
-
-            token_push = subprocess.run(
-                ["git", "-c", "credential.helper=", "-c", f"credential.helper={helper_value}", "push", "-u", "origin", branch],
-                cwd=str(REPO_ROOT),
-                text=True,
-                capture_output=True,
-                check=False,
-                env=env,
-            )
-            if token_push.returncode != 0:
-                token_url = authenticated_remote_url(origin_url, username, token)
-                token_url_push = subprocess.run(
-                    ["git", "push", "-u", token_url, branch],
-                    cwd=str(REPO_ROOT),
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                    env=env,
-                )
-                if token_url_push.returncode != 0:
-                    details = sanitize_git_error(
-                        "\n".join([token_push.stderr or "", token_push.stdout or "", token_url_push.stderr or "", token_url_push.stdout or ""]),
-                        token,
-                    )
-                    raise RuntimeError(f"git push failed: auth fallback push failed ({details[:220]})")
+        env = os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        token_url = authenticated_remote_url(origin_url, "x-access-token", token)
+        token_push = subprocess.run(
+            ["git", "push", "-u", token_url, branch],
+            cwd=str(REPO_ROOT),
+            text=True,
+            capture_output=True,
+            check=False,
+            env=env,
+        )
+        if token_push.returncode != 0:
+            details = sanitize_git_error("\n".join([token_push.stderr or "", token_push.stdout or ""]), token)
+            raise RuntimeError(f"git push failed: auth fallback push failed ({details[:220]})")
     except RuntimeError:
         raise
     except Exception as ex:
@@ -544,6 +544,55 @@ def authenticated_remote_url(origin_url: str, username: str, token: str) -> str:
     safe_token = urllib.parse.quote(token, safe="")
     netloc = f"{safe_user}:{safe_token}@{parsed.netloc}"
     return urllib.parse.urlunparse((parsed.scheme, netloc, parsed.path, "", "", ""))
+
+
+def push_changes_via_contents_api(token: str, branch: str, issue_number: int, changed_files: list[str]) -> None:
+    owner, repo = repository_from_env()
+    if not owner or not repo:
+        raise RuntimeError("APP_GITHUB_REPOSITORY must be set as owner/repo for API push fallback.")
+
+    ref = github_request("GET", owner, repo, "/git/ref/heads/main", token)
+    base_sha = ((ref or {}).get("object") or {}).get("sha")
+    if not base_sha:
+        raise RuntimeError("Unable to resolve main branch SHA for API push fallback.")
+
+    try:
+        github_request(
+            "POST",
+            owner,
+            repo,
+            "/git/refs",
+            token,
+            {"ref": f"refs/heads/{branch}", "sha": base_sha},
+        )
+    except urllib.error.HTTPError as exc:
+        if exc.code != 422:
+            raise
+
+    message = f"Issue #{issue_number}: apply approved update"
+    for rel in changed_files:
+        path = REPO_ROOT / rel
+        if not path.exists():
+            continue
+        content_raw = path.read_bytes()
+        encoded = base64.b64encode(content_raw).decode("ascii")
+        api_path = urllib.parse.quote(rel, safe="/")
+        existing_sha = None
+        try:
+            existing = github_request("GET", owner, repo, f"/contents/{api_path}?ref={urllib.parse.quote(branch)}", token)
+            if isinstance(existing, dict):
+                existing_sha = existing.get("sha")
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404:
+                raise
+        payload = {
+            "message": message,
+            "content": encoded,
+            "branch": branch,
+        }
+        if existing_sha:
+            payload["sha"] = existing_sha
+        github_request("PUT", owner, repo, f"/contents/{api_path}", token, payload)
 
 
 def is_auth_push_error(raw: str) -> bool:
@@ -585,7 +634,16 @@ def commit_and_push(token: str, branch: str, issue_number: int, changed_files: l
         raise RuntimeError("No staged changes to commit.")
     message = f"Issue #{issue_number}: apply approved update"
     run_cmd("git", "commit", "-m", message)
-    push_branch(token, branch)
+    try:
+        push_branch(token, branch)
+    except RuntimeError as ex:
+        failure = str(ex)
+        if "git push failed" not in failure:
+            raise
+        log(
+            f"Issue #{issue_number}: git push failed; using GitHub Contents API fallback for branch sync."
+        )
+        push_changes_via_contents_api(token, branch, issue_number, changed_files)
     return message
 
 
@@ -825,6 +883,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
     log_step5_event("approved-issue-picked", issue_number=issue_number, metadata={"title": issue.get("title", "")})
 
     try:
+        validate_repo_permissions(owner, repo, token)
         add_label(owner, repo, token, issue_number, "ai-in-progress")
         label_applied = True
         log(f"Issue #{issue_number}: applied label ai-in-progress")
@@ -934,6 +993,84 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
                 "changedFiles": [],
                 "merged": False,
             }
+        if isinstance(ex, UnsupportedInstructionError):
+            log(f"Issue #{issue_number}: unsupported automation scope, deferring to human")
+            log_step5_event("approved-issue-unsupported", issue_number=issue_number, error=str(ex))
+            try:
+                comment_issue(
+                    owner,
+                    repo,
+                    token,
+                    issue_number,
+                    "Automation deferred this issue because it is outside the current minimal Step 5 implementation scope. "
+                    "This workflow currently applies small deterministic text-replacement code changes. "
+                    "Please handle this issue manually or split it into an executable rename-story and re-add `approved-for-dev`.",
+                )
+            except Exception:
+                pass
+            try:
+                remove_label(owner, repo, token, issue_number, "approved-for-dev")
+            except Exception:
+                pass
+            if label_applied:
+                try:
+                    remove_label(owner, repo, token, issue_number, "ai-in-progress")
+                except Exception:
+                    pass
+            if branch:
+                try:
+                    run_cmd("git", "checkout", "main", check=False)
+                    run_cmd("git", "branch", "-D", branch, check=False)
+                except Exception:
+                    pass
+            return {
+                "issueNumber": issue_number,
+                "branch": branch,
+                "prNumber": None,
+                "prUrl": "",
+                "changedFiles": [],
+                "merged": False,
+            }
+        if isinstance(ex, GitHubPermissionError) or "APP_GITHUB_TOKEN lacks required write permissions" in str(ex):
+            log(f"Issue #{issue_number}: token permission blocker, deferring until credentials are fixed")
+            log_step5_event("approved-issue-permission-blocked", issue_number=issue_number, error=str(ex))
+            try:
+                comment_issue(
+                    owner,
+                    repo,
+                    token,
+                    issue_number,
+                    "Automation is blocked by APP_GITHUB_TOKEN permissions for write operations. "
+                    "Please update the app token to fine-grained permissions on this repo with: "
+                    "Contents (Read and write), Pull requests (Read and write), Issues (Read and write), Metadata (Read). "
+                    "After updating the token, re-add `approved-for-dev` to retry.",
+                )
+            except Exception:
+                pass
+            try:
+                remove_label(owner, repo, token, issue_number, "approved-for-dev")
+            except Exception:
+                pass
+            if label_applied:
+                try:
+                    remove_label(owner, repo, token, issue_number, "ai-in-progress")
+                except Exception:
+                    pass
+            if branch:
+                try:
+                    run_cmd("git", "checkout", "main", check=False)
+                    run_cmd("git", "push", "origin", "--delete", branch, check=False)
+                    run_cmd("git", "branch", "-D", branch, check=False)
+                except Exception:
+                    pass
+            return {
+                "issueNumber": issue_number,
+                "branch": branch,
+                "prNumber": None,
+                "prUrl": "",
+                "changedFiles": [],
+                "merged": False,
+            }
         if label_applied:
             try:
                 remove_label(owner, repo, token, issue_number, "ai-in-progress")
@@ -952,6 +1089,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
                 pass
         elif branch:
             try:
+                run_cmd("git", "checkout", "main", check=False)
                 run_cmd("git", "push", "origin", "--delete", branch, check=False)
                 run_cmd("git", "branch", "-D", branch, check=False)
             except Exception:
