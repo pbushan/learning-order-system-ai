@@ -242,6 +242,12 @@ def github_repo_details(owner: str, repo: str, token: str) -> dict[str, Any]:
 def validate_repo_permissions(owner: str, repo: str, token: str) -> None:
     details = github_repo_details(owner, repo, token)
     permissions = details.get("permissions") if isinstance(details, dict) else None
+    role_name = str(details.get("role_name") or "").strip().lower() if isinstance(details, dict) else ""
+    if role_name in {"read", "triage"}:
+        raise GitHubPermissionError(
+            "APP_GITHUB_TOKEN repository role does not allow writes. "
+            "Grant repository write access and Contents: Read and write."
+        )
     if not isinstance(permissions, dict):
         # Some fine-grained token contexts do not expose this field reliably.
         # Continue and let write operations surface explicit permission failures.
