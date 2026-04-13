@@ -158,11 +158,45 @@ def github_request(method: str, owner: str, repo: str, path: str, token: str, bo
         raise RuntimeError(f"GitHub API {method} {path} failed with {exc.code}{suffix}") from exc
 
 
+def github_repo_details(owner: str, repo: str, token: str) -> dict[str, Any]:
+    req = urllib.request.Request(
+        url=f"https://api.github.com/repos/{owner}/{repo}",
+        method="GET",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "step5-auto-issue-executor",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as exc:
+        raw = ""
+        try:
+            raw = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            raw = ""
+        detail = ""
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                detail = str(parsed.get("message") or "").strip()
+            except Exception:
+                detail = raw.strip()
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"GitHub API GET repository details failed with {exc.code}{suffix}") from exc
+
+
 def validate_repo_permissions(owner: str, repo: str, token: str) -> None:
-    details = github_request("GET", owner, repo, "/", token)
-    permissions = details.get("permissions") if isinstance(details, dict) else {}
+    details = github_repo_details(owner, repo, token)
+    permissions = details.get("permissions") if isinstance(details, dict) else None
     if not isinstance(permissions, dict):
-        raise GitHubPermissionError("Unable to determine repository permissions for APP_GITHUB_TOKEN.")
+        # Some fine-grained token contexts do not expose this field reliably.
+        # Continue and let write operations surface explicit permission failures.
+        log("Step 5 permission precheck: repository permissions payload unavailable; proceeding with runtime write checks.")
+        return
     if not bool(permissions.get("push")):
         raise GitHubPermissionError(
             "APP_GITHUB_TOKEN does not have push permission for repository contents. "
@@ -504,11 +538,16 @@ def push_branch(token: str, branch: str) -> None:
             env=env,
         )
         if token_push.returncode != 0:
-            details = sanitize_git_error("\n".join([token_push.stderr or "", token_push.stdout or ""]), token)
-            raise GitHubPermissionError(
-                "APP_GITHUB_TOKEN cannot push branch updates from runtime (git transport denied). "
-                f"push failure details: {details[:220]}"
-            )
+            fallback_raw = "\n".join([token_push.stderr or "", token_push.stdout or ""]).strip()
+            details = sanitize_git_error(fallback_raw, token)
+            if is_known_non_auth_push_error(fallback_raw):
+                raise RuntimeError(f"git push failed: non-auth push rejection ({details[:220]})")
+            if is_auth_push_error(fallback_raw):
+                raise GitHubPermissionError(
+                    "APP_GITHUB_TOKEN cannot push branch updates from runtime (git transport denied). "
+                    f"push failure details: {details[:220]}"
+                )
+            raise RuntimeError(f"git push failed: auth fallback push failed ({details[:220]})")
     except RuntimeError:
         raise
     except Exception as ex:
@@ -594,7 +633,13 @@ def commit_and_push(token: str, branch: str, issue_number: int, changed_files: l
 def delete_branch_if_exists(branch: str) -> None:
     if not branch:
         return
-    run_cmd("git", "checkout", "main", check=False)
+    current_branch = run_cmd("git", "branch", "--show-current", check=False).stdout.strip()
+    if current_branch == branch:
+        run_cmd("git", "checkout", "main", check=False)
+        current_branch = run_cmd("git", "branch", "--show-current", check=False).stdout.strip()
+    if current_branch == branch:
+        log(f"Branch cleanup skipped: still on {branch}.")
+        return
     remote_exists = run_cmd("git", "ls-remote", "--exit-code", "--heads", "origin", branch, check=False).returncode == 0
     if remote_exists:
         run_cmd("git", "push", "origin", "--delete", branch, check=False)
@@ -931,16 +976,16 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
                     "Please verify manually; if more work is needed, update the issue details and re-add `approved-for-dev`.",
                 )
             except Exception:
-                pass
+                log(f"Issue #{issue_number}: failed to post unsupported-scope comment.")
             try:
                 remove_label(owner, repo, token, issue_number, "approved-for-dev")
             except Exception:
-                pass
+                log(f"Issue #{issue_number}: failed to remove approved-for-dev label after unsupported scope.")
             if label_applied:
                 try:
                     remove_label(owner, repo, token, issue_number, "ai-in-progress")
                 except Exception:
-                    pass
+                    log(f"Issue #{issue_number}: failed to remove ai-in-progress label after unsupported scope.")
             return {
                 "issueNumber": issue_number,
                 "branch": branch,
@@ -972,7 +1017,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
                 try:
                     remove_label(owner, repo, token, issue_number, "ai-in-progress")
                 except Exception:
-                    pass
+                    log(f"Issue #{issue_number}: failed to cleanup branch after unsupported scope.")
             if branch:
                 try:
                     delete_branch_if_exists(branch)
@@ -1001,21 +1046,21 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
                     "After updating the token, re-add `approved-for-dev` to retry.",
                 )
             except Exception:
-                pass
+                log(f"Issue #{issue_number}: failed to post permission-blocked comment.")
             try:
                 remove_label(owner, repo, token, issue_number, "approved-for-dev")
             except Exception:
-                pass
+                log(f"Issue #{issue_number}: failed to remove approved-for-dev label after permission block.")
             if label_applied:
                 try:
                     remove_label(owner, repo, token, issue_number, "ai-in-progress")
                 except Exception:
-                    pass
+                    log(f"Issue #{issue_number}: failed to remove ai-in-progress label after permission block.")
             if branch:
                 try:
                     delete_branch_if_exists(branch)
                 except Exception:
-                    pass
+                    log(f"Issue #{issue_number}: failed to cleanup branch after permission block.")
             return {
                 "issueNumber": issue_number,
                 "branch": branch,
