@@ -692,15 +692,25 @@ def commit_and_push(token: str, branch: str, issue_number: int, changed_files: l
     return message
 
 
+def resolve_default_base_branch() -> str:
+    ref = run_cmd("git", "symbolic-ref", "refs/remotes/origin/HEAD", check=False).stdout.strip()
+    if ref.startswith("refs/remotes/origin/"):
+        name = ref.split("/")[-1].strip()
+        if name:
+            return name
+    return "main"
+
+
 def delete_branch_if_exists(branch: str) -> None:
     if not branch:
         return
+    base_branch = resolve_default_base_branch()
     current_branch = run_cmd("git", "branch", "--show-current", check=False).stdout.strip()
     if current_branch == branch:
-        run_cmd("git", "checkout", "main", check=False)
+        run_cmd("git", "checkout", base_branch, check=False)
         current_branch = run_cmd("git", "branch", "--show-current", check=False).stdout.strip()
     if current_branch == branch:
-        run_cmd("git", "checkout", "-B", "main", "origin/main", check=False)
+        run_cmd("git", "checkout", "-B", base_branch, f"origin/{base_branch}", check=False)
         current_branch = run_cmd("git", "branch", "--show-current", check=False).stdout.strip()
     if current_branch == branch:
         log(f"Branch cleanup skipped: still on {branch}.")
