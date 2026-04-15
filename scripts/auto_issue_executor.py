@@ -454,10 +454,14 @@ def parse_rename_instruction(text: str) -> tuple[str, str] | None:
 
 
 def parse_body_rename_instruction(text: str) -> tuple[str, str] | None:
-    # Keep body parsing strict to avoid accidental matches in longer issue descriptions.
+    # Keep body parsing conservative: explicit from/to or explicit spelling-correction phrasing only.
     patterns = [
         r"from\s+'([^']+)'\s+to\s+'([^']+)'",
         r'from\s+"([^"]+)"\s+to\s+"([^"]+)"',
+        r"spelling\s+of\s+'([^']+)'\s+to\s+'([^']+)'",
+        r'spelling\s+of\s+"([^"]+)"\s+to\s+"([^"]+)"',
+        r"correct(?:\s+the)?\s+spelling\s+of\s+'([^']+)'\s+to\s+'([^']+)'",
+        r'correct(?:\s+the)?\s+spelling\s+of\s+"([^"]+)"\s+to\s+"([^"]+)"',
     ]
     for pattern in patterns:
         m = re.search(pattern, text or "", flags=re.IGNORECASE)
