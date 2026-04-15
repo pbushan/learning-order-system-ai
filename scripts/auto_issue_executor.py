@@ -453,13 +453,26 @@ def parse_rename_instruction(text: str) -> tuple[str, str] | None:
     return None
 
 
+def parse_body_rename_instruction(text: str) -> tuple[str, str] | None:
+    # Keep body parsing strict to avoid accidental matches in longer issue descriptions.
+    patterns = [
+        r"from\s+'([^']+)'\s+to\s+'([^']+)'",
+        r'from\s+"([^"]+)"\s+to\s+"([^"]+)"',
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, text or "", flags=re.IGNORECASE)
+        if m:
+            return m.group(1).strip(), m.group(2).strip()
+    return None
+
+
 def apply_issue_change(issue: dict[str, Any]) -> list[str]:
     title = str(issue.get("title") or "")
     text = f"{title}\n{issue.get('body', '')}"
     rename = parse_rename_instruction(title)
     if not rename:
         # Keep matching conservative: only look at explicit "from ... to ..." instructions in body.
-        rename = parse_rename_instruction(str(issue.get("body") or ""))
+        rename = parse_body_rename_instruction(str(issue.get("body") or ""))
     if not rename:
         title_lower = title.lower()
         if title_lower.startswith("locate the source") or "read-only code inspection" in text.lower():
