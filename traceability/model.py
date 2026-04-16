@@ -4,7 +4,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from datetime import timedelta
+import re
 from typing import Any
+
+ALLOWED_STATUSES = {
+    "recorded",
+    "pending",
+    "accepted",
+    "approved",
+    "rejected",
+    "completed",
+    "failed",
+    "skipped",
+}
+
+EVENT_TYPE_PATTERN = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)+$")
+ACTOR_PATTERN = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 
 
 @dataclass(frozen=True)
@@ -51,6 +67,7 @@ class DecisionTraceEvent:
         actor = _required_record_value(record, "actor")
         summary = _required_record_value(record, "summary")
         _validate_iso8601_timestamp(timestamp)
+        _validate_event_contract(event_type=event_type, status=status, actor=actor)
 
         return DecisionTraceEvent(
             trace_id=trace_id,
@@ -100,6 +117,7 @@ def create_trace_event(
 
     if timestamp is not None:
         _validate_iso8601_timestamp(timestamp)
+    _validate_event_contract(event_type=str(event_type), status=str(status), actor=str(actor))
 
     return DecisionTraceEvent(
         trace_id=str(trace_id),
@@ -129,6 +147,24 @@ def _validate_iso8601_timestamp(timestamp: str) -> None:
     if candidate.endswith("Z"):
         candidate = f"{candidate[:-1]}+00:00"
     try:
-        datetime.fromisoformat(candidate)
+        parsed = datetime.fromisoformat(candidate)
     except ValueError as exc:
         raise ValueError(f"Invalid trace record: timestamp is not ISO-8601 ({timestamp})") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
+        raise ValueError(f"Invalid trace record: timestamp must be UTC ({timestamp})")
+
+
+def _validate_event_contract(*, event_type: str, status: str, actor: str) -> None:
+    if status not in ALLOWED_STATUSES:
+        raise ValueError(
+            f"Invalid trace record: status must be one of {sorted(ALLOWED_STATUSES)} (got {status})"
+        )
+    if not EVENT_TYPE_PATTERN.match(event_type):
+        raise ValueError(
+            "Invalid trace record: eventType must be lowercase and namespace-like "
+            "(example: intake.received)"
+        )
+    if not ACTOR_PATTERN.match(actor):
+        raise ValueError(
+            "Invalid trace record: actor must be lowercase token(s) joined by '.', '_' or '-'"
+        )

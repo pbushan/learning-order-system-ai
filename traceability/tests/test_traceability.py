@@ -55,6 +55,58 @@ class TraceabilityFoundationTest(unittest.TestCase):
                 timestamp="bad-ts",
             )
 
+    def test_create_trace_event_rejects_non_utc_timestamp(self) -> None:
+        with self.assertRaises(ValueError):
+            create_trace_event(
+                trace_id="trace-123",
+                session_id="session-abc",
+                correlation_id="corr-1",
+                event_type="intake.received",
+                status="recorded",
+                actor="intake-api",
+                summary="Intake payload accepted",
+                timestamp="2026-04-16T10:00:00+05:00",
+            )
+
+    def test_create_trace_event_rejects_invalid_status(self) -> None:
+        with self.assertRaises(ValueError):
+            create_trace_event(
+                trace_id="trace-123",
+                session_id="session-abc",
+                correlation_id="corr-1",
+                event_type="intake.received",
+                status="done",
+                actor="intake-api",
+                summary="Intake payload accepted",
+                timestamp="2026-04-16T10:00:00+00:00",
+            )
+
+    def test_create_trace_event_rejects_invalid_event_type(self) -> None:
+        with self.assertRaises(ValueError):
+            create_trace_event(
+                trace_id="trace-123",
+                session_id="session-abc",
+                correlation_id="corr-1",
+                event_type="IntakeReceived",
+                status="recorded",
+                actor="intake-api",
+                summary="Intake payload accepted",
+                timestamp="2026-04-16T10:00:00+00:00",
+            )
+
+    def test_create_trace_event_rejects_invalid_actor(self) -> None:
+        with self.assertRaises(ValueError):
+            create_trace_event(
+                trace_id="trace-123",
+                session_id="session-abc",
+                correlation_id="corr-1",
+                event_type="intake.received",
+                status="recorded",
+                actor="Intake API",
+                summary="Intake payload accepted",
+                timestamp="2026-04-16T10:00:00+00:00",
+            )
+
     def test_append_only_write_and_query_by_trace_and_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decision-trace.jsonl"
@@ -139,6 +191,24 @@ class TraceabilityFoundationTest(unittest.TestCase):
                 "status": "recorded",
                 "actor": "intake-api",
                 "summary": "invalid timestamp",
+            }
+            path.write_text(f"{json.dumps(invalid_record)}\n", encoding="utf-8")
+
+            with self.assertRaises(ValueError):
+                read_trace_events(trace_id="trace-123", path=path)
+
+    def test_read_rejects_non_utc_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decision-trace.jsonl"
+            invalid_record = {
+                "traceId": "trace-123",
+                "sessionId": "session-abc",
+                "correlationId": "corr-1",
+                "eventType": "intake.received",
+                "timestamp": "2026-04-16T10:00:00+03:00",
+                "status": "recorded",
+                "actor": "intake-api",
+                "summary": "non utc timestamp",
             }
             path.write_text(f"{json.dumps(invalid_record)}\n", encoding="utf-8")
 

@@ -32,6 +32,10 @@ Schema contract notes:
 - persisted keys are camelCase exactly as listed above
 - snake_case aliases are intentionally not accepted by the reader
 - reads fail fast for missing required fields or invalid timestamp formats
+- timestamps must be UTC (`Z` or `+00:00`)
+- allowed `status` values: `recorded`, `pending`, `accepted`, `approved`, `rejected`, `completed`, `failed`, `skipped`
+- `eventType` must be lowercase namespace-like format (example: `intake.received`)
+- `actor` must be lowercase token format (example: `intake-api`)
 
 ## Persistence
 
@@ -44,4 +48,4 @@ Schema contract notes:
 - `create_trace_id(prefix="trace")`
 - `create_trace_event(...)`
 - `append_trace_event(event, path=None)`
-- `read_trace_events(trace_id=..., session_id=..., path=None)`
+- `read_trace_events(trace_id=..., session_id=..., path=None)` (keyword-only filters)
