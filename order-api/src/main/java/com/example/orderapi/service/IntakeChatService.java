@@ -23,18 +23,23 @@ public class IntakeChatService {
 
     private final IntakeOpenAiClient intakeOpenAiClient;
     private final FileAuditLogService fileAuditLogService;
+    private final IntakeTraceabilityAgent intakeTraceabilityAgent;
     private final String model;
 
     public IntakeChatService(IntakeOpenAiClient intakeOpenAiClient,
                              FileAuditLogService fileAuditLogService,
+                             IntakeTraceabilityAgent intakeTraceabilityAgent,
                              @Value("${app.intake.model:gpt-4.1-mini}") String model) {
         this.intakeOpenAiClient = intakeOpenAiClient;
         this.fileAuditLogService = fileAuditLogService;
+        this.intakeTraceabilityAgent = intakeTraceabilityAgent;
         this.model = model;
     }
 
     public IntakeChatResponse chat(String requestId, IntakeChatRequest request) {
         List<ChatMessage> messages = request.getMessages() != null ? request.getMessages() : Collections.emptyList();
+        String traceId = intakeTraceabilityAgent.resolveTraceId(request.getTraceId(), requestId);
+        intakeTraceabilityAgent.recordIntakeSessionStart(traceId, requestId, messages.size());
         try {
             IntakeOpenAiClient.NormalizedIntakeResult result = intakeOpenAiClient.collectIntake(messages);
             IntakeChatResponse response = new IntakeChatResponse();
@@ -45,6 +50,10 @@ public class IntakeChatService {
                     : emptyStructuredData();
             response.setStructuredData(structuredData);
             response.setRequestId(requestId);
+            response.setTraceId(traceId);
+
+            intakeTraceabilityAgent.recordClassification(traceId, requestId, response.getStructuredData());
+            intakeTraceabilityAgent.recordStructuredIntake(traceId, requestId, response.getStructuredData());
 
             safeAuditLog(
                     requestId,
@@ -66,9 +75,10 @@ public class IntakeChatService {
                     emptyStructuredData(),
                     ex.getMessage()
             );
-            throw new IntakeConfigurationException("Intake service is not configured. Please set OPENAI_API_KEY.");
+            intakeTraceabilityAgent.recordIntakeFailure(traceId, requestId, ex.getMessage());
+            throw new IntakeConfigurationException("Intake service is not configured. Please set OPENAI_API_KEY.", traceId);
         } catch (Exception ex) {
-            IntakeChatResponse fallback = fallbackResponse(requestId);
+            IntakeChatResponse fallback = fallbackResponse(requestId, traceId);
             safeAuditLog(
                     requestId,
                     messages,
@@ -78,16 +88,18 @@ public class IntakeChatService {
                     fallback.getStructuredData(),
                     ex.getMessage()
             );
+            intakeTraceabilityAgent.recordIntakeFailure(traceId, requestId, ex.getMessage());
             throw new IntakeProcessingException(fallback);
         }
     }
 
-    private IntakeChatResponse fallbackResponse(String requestId) {
+    private IntakeChatResponse fallbackResponse(String requestId, String traceId) {
         IntakeChatResponse response = new IntakeChatResponse();
         response.setReply("I need a bit more detail to capture this intake. Please share whether this is a bug or feature, plus title and description.");
         response.setIntakeComplete(false);
         response.setStructuredData(emptyStructuredData());
         response.setRequestId(requestId);
+        response.setTraceId(traceId);
         return response;
     }
 
@@ -185,8 +197,15 @@ public class IntakeChatService {
     }
 
     public static class IntakeConfigurationException extends RuntimeException {
-        public IntakeConfigurationException(String message) {
+        private final String traceId;
+
+        public IntakeConfigurationException(String message, String traceId) {
             super(message);
+            this.traceId = traceId;
+        }
+
+        public String getTraceId() {
+            return traceId;
         }
     }
 

@@ -8,6 +8,7 @@ import com.example.orderapi.dto.GitHubIssueCreateResponse;
 import com.example.orderapi.service.DecompositionService;
 import com.example.orderapi.service.FileAuditLogService;
 import com.example.orderapi.service.GitHubIssueCreationService;
+import com.example.orderapi.service.IntakeTraceabilityAgent;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -23,13 +24,16 @@ public class DecompositionController {
     private final DecompositionService decompositionService;
     private final GitHubIssueCreationService gitHubIssueCreationService;
     private final FileAuditLogService fileAuditLogService;
+    private final IntakeTraceabilityAgent intakeTraceabilityAgent;
 
     public DecompositionController(DecompositionService decompositionService,
                                    GitHubIssueCreationService gitHubIssueCreationService,
-                                   FileAuditLogService fileAuditLogService) {
+                                   FileAuditLogService fileAuditLogService,
+                                   IntakeTraceabilityAgent intakeTraceabilityAgent) {
         this.decompositionService = decompositionService;
         this.gitHubIssueCreationService = gitHubIssueCreationService;
         this.fileAuditLogService = fileAuditLogService;
+        this.intakeTraceabilityAgent = intakeTraceabilityAgent;
     }
 
     @PostMapping("/decompose")
@@ -67,6 +71,7 @@ public class DecompositionController {
             String sourceType = resolveSourceType(request);
             GitHubIssueCreateRequest issueRequest = new GitHubIssueCreateRequest();
             issueRequest.setRequestId(resolveRequestId(decomposition.getRequestId(), request));
+            issueRequest.setTraceId(resolveTraceId(decomposition.getTraceId(), request));
             issueRequest.setSourceType(sourceType);
             issueRequest.setStories(decomposition.getStories());
             GitHubIssueCreateResponse issueResponse = gitHubIssueCreationService.createFromDecomposition(issueRequest);
@@ -91,15 +96,17 @@ public class DecompositionController {
             return ResponseEntity.ok(issueResponse);
         } catch (IllegalArgumentException ex) {
             String requestId = resolveRequestId(null, request);
+            String traceId = resolveTraceId(null, request);
             String safeError = normalizeIntakeValidationError(ex.getMessage());
             return ResponseEntity.badRequest()
                     .header("X-Error-Message", safeError)
-                    .body(githubFailureResponse(requestId, safeError));
+                    .body(githubFailureResponse(requestId, traceId, safeError));
         } catch (IllegalStateException ex) {
             String requestId = resolveRequestId(null, request);
+            String traceId = resolveTraceId(null, request);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .header("X-Error-Message", ex.getMessage())
-                    .body(githubFailureResponse(requestId, ex.getMessage()));
+                    .body(githubFailureResponse(requestId, traceId, ex.getMessage()));
         }
     }
 
@@ -107,6 +114,7 @@ public class DecompositionController {
         DecompositionResponse response = new DecompositionResponse();
         String requestId = request != null ? request.getRequestId() : null;
         response.setRequestId((requestId != null && !requestId.isBlank()) ? requestId.trim() : "unknown-request");
+        response.setTraceId(resolveTraceId(null, request));
         response.setDecompositionComplete(false);
         response.setStories(Collections.emptyList());
         return response;
@@ -126,9 +134,10 @@ public class DecompositionController {
         return normalized;
     }
 
-    private GitHubIssueCreateResponse githubFailureResponse(String requestId, String error) {
+    private GitHubIssueCreateResponse githubFailureResponse(String requestId, String traceId, String error) {
         GitHubIssueCreateResponse response = new GitHubIssueCreateResponse();
         response.setRequestId(requestId);
+        response.setTraceId(traceId);
         response.setIssuesCreated(false);
         response.setIssues(Collections.emptyList());
         response.setError(error != null ? error : "");
@@ -141,6 +150,17 @@ public class DecompositionController {
         }
         String requestId = request != null ? request.getRequestId() : null;
         return (requestId != null && !requestId.isBlank()) ? requestId.trim() : "unknown-request";
+    }
+
+    private String resolveTraceId(String preferredTraceId, DecompositionRequest request) {
+        if (preferredTraceId != null && !preferredTraceId.isBlank()) {
+            return preferredTraceId.trim();
+        }
+        String traceId = request != null ? request.getTraceId() : null;
+        if (traceId != null && !traceId.isBlank()) {
+            return traceId.trim();
+        }
+        return "trace-" + resolveRequestId(null, request);
     }
 
     private String normalizeIntakeValidationError(String errorMessage) {
@@ -167,9 +187,16 @@ public class DecompositionController {
                 decomposition != null ? decomposition.getStories() : Collections.emptyList(),
                 errorMessage
         );
+        intakeTraceabilityAgent.recordGitHubIssueCreationResult(
+                resolveTraceId(decomposition != null ? decomposition.getTraceId() : null, request),
+                requestId,
+                sourceType != null ? sourceType : "",
+                Collections.emptyList(),
+                errorMessage
+        );
         return ResponseEntity.status(status)
                 .header("X-Error-Message", errorMessage)
-                .body(githubFailureResponse(requestId, errorMessage));
+                .body(githubFailureResponse(requestId, resolveTraceId(decomposition != null ? decomposition.getTraceId() : null, request), errorMessage));
     }
 
     private void safeGitHubCreationAudit(String requestId,

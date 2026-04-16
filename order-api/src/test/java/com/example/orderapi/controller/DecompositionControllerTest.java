@@ -4,6 +4,7 @@ import com.example.orderapi.dto.*;
 import com.example.orderapi.service.DecompositionService;
 import com.example.orderapi.service.FileAuditLogService;
 import com.example.orderapi.service.GitHubIssueCreationService;
+import com.example.orderapi.service.IntakeTraceabilityAgent;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -23,7 +24,7 @@ class DecompositionControllerTest {
         DecompositionService decompositionService = mock(DecompositionService.class);
         GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
         FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
-        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService, fileAuditLogService);
+        DecompositionController controller = createController(decompositionService, issueCreationService, fileAuditLogService);
 
         when(decompositionService.decompose(any(DecompositionRequest.class)))
                 .thenThrow(new IllegalArgumentException("structuredData.title is required"));
@@ -48,7 +49,7 @@ class DecompositionControllerTest {
         DecompositionService decompositionService = mock(DecompositionService.class);
         GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
         FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
-        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService, fileAuditLogService);
+        DecompositionController controller = createController(decompositionService, issueCreationService, fileAuditLogService);
 
         DecompositionResponse decompositionResponse = new DecompositionResponse();
         decompositionResponse.setRequestId("req-1");
@@ -75,7 +76,7 @@ class DecompositionControllerTest {
         DecompositionService decompositionService = mock(DecompositionService.class);
         GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
         FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
-        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService, fileAuditLogService);
+        DecompositionController controller = createController(decompositionService, issueCreationService, fileAuditLogService);
 
         DecompositionResponse decompositionResponse = new DecompositionResponse();
         decompositionResponse.setRequestId(null);
@@ -103,7 +104,7 @@ class DecompositionControllerTest {
         DecompositionService decompositionService = mock(DecompositionService.class);
         GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
         FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
-        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService, fileAuditLogService);
+        DecompositionController controller = createController(decompositionService, issueCreationService, fileAuditLogService);
 
         DecompositionResponse decompositionResponse = new DecompositionResponse();
         decompositionResponse.setRequestId("req-2");
@@ -124,7 +125,7 @@ class DecompositionControllerTest {
         DecompositionService decompositionService = mock(DecompositionService.class);
         GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
         FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
-        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService, fileAuditLogService);
+        DecompositionController controller = createController(decompositionService, issueCreationService, fileAuditLogService);
 
         DecompositionResponse decompositionResponse = new DecompositionResponse();
         decompositionResponse.setRequestId("req-3");
@@ -145,7 +146,7 @@ class DecompositionControllerTest {
         DecompositionService decompositionService = mock(DecompositionService.class);
         GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
         FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
-        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService, fileAuditLogService);
+        DecompositionController controller = createController(decompositionService, issueCreationService, fileAuditLogService);
 
         DecompositionResponse decompositionResponse = new DecompositionResponse();
         decompositionResponse.setRequestId("decomp-req-id");
@@ -165,7 +166,7 @@ class DecompositionControllerTest {
         DecompositionService decompositionService = mock(DecompositionService.class);
         GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
         FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
-        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService, fileAuditLogService);
+        DecompositionController controller = createController(decompositionService, issueCreationService, fileAuditLogService);
 
         DecompositionResponse decompositionResponse = new DecompositionResponse();
         decompositionResponse.setRequestId("req-4");
@@ -186,7 +187,7 @@ class DecompositionControllerTest {
         DecompositionService decompositionService = mock(DecompositionService.class);
         GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
         FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
-        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService, fileAuditLogService);
+        DecompositionController controller = createController(decompositionService, issueCreationService, fileAuditLogService);
 
         DecompositionResponse decompositionResponse = new DecompositionResponse();
         decompositionResponse.setRequestId("req-5");
@@ -208,7 +209,7 @@ class DecompositionControllerTest {
         DecompositionService decompositionService = mock(DecompositionService.class);
         GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
         FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
-        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService, fileAuditLogService);
+        DecompositionController controller = createController(decompositionService, issueCreationService, fileAuditLogService);
 
         DecompositionResponse decompositionResponse = new DecompositionResponse();
         decompositionResponse.setRequestId("req-bug");
@@ -262,5 +263,16 @@ class DecompositionControllerTest {
         summary.setTitle("Update tab label");
         summary.setLabels(List.of("feature"));
         return summary;
+    }
+
+    private DecompositionController createController(DecompositionService decompositionService,
+                                                     GitHubIssueCreationService issueCreationService,
+                                                     FileAuditLogService fileAuditLogService) {
+        return new DecompositionController(
+                decompositionService,
+                issueCreationService,
+                fileAuditLogService,
+                mock(IntakeTraceabilityAgent.class)
+        );
     }
 }

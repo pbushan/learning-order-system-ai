@@ -18,29 +18,37 @@ public class DecompositionService {
 
     private final IntakeOpenAiClient intakeOpenAiClient;
     private final FileAuditLogService fileAuditLogService;
+    private final IntakeTraceabilityAgent intakeTraceabilityAgent;
     private final String decompositionModel;
 
     public DecompositionService(IntakeOpenAiClient intakeOpenAiClient,
                                 FileAuditLogService fileAuditLogService,
+                                IntakeTraceabilityAgent intakeTraceabilityAgent,
                                 @Value("${app.intake.decomposition.model:${app.intake.model:gpt-4.1-mini}}") String decompositionModel) {
         this.intakeOpenAiClient = intakeOpenAiClient;
         this.fileAuditLogService = fileAuditLogService;
+        this.intakeTraceabilityAgent = intakeTraceabilityAgent;
         this.decompositionModel = decompositionModel;
     }
 
     public DecompositionResponse decompose(DecompositionRequest request) {
         validateRequest(request);
         String requestId = request.getRequestId().trim();
+        String traceId = intakeTraceabilityAgent.resolveTraceId(request.getTraceId(), requestId);
         StructuredIntakeData structuredData = request.getStructuredData();
         try {
             DecompositionResponse response = intakeOpenAiClient.decompose(requestId, structuredData);
             DecompositionResponse normalized = normalizeResponse(response, requestId);
+            normalized.setTraceId(traceId);
             safeAuditLog(requestId, structuredData, normalized, null);
+            intakeTraceabilityAgent.recordDecomposition(traceId, requestId, normalized, null);
             return normalized;
         } catch (Exception ex) {
             log.warn("Decomposition call failed for requestId={}: {}", requestId, ex.getClass().getSimpleName());
             DecompositionResponse fallback = fallback(requestId);
+            fallback.setTraceId(traceId);
             safeAuditLog(requestId, structuredData, fallback, ex.getClass().getSimpleName());
+            intakeTraceabilityAgent.recordDecomposition(traceId, requestId, fallback, ex.getClass().getSimpleName());
             return fallback;
         }
     }
@@ -68,6 +76,9 @@ public class DecompositionService {
         if (!StringUtils.hasText(response.getRequestId())) {
             response.setRequestId(requestId);
         }
+        if (!StringUtils.hasText(response.getTraceId())) {
+            response.setTraceId("trace-" + requestId);
+        }
         if (response.getStories() == null) {
             response.setStories(Collections.emptyList());
         }
@@ -77,6 +88,7 @@ public class DecompositionService {
     private DecompositionResponse fallback(String requestId) {
         DecompositionResponse fallback = new DecompositionResponse();
         fallback.setRequestId(requestId);
+        fallback.setTraceId("trace-" + requestId);
         fallback.setDecompositionComplete(false);
         fallback.setStories(Collections.emptyList());
         return fallback;

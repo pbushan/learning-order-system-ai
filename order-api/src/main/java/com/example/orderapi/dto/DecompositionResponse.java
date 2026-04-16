@@ -11,6 +11,9 @@ public class DecompositionResponse {
     @JsonProperty("requestId")
     private String requestId;
 
+    @JsonProperty("traceId")
+    private String traceId;
+
     @JsonProperty("decompositionComplete")
     private boolean decompositionComplete;
 
@@ -23,6 +26,14 @@ public class DecompositionResponse {
 
     public void setRequestId(String requestId) {
         this.requestId = requestId;
+    }
+
+    public String getTraceId() {
+        return traceId;
+    }
+
+    public void setTraceId(String traceId) {
+        this.traceId = traceId;
     }
 
     public boolean isDecompositionComplete() {
