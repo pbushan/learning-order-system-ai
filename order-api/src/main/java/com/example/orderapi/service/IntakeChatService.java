@@ -76,7 +76,7 @@ public class IntakeChatService {
                     ex.getMessage()
             );
             intakeTraceabilityAgent.recordIntakeFailure(traceId, requestId, ex.getMessage());
-            throw new IntakeConfigurationException("Intake service is not configured. Please set OPENAI_API_KEY.");
+            throw new IntakeConfigurationException("Intake service is not configured. Please set OPENAI_API_KEY.", traceId);
         } catch (Exception ex) {
             IntakeChatResponse fallback = fallbackResponse(requestId, traceId);
             safeAuditLog(
@@ -197,8 +197,15 @@ public class IntakeChatService {
     }
 
     public static class IntakeConfigurationException extends RuntimeException {
-        public IntakeConfigurationException(String message) {
+        private final String traceId;
+
+        public IntakeConfigurationException(String message, String traceId) {
             super(message);
+            this.traceId = traceId;
+        }
+
+        public String getTraceId() {
+            return traceId;
         }
     }
 

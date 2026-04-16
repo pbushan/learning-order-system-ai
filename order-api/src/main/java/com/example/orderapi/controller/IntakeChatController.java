@@ -30,14 +30,14 @@ public class IntakeChatController {
             return ResponseEntity.ok(response);
         } catch (IntakeChatService.IntakeConfigurationException ex) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                    .body(serviceUnavailableResponse(requestId));
+                    .body(serviceUnavailableResponse(requestId, resolveTraceId(request, requestId, ex.getTraceId())));
         } catch (IntakeChatService.IntakeProcessingException ex) {
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .body(normalizeErrorResponse(ex.getFallbackResponse(), requestId));
+                    .body(normalizeErrorResponse(ex.getFallbackResponse(), requestId, resolveTraceId(request, requestId, null)));
         }
     }
 
-    private IntakeChatResponse serviceUnavailableResponse(String requestId) {
+    private IntakeChatResponse serviceUnavailableResponse(String requestId, String traceId) {
         IntakeChatResponse response = new IntakeChatResponse();
         response.setReply("Service unavailable. Please try again shortly.");
         response.setIntakeComplete(false);
@@ -49,19 +49,19 @@ public class IntakeChatController {
         data.setAffectedComponents(Collections.emptyList());
         response.setStructuredData(data);
         response.setRequestId(requestId);
-        response.setTraceId("trace-" + requestId);
+        response.setTraceId(traceId);
         return response;
     }
 
-    private IntakeChatResponse normalizeErrorResponse(IntakeChatResponse fallback, String requestId) {
-        IntakeChatResponse response = fallback != null ? fallback : serviceUnavailableResponse(requestId);
+    private IntakeChatResponse normalizeErrorResponse(IntakeChatResponse fallback, String requestId, String defaultTraceId) {
+        IntakeChatResponse response = fallback != null ? fallback : serviceUnavailableResponse(requestId, defaultTraceId);
         if (response.getRequestId() == null || response.getRequestId().isBlank()) {
             response.setRequestId(requestId);
         }
         if (response.getTraceId() == null || response.getTraceId().isBlank()) {
-            response.setTraceId("trace-" + requestId);
+            response.setTraceId(defaultTraceId);
         }
-        StructuredIntakeData fallbackData = serviceUnavailableResponse(requestId).getStructuredData();
+        StructuredIntakeData fallbackData = serviceUnavailableResponse(requestId, defaultTraceId).getStructuredData();
         if (fallbackData == null) {
             fallbackData = new StructuredIntakeData();
             fallbackData.setTitle("");
@@ -91,5 +91,16 @@ public class IntakeChatController {
         }
         response.setStructuredData(data);
         return response;
+    }
+
+    private String resolveTraceId(IntakeChatRequest request, String requestId, String preferredTraceId) {
+        if (preferredTraceId != null && !preferredTraceId.isBlank()) {
+            return preferredTraceId.trim();
+        }
+        String requestTraceId = request != null ? request.getTraceId() : null;
+        if (requestTraceId != null && !requestTraceId.isBlank()) {
+            return requestTraceId.trim();
+        }
+        return "trace-" + requestId;
     }
 }
