@@ -94,6 +94,19 @@ class TraceabilityFoundationTest(unittest.TestCase):
                 timestamp="2026-04-16T10:00:00+00:00",
             )
 
+    def test_create_trace_event_accepts_single_token_event_type(self) -> None:
+        event = create_trace_event(
+            trace_id="trace-123",
+            session_id="session-abc",
+            correlation_id="corr-1",
+            event_type="intake",
+            status="recorded",
+            actor="intake-api",
+            summary="Intake payload accepted",
+            timestamp="2026-04-16T10:00:00+00:00",
+        )
+        self.assertEqual(event.event_type, "intake")
+
     def test_create_trace_event_rejects_invalid_actor(self) -> None:
         with self.assertRaises(ValueError):
             create_trace_event(
@@ -177,7 +190,7 @@ class TraceabilityFoundationTest(unittest.TestCase):
             path.write_text(f"{json.dumps(invalid_record)}\n", encoding="utf-8")
 
             with self.assertRaises(ValueError):
-                read_trace_events(trace_id="trace-123", path=path)
+                read_trace_events(trace_id="trace-123", path=path, strict=True)
 
     def test_read_rejects_invalid_timestamp(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -195,7 +208,7 @@ class TraceabilityFoundationTest(unittest.TestCase):
             path.write_text(f"{json.dumps(invalid_record)}\n", encoding="utf-8")
 
             with self.assertRaises(ValueError):
-                read_trace_events(trace_id="trace-123", path=path)
+                read_trace_events(trace_id="trace-123", path=path, strict=True)
 
     def test_read_rejects_non_utc_timestamp(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -213,7 +226,37 @@ class TraceabilityFoundationTest(unittest.TestCase):
             path.write_text(f"{json.dumps(invalid_record)}\n", encoding="utf-8")
 
             with self.assertRaises(ValueError):
-                read_trace_events(trace_id="trace-123", path=path)
+                read_trace_events(trace_id="trace-123", path=path, strict=True)
+
+    def test_read_skips_invalid_lines_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decision-trace.jsonl"
+            valid_record = {
+                "traceId": "trace-123",
+                "sessionId": "session-abc",
+                "correlationId": "corr-1",
+                "eventType": "intake.received",
+                "timestamp": "2026-04-16T10:00:00+00:00",
+                "status": "recorded",
+                "actor": "intake-api",
+                "summary": "valid event",
+            }
+            path.write_text(
+                "{bad-json}\n"
+                f"{json.dumps(valid_record)}\n"
+                f"{json.dumps({**valid_record, 'traceId': 'trace-456', 'status': 'bad'})}\n",
+                encoding="utf-8",
+            )
+            events = read_trace_events(trace_id="trace-123", path=path)
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].trace_id, "trace-123")
+
+    def test_read_strict_mode_fails_on_invalid_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decision-trace.jsonl"
+            path.write_text("{bad-json}\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                read_trace_events(trace_id="trace-123", path=path, strict=True)
 
 
 if __name__ == "__main__":

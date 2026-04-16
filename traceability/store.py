@@ -31,6 +31,7 @@ def read_trace_events(
     trace_id: str | None = None,
     session_id: str | None = None,
     path: str | Path | None = None,
+    strict: bool = False,
 ) -> list[DecisionTraceEvent]:
     """Read events filtered to one trace or one session."""
 
@@ -50,7 +51,9 @@ def read_trace_events(
             try:
                 record = json.loads(line)
             except json.JSONDecodeError as exc:
-                raise ValueError(f"Invalid JSON in trace log at line {line_number}") from exc
+                if strict:
+                    raise ValueError(f"Invalid JSON in trace log at line {line_number}") from exc
+                continue
             if trace_id and str(record.get("traceId") or "") != trace_id:
                 continue
             if session_id and str(record.get("sessionId") or "") != session_id:
@@ -58,5 +61,7 @@ def read_trace_events(
             try:
                 matches.append(DecisionTraceEvent.from_record(record))
             except ValueError as exc:
-                raise ValueError(f"Invalid trace record at line {line_number}: {exc}") from exc
+                if strict:
+                    raise ValueError(f"Invalid trace record at line {line_number}: {exc}") from exc
+                continue
     return matches

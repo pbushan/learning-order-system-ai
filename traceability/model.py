@@ -19,7 +19,7 @@ ALLOWED_STATUSES = {
     "skipped",
 }
 
-EVENT_TYPE_PATTERN = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)+$")
+EVENT_TYPE_PATTERN = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 ACTOR_PATTERN = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 
 
@@ -150,7 +150,8 @@ def _validate_iso8601_timestamp(timestamp: str) -> None:
         parsed = datetime.fromisoformat(candidate)
     except ValueError as exc:
         raise ValueError(f"Invalid trace record: timestamp is not ISO-8601 ({timestamp})") from exc
-    if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
+    offset = parsed.utcoffset()
+    if parsed.tzinfo is None or offset is None or offset.total_seconds() != 0:
         raise ValueError(f"Invalid trace record: timestamp must be UTC ({timestamp})")
 
 

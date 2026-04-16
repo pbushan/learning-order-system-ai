@@ -34,7 +34,7 @@ Schema contract notes:
 - reads fail fast for missing required fields or invalid timestamp formats
 - timestamps must be UTC (`Z` or `+00:00`)
 - allowed `status` values: `recorded`, `pending`, `accepted`, `approved`, `rejected`, `completed`, `failed`, `skipped`
-- `eventType` must be lowercase namespace-like format (example: `intake.received`)
+- `eventType` must be lowercase token format (single token or namespaced, examples: `intake`, `intake.received`)
 - `actor` must be lowercase token format (example: `intake-api`)
 
 ## Persistence
@@ -49,3 +49,5 @@ Schema contract notes:
 - `create_trace_event(...)`
 - `append_trace_event(event, path=None)`
 - `read_trace_events(trace_id=..., session_id=..., path=None)` (keyword-only filters)
+  - default mode skips malformed lines and returns valid matching events
+  - set `strict=True` to fail fast on malformed JSON or invalid records
