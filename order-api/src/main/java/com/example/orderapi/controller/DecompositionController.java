@@ -91,9 +91,10 @@ public class DecompositionController {
             return ResponseEntity.ok(issueResponse);
         } catch (IllegalArgumentException ex) {
             String requestId = resolveRequestId(null, request);
+            String safeError = normalizeIntakeValidationError(ex.getMessage());
             return ResponseEntity.badRequest()
-                    .header("X-Error-Message", ex.getMessage())
-                    .body(githubFailureResponse(requestId, ex.getMessage()));
+                    .header("X-Error-Message", safeError)
+                    .body(githubFailureResponse(requestId, safeError));
         } catch (IllegalStateException ex) {
             String requestId = resolveRequestId(null, request);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -140,6 +141,18 @@ public class DecompositionController {
         }
         String requestId = request != null ? request.getRequestId() : null;
         return (requestId != null && !requestId.isBlank()) ? requestId.trim() : "unknown-request";
+    }
+
+    private String normalizeIntakeValidationError(String errorMessage) {
+        if (errorMessage == null) {
+            return "";
+        }
+        if (errorMessage.contains("structuredData.title is required")
+                || errorMessage.contains("structuredData.description is required")
+                || errorMessage.contains("structuredData.type is required")) {
+            return "Intake completed without actionable bug/feature details, so no GitHub issues were created.";
+        }
+        return errorMessage;
     }
 
     private ResponseEntity<GitHubIssueCreateResponse> failureWithAudit(HttpStatus status,

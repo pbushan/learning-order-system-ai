@@ -19,6 +19,31 @@ import static org.mockito.Mockito.*;
 class DecompositionControllerTest {
 
     @Test
+    void completeToGitHub_returnsFriendlyMessageWhenStructuredTitleMissing() {
+        DecompositionService decompositionService = mock(DecompositionService.class);
+        GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
+        FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
+        DecompositionController controller = new DecompositionController(decompositionService, issueCreationService, fileAuditLogService);
+
+        when(decompositionService.decompose(any(DecompositionRequest.class)))
+                .thenThrow(new IllegalArgumentException("structuredData.title is required"));
+
+        ResponseEntity<GitHubIssueCreateResponse> response = controller.completeToGitHub(sampleDecompositionRequest("req-intake", "bug"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("req-intake", response.getBody().getRequestId());
+        assertEquals(
+                "Intake completed without actionable bug/feature details, so no GitHub issues were created.",
+                response.getBody().getError()
+        );
+        assertEquals(
+                "Intake completed without actionable bug/feature details, so no GitHub issues were created.",
+                response.getHeaders().getFirst("X-Error-Message")
+        );
+        verify(issueCreationService, never()).createFromDecomposition(any(GitHubIssueCreateRequest.class));
+    }
+
+    @Test
     void completeToGitHub_createsIssuesWhenDecompositionHasStories() {
         DecompositionService decompositionService = mock(DecompositionService.class);
         GitHubIssueCreationService issueCreationService = mock(GitHubIssueCreationService.class);
