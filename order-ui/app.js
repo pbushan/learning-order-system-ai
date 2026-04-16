@@ -357,6 +357,14 @@ async function handleIntakeChatSubmit(event) {
         updateIntakeResult(response);
         if (hasCompleteIntakeResult(state.intakeResult)) {
             await runAutomatedIntakeFlow(state.intakeResult);
+        } else if (response?.intakeComplete === true) {
+            state.githubIssueCreationResult = {
+                requestId: typeof response?.requestId === "string" ? response.requestId.trim() : "",
+                issuesCreated: false,
+                issues: [],
+                note: "Intake completed without an actionable bug/feature request. No GitHub issues were created."
+            };
+            state.githubIssueCreationError = "";
         }
         trimIntakeMessages();
     } catch (error) {
@@ -421,7 +429,17 @@ function hasCompleteIntakeResult(result) {
     return result?.intakeComplete
         && typeof result.requestId === "string"
         && result.requestId.length > 0
-        && !!result.structuredData;
+        && isActionableStructuredData(result.structuredData);
+}
+
+function isActionableStructuredData(structuredData) {
+    if (!structuredData || typeof structuredData !== "object") {
+        return false;
+    }
+    const type = typeof structuredData.type === "string" ? structuredData.type.trim().toLowerCase() : "";
+    const title = typeof structuredData.title === "string" ? structuredData.title.trim() : "";
+    const description = typeof structuredData.description === "string" ? structuredData.description.trim() : "";
+    return (type === "bug" || type === "feature") && title.length > 0 && description.length > 0;
 }
 
 async function runAutomatedIntakeFlow(intakeResult) {
@@ -465,6 +483,13 @@ function resolveGithubIssueCreationFallbackMessage(error) {
     }
     if (error?.message === "GitHub issue creation did not complete successfully.") {
         return error.message;
+    }
+    if (typeof error?.message === "string" && (
+        error.message.includes("structuredData.title is required")
+        || error.message.includes("structuredData.description is required")
+        || error.message.includes("structuredData.type is required")
+    )) {
+        return "Intake completed without actionable bug/feature details, so no GitHub issues were created.";
     }
     if (error?.message === "Intake request timed out") {
         return "GitHub issue creation timed out. Please try again.";
@@ -590,7 +615,9 @@ function createGithubIssueResultsElement(result) {
     if (!issues.length) {
         const empty = document.createElement("p");
         empty.className = "intake-decomposition-empty";
-        empty.textContent = "No GitHub issues created yet.";
+        empty.textContent = (typeof result?.note === "string" && result.note.trim())
+            ? result.note.trim()
+            : "No GitHub issues created yet.";
         wrapper.appendChild(empty);
     } else {
         issues.forEach((issue) => {
