@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 @Service
@@ -15,22 +16,34 @@ public class GitHubIssueCreationService {
 
     private final GitHubIssueClientService gitHubIssueClientService;
     private final FileAuditLogService fileAuditLogService;
+    private final IntakeTraceabilityAgent intakeTraceabilityAgent;
 
     public GitHubIssueCreationService(GitHubIssueClientService gitHubIssueClientService,
-                                      FileAuditLogService fileAuditLogService) {
+                                      FileAuditLogService fileAuditLogService,
+                                      IntakeTraceabilityAgent intakeTraceabilityAgent) {
         this.gitHubIssueClientService = gitHubIssueClientService;
         this.fileAuditLogService = fileAuditLogService;
+        this.intakeTraceabilityAgent = intakeTraceabilityAgent;
     }
 
     public GitHubIssueCreateResponse createFromDecomposition(GitHubIssueCreateRequest request) {
-        validateRequest(request);
-
-        String requestId = request.getRequestId().trim();
-        String sourceType = request.getSourceType().trim();
-        List<DecompositionStory> stories = request.getStories();
+        String requestId = request != null && StringUtils.hasText(request.getRequestId())
+                ? request.getRequestId().trim()
+                : "unknown-request";
+        String traceId = intakeTraceabilityAgent.resolveTraceId(request != null ? request.getTraceId() : null, requestId);
+        String sourceType = request != null && StringUtils.hasText(request.getSourceType())
+                ? request.getSourceType().trim()
+                : "";
+        List<DecompositionStory> stories = request != null && request.getStories() != null
+                ? request.getStories()
+                : Collections.emptyList();
         List<GitHubIssueSummary> issues = new ArrayList<>();
 
         try {
+            validateRequest(request);
+            sourceType = request.getSourceType().trim();
+            stories = request.getStories();
+            intakeTraceabilityAgent.recordGitHubPayloadPrepared(traceId, requestId, sourceType, stories.size());
             for (DecompositionStory story : stories) {
                 GitHubIssueSummary issue = gitHubIssueClientService.createIssueForStory(sourceType, story);
                 issue.setStoryId(story.getStoryId());
@@ -38,13 +51,16 @@ public class GitHubIssueCreationService {
             }
             GitHubIssueCreateResponse response = new GitHubIssueCreateResponse();
             response.setRequestId(requestId);
+            response.setTraceId(traceId);
             response.setIssuesCreated(!issues.isEmpty());
             response.setIssues(issues);
 
             safeAuditLog(requestId, sourceType, stories, issues, null);
+            intakeTraceabilityAgent.recordGitHubIssueCreationResult(traceId, requestId, sourceType, issues, null);
             return response;
         } catch (Exception ex) {
             safeAuditLog(requestId, sourceType, stories, issues, ex.getMessage());
+            intakeTraceabilityAgent.recordGitHubIssueCreationResult(traceId, requestId, sourceType, issues, ex.getMessage());
             throw ex;
         }
     }

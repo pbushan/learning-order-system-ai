@@ -11,6 +11,9 @@ public class GitHubIssueCreateResponse {
     @JsonProperty("requestId")
     private String requestId;
 
+    @JsonProperty("traceId")
+    private String traceId;
+
     @JsonProperty("issuesCreated")
     private boolean issuesCreated;
 
@@ -26,6 +29,14 @@ public class GitHubIssueCreateResponse {
 
     public void setRequestId(String requestId) {
         this.requestId = requestId;
+    }
+
+    public String getTraceId() {
+        return traceId;
+    }
+
+    public void setTraceId(String traceId) {
+        this.traceId = traceId;
     }
 
     public boolean isIssuesCreated() {

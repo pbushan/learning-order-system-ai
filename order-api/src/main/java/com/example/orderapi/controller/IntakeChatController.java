@@ -49,6 +49,7 @@ public class IntakeChatController {
         data.setAffectedComponents(Collections.emptyList());
         response.setStructuredData(data);
         response.setRequestId(requestId);
+        response.setTraceId("trace-" + requestId);
         return response;
     }
 
@@ -56,6 +57,9 @@ public class IntakeChatController {
         IntakeChatResponse response = fallback != null ? fallback : serviceUnavailableResponse(requestId);
         if (response.getRequestId() == null || response.getRequestId().isBlank()) {
             response.setRequestId(requestId);
+        }
+        if (response.getTraceId() == null || response.getTraceId().isBlank()) {
+            response.setTraceId("trace-" + requestId);
         }
         StructuredIntakeData fallbackData = serviceUnavailableResponse(requestId).getStructuredData();
         if (fallbackData == null) {

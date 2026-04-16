@@ -42,6 +42,8 @@ public class GitHubIssueController {
         GitHubIssueCreateResponse response = new GitHubIssueCreateResponse();
         String requestId = request != null ? request.getRequestId() : null;
         response.setRequestId(StringUtils.hasText(requestId) ? requestId.trim() : "unknown-request");
+        String traceId = request != null ? request.getTraceId() : null;
+        response.setTraceId(StringUtils.hasText(traceId) ? traceId.trim() : "trace-" + response.getRequestId());
         response.setIssuesCreated(false);
         response.setIssues(Collections.emptyList());
         response.setError(error != null ? error : "");

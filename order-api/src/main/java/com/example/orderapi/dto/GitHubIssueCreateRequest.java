@@ -16,6 +16,9 @@ public class GitHubIssueCreateRequest {
     @NotBlank(message = "requestId is required")
     private String requestId;
 
+    @JsonProperty("traceId")
+    private String traceId;
+
     @JsonProperty("sourceType")
     @NotBlank(message = "sourceType is required")
     private String sourceType;
@@ -32,6 +35,14 @@ public class GitHubIssueCreateRequest {
 
     public void setRequestId(String requestId) {
         this.requestId = requestId;
+    }
+
+    public String getTraceId() {
+        return traceId;
+    }
+
+    public void setTraceId(String traceId) {
+        this.traceId = traceId;
     }
 
     public String getSourceType() {
