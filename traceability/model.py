@@ -42,15 +42,25 @@ class DecisionTraceEvent:
 
     @staticmethod
     def from_record(record: dict[str, Any]) -> "DecisionTraceEvent":
+        trace_id = _required_record_value(record, "traceId")
+        session_id = _required_record_value(record, "sessionId")
+        correlation_id = _required_record_value(record, "correlationId")
+        event_type = _required_record_value(record, "eventType")
+        timestamp = _required_record_value(record, "timestamp")
+        status = _required_record_value(record, "status")
+        actor = _required_record_value(record, "actor")
+        summary = _required_record_value(record, "summary")
+        _validate_iso8601_timestamp(timestamp)
+
         return DecisionTraceEvent(
-            trace_id=str(record.get("traceId") or ""),
-            session_id=str(record.get("sessionId") or ""),
-            correlation_id=str(record.get("correlationId") or ""),
-            event_type=str(record.get("eventType") or ""),
-            timestamp=str(record.get("timestamp") or ""),
-            status=str(record.get("status") or ""),
-            actor=str(record.get("actor") or ""),
-            summary=str(record.get("summary") or ""),
+            trace_id=trace_id,
+            session_id=session_id,
+            correlation_id=correlation_id,
+            event_type=event_type,
+            timestamp=timestamp,
+            status=status,
+            actor=actor,
+            summary=summary,
             decision_metadata=dict(record.get("decisionMetadata") or {}),
             input_summary=dict(record.get("inputSummary") or {}),
             artifact_summary=dict(record.get("artifactSummary") or {}),
@@ -67,6 +77,7 @@ def create_trace_event(
     status: str,
     actor: str,
     summary: str,
+    timestamp: str | None = None,
     decision_metadata: dict[str, Any] | None = None,
     input_summary: dict[str, Any] | None = None,
     artifact_summary: dict[str, Any] | None = None,
@@ -87,11 +98,15 @@ def create_trace_event(
     if missing:
         raise ValueError(f"Missing required fields: {', '.join(missing)}")
 
+    if timestamp is not None:
+        _validate_iso8601_timestamp(timestamp)
+
     return DecisionTraceEvent(
         trace_id=str(trace_id),
         session_id=str(session_id),
         correlation_id=str(correlation_id),
         event_type=str(event_type),
+        timestamp=timestamp if timestamp is not None else datetime.now(timezone.utc).isoformat(),
         status=str(status),
         actor=str(actor),
         summary=str(summary),
@@ -100,3 +115,20 @@ def create_trace_event(
         artifact_summary=dict(artifact_summary or {}),
         governance_metadata=dict(governance_metadata or {}),
     )
+
+
+def _required_record_value(record: dict[str, Any], key: str) -> str:
+    value = record.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Invalid trace record: missing or empty {key}")
+    return value
+
+
+def _validate_iso8601_timestamp(timestamp: str) -> None:
+    candidate = timestamp
+    if candidate.endswith("Z"):
+        candidate = f"{candidate[:-1]}+00:00"
+    try:
+        datetime.fromisoformat(candidate)
+    except ValueError as exc:
+        raise ValueError(f"Invalid trace record: timestamp is not ISO-8601 ({timestamp})") from exc

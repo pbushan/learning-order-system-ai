@@ -28,6 +28,11 @@ Each JSONL line is one immutable event with these fields:
 - `artifactSummary`: produced artifacts summary
 - `governanceMetadata`: guardrail/compliance markers
 
+Schema contract notes:
+- persisted keys are camelCase exactly as listed above
+- snake_case aliases are intentionally not accepted by the reader
+- reads fail fast for missing required fields or invalid timestamp formats
+
 ## Persistence
 
 - Append-only JSONL store

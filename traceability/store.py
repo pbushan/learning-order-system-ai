@@ -43,14 +43,20 @@ def read_trace_events(
 
     matches: list[DecisionTraceEvent] = []
     with log_path.open("r", encoding="utf-8") as handle:
-        for raw in handle:
+        for line_number, raw in enumerate(handle, start=1):
             line = raw.strip()
             if not line:
                 continue
-            record = json.loads(line)
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Invalid JSON in trace log at line {line_number}") from exc
             if trace_id and str(record.get("traceId") or "") != trace_id:
                 continue
             if session_id and str(record.get("sessionId") or "") != session_id:
                 continue
-            matches.append(DecisionTraceEvent.from_record(record))
+            try:
+                matches.append(DecisionTraceEvent.from_record(record))
+            except ValueError as exc:
+                raise ValueError(f"Invalid trace record at line {line_number}: {exc}") from exc
     return matches

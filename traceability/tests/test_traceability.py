@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -26,6 +27,32 @@ class TraceabilityFoundationTest(unittest.TestCase):
                 status="accepted",
                 actor="intake-service",
                 summary="Validated user request",
+            )
+
+    def test_create_trace_event_accepts_explicit_timestamp_for_determinism(self) -> None:
+        event = create_trace_event(
+            trace_id="trace-123",
+            session_id="session-abc",
+            correlation_id="corr-1",
+            event_type="intake.received",
+            status="recorded",
+            actor="intake-api",
+            summary="Intake payload accepted",
+            timestamp="2026-04-16T10:00:00+00:00",
+        )
+        self.assertEqual(event.timestamp, "2026-04-16T10:00:00+00:00")
+
+    def test_create_trace_event_rejects_invalid_explicit_timestamp(self) -> None:
+        with self.assertRaises(ValueError):
+            create_trace_event(
+                trace_id="trace-123",
+                session_id="session-abc",
+                correlation_id="corr-1",
+                event_type="intake.received",
+                status="recorded",
+                actor="intake-api",
+                summary="Intake payload accepted",
+                timestamp="bad-ts",
             )
 
     def test_append_only_write_and_query_by_trace_and_session(self) -> None:
@@ -81,6 +108,42 @@ class TraceabilityFoundationTest(unittest.TestCase):
             by_session = read_trace_events(session_id=session_id, path=path)
             self.assertEqual(len(by_session), 2)
             self.assertTrue(all(event.session_id == session_id for event in by_session))
+
+    def test_read_rejects_missing_required_camel_case_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decision-trace.jsonl"
+            invalid_record = {
+                "traceId": "trace-123",
+                "session_id": "session-abc",
+                "correlation_id": "corr-1",
+                "event_type": "intake.received",
+                "timestamp": "2026-04-16T10:00:00+00:00",
+                "status": "recorded",
+                "actor": "intake-api",
+                "summary": "snake_case keys are not accepted",
+            }
+            path.write_text(f"{json.dumps(invalid_record)}\n", encoding="utf-8")
+
+            with self.assertRaises(ValueError):
+                read_trace_events(trace_id="trace-123", path=path)
+
+    def test_read_rejects_invalid_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decision-trace.jsonl"
+            invalid_record = {
+                "traceId": "trace-123",
+                "sessionId": "session-abc",
+                "correlationId": "corr-1",
+                "eventType": "intake.received",
+                "timestamp": "not-a-timestamp",
+                "status": "recorded",
+                "actor": "intake-api",
+                "summary": "invalid timestamp",
+            }
+            path.write_text(f"{json.dumps(invalid_record)}\n", encoding="utf-8")
+
+            with self.assertRaises(ValueError):
+                read_trace_events(trace_id="trace-123", path=path)
 
 
 if __name__ == "__main__":
