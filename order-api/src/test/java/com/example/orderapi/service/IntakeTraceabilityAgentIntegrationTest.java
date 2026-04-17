@@ -312,6 +312,33 @@ class IntakeTraceabilityAgentIntegrationTest {
         assertEquals(0, event.path("artifactSummary").path("failedIssueCount").asInt());
     }
 
+    @Test
+    void recordsSummaryCommentEventWhenFailedIssueNumbersIsNull() throws Exception {
+        Path traceLogPath = Files.createTempFile("decision-trace-comment-null-list", ".jsonl");
+        ObjectMapper objectMapper = new ObjectMapper();
+        IntakeTraceabilityAgent traceabilityAgent = new IntakeTraceabilityAgent(objectMapper, traceLogPath.toString());
+
+        traceabilityAgent.recordGitHubSummaryCommentResult(
+                "trace-null-failures",
+                "req-null-failures",
+                "bug",
+                1,
+                1,
+                null
+        );
+
+        List<JsonNode> events = readEvents(traceLogPath, objectMapper);
+        JsonNode event = events.stream()
+                .filter(node -> "intake.github.summary-comment.completed".equals(node.path("eventType").asText("")))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(1, event.path("artifactSummary").path("issueCount").asInt());
+        assertEquals(1, event.path("artifactSummary").path("commentedIssueCount").asInt());
+        assertEquals(0, event.path("artifactSummary").path("failedIssueCount").asInt());
+        assertTrue(event.path("artifactSummary").path("failedIssueNumbers").isArray());
+    }
+
     private static StructuredIntakeData structuredData(String type, String title, String description) {
         StructuredIntakeData data = new StructuredIntakeData();
         data.setType(type);

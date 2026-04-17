@@ -50,8 +50,8 @@ test('buildEngineerTimeline keeps all events with detailed payload', () => {
 test('buildCustomerTimeline surfaces failure states with clear step titles', () => {
   const timeline = ui.buildCustomerTimeline([
     { eventType: 'intake.classification.completed', timestamp: '2026-04-17T10:00:01Z', status: 'pending', summary: 'classification uncertain', decisionMetadata: {}, inputSummary: {}, artifactSummary: {}, governanceMetadata: {} },
-    { eventType: 'intake.github.issue-creation.failed', timestamp: '2026-04-17T10:00:05Z', status: 'failed', summary: 'issue creation failed', decisionMetadata: {}, inputSummary: {}, artifactSummary: {}, governanceMetadata: {} },
-    { eventType: 'intake.github.summary-comment.failed', timestamp: '2026-04-17T10:00:06Z', status: 'failed', summary: 'comments partially failed', decisionMetadata: {}, inputSummary: {}, artifactSummary: { failedIssueCount: 1 }, governanceMetadata: {} }
+    { eventType: 'intake.github.issue-creation.failed', timestamp: '2026-04-17T10:00:05Z', status: 'FAILED', summary: 'issue creation failed', decisionMetadata: {}, inputSummary: {}, artifactSummary: {}, governanceMetadata: {} },
+    { eventType: 'intake.github.summary-comment.failed', timestamp: '2026-04-17T10:00:06Z', summary: 'comments partially failed', decisionMetadata: {}, inputSummary: {}, artifactSummary: { failedIssueCount: 1 }, governanceMetadata: {} }
   ]);
 
   const titles = timeline.map((entry) => entry.stepTitle);

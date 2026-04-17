@@ -142,19 +142,27 @@
     function resolveStepTitle(baseTitle, event) {
         const eventType = toText(event?.eventType);
         const status = (event?.status ?? "").toString().toLowerCase();
+        const failed = isFailedEvent(status, eventType);
         if (eventType.startsWith("intake.classification") && status === "pending") {
             return "Classification needs clarification";
         }
-        if (eventType.startsWith("intake.decomposition") && status === "failed") {
+        if (eventType.startsWith("intake.decomposition") && failed) {
             return "Decomposition failed";
         }
-        if (eventType.startsWith("intake.github.issue-creation") && status === "failed") {
+        if (eventType.startsWith("intake.github.issue-creation") && failed) {
             return "GitHub issue creation failed";
         }
-        if (eventType.startsWith("intake.github.summary-comment") && status === "failed") {
+        if (eventType.startsWith("intake.github.summary-comment") && failed) {
             return "GitHub summary comment posting had failures";
         }
         return baseTitle;
+    }
+
+    function isFailedEvent(status, eventType) {
+        if (status.startsWith("fail") || status === "error") {
+            return true;
+        }
+        return eventType.endsWith(".failed");
     }
 
     function readableEventType(eventType) {
