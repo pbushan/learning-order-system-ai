@@ -79,3 +79,22 @@ test('buildCustomerTimeline omits absent count fields and parses numeric strings
   assert.equal(Object.prototype.hasOwnProperty.call(timeline[0].details, 'issueCount'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(timeline[0].details, 'failedIssueCount'), false);
 });
+
+test('buildCustomerTimeline detects failure when eventType ends with failed without dot delimiter', () => {
+  const timeline = ui.buildCustomerTimeline([
+    {
+      eventType: 'intake.github.summary-comment-failed',
+      timestamp: '2026-04-17T10:00:07Z',
+      status: 'completed',
+      summary: 'legacy failed suffix event',
+      decisionMetadata: {},
+      inputSummary: {},
+      artifactSummary: {},
+      governanceMetadata: {}
+    }
+  ]);
+
+  assert.equal(timeline.length, 1);
+  assert.equal(timeline[0].status, 'completed');
+  assert.equal(timeline[0].stepTitle, 'GitHub summary comment posting had failures');
+});

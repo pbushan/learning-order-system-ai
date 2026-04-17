@@ -160,10 +160,11 @@
     }
 
     function isFailedEvent(status, eventType) {
-        if (status.startsWith("fail") || status === "error") {
+        const normalizedStatus = (status || "").toLowerCase();
+        if (normalizedStatus === "failed" || normalizedStatus.startsWith("fail") || normalizedStatus === "error") {
             return true;
         }
-        return eventType.endsWith(".failed");
+        return /\.failed$|failed$/i.test(eventType || "");
     }
 
     function readableEventType(eventType) {
