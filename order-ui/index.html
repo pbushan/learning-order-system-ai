@@ -382,9 +382,26 @@
                 <h3>Intake Result</h3>
                 <div class="intake-decomposition-list" id="intake-decomposition-list"></div>
             </section>
+            <section class="decision-trace-section hidden" id="decision-trace-section" aria-live="polite">
+                <div class="decision-trace-header">
+                    <div>
+                        <h3>Decision Trace</h3>
+                        <p class="decision-trace-note">
+                            A clear timeline of what the agent did from intake through issue creation.
+                        </p>
+                    </div>
+                    <div class="decision-trace-mode" id="decision-trace-mode" role="group" aria-label="Decision trace detail level">
+                        <button class="decision-trace-mode-button active" id="decision-trace-mode-customer" type="button" data-trace-mode="customer">Customer view</button>
+                        <button class="decision-trace-mode-button" id="decision-trace-mode-engineer" type="button" data-trace-mode="engineer">Engineer view</button>
+                    </div>
+                </div>
+                <div class="decision-trace-meta hidden" id="decision-trace-meta"></div>
+                <div class="decision-trace-list" id="decision-trace-list"></div>
+            </section>
         </section>
     </main>
 </div>
+<script src="./decision-trace-ui.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>

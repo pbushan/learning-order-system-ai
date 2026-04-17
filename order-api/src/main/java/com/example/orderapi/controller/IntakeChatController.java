@@ -1,9 +1,11 @@
 package com.example.orderapi.controller;
 
+import com.example.orderapi.dto.DecisionTraceResponse;
 import com.example.orderapi.dto.IntakeChatRequest;
 import com.example.orderapi.dto.IntakeChatResponse;
 import com.example.orderapi.dto.StructuredIntakeData;
 import com.example.orderapi.service.IntakeChatService;
+import com.example.orderapi.service.IntakeTraceabilityAgent;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,9 +19,12 @@ import java.util.UUID;
 public class IntakeChatController {
 
     private final IntakeChatService intakeChatService;
+    private final IntakeTraceabilityAgent intakeTraceabilityAgent;
 
-    public IntakeChatController(IntakeChatService intakeChatService) {
+    public IntakeChatController(IntakeChatService intakeChatService,
+                                IntakeTraceabilityAgent intakeTraceabilityAgent) {
         this.intakeChatService = intakeChatService;
+        this.intakeTraceabilityAgent = intakeTraceabilityAgent;
     }
 
     @PostMapping("/chat")
@@ -35,6 +40,14 @@ public class IntakeChatController {
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                     .body(normalizeErrorResponse(ex.getFallbackResponse(), requestId, resolveTraceId(request, requestId, null)));
         }
+    }
+
+    @GetMapping("/trace/{traceId}")
+    public ResponseEntity<DecisionTraceResponse> trace(@PathVariable String traceId) {
+        DecisionTraceResponse response = new DecisionTraceResponse();
+        response.setTraceId(traceId != null ? traceId.trim() : "");
+        response.setEvents(intakeTraceabilityAgent.readTraceEvents(traceId));
+        return ResponseEntity.ok(response);
     }
 
     private IntakeChatResponse serviceUnavailableResponse(String requestId, String traceId) {
