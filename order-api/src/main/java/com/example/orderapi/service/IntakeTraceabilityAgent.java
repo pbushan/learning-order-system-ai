@@ -1,8 +1,10 @@
 package com.example.orderapi.service;
 
+import com.example.orderapi.dto.DecisionTraceEventResponse;
 import com.example.orderapi.dto.DecompositionResponse;
 import com.example.orderapi.dto.GitHubIssueSummary;
 import com.example.orderapi.dto.StructuredIntakeData;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class IntakeTraceabilityAgent {
@@ -170,6 +173,11 @@ public class IntakeTraceabilityAgent {
                                                 String error) {
         List<GitHubIssueSummary> safeIssues = issues != null ? issues : Collections.emptyList();
         boolean success = safeText(error).isEmpty();
+        List<String> issueLinks = safeIssues.stream()
+                .map(GitHubIssueSummary::getIssueUrl)
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .collect(Collectors.toList());
 
         appendEvent(
                 traceId,
@@ -183,9 +191,26 @@ public class IntakeTraceabilityAgent {
                 Map.of("sourceType", safeText(sourceType),
                         "rationaleSummary", "Issue creation outcome determines whether intake exits as actionable artifacts."),
                 Collections.emptyMap(),
-                Map.of("issueCount", safeIssues.size(), "error", safeText(error)),
+                Map.of("issueCount", safeIssues.size(), "issueLinks", issueLinks, "error", safeText(error)),
                 governanceMetadata()
         );
+    }
+
+    public synchronized List<DecisionTraceEventResponse> readTraceEvents(String traceId) {
+        if (!StringUtils.hasText(traceId) || !Files.exists(traceLogPath)) {
+            return Collections.emptyList();
+        }
+        try {
+            return Files.readAllLines(traceLogPath).stream()
+                    .map(String::trim)
+                    .filter(line -> !line.isEmpty())
+                    .map(this::parseTraceLine)
+                    .filter(entry -> entry != null && traceId.equals(entry.getTraceId()))
+                    .collect(Collectors.toList());
+        } catch (Exception ex) {
+            log.warn("Failed reading traceability events for traceId={}", traceId, ex);
+            return Collections.emptyList();
+        }
     }
 
     private synchronized void appendEvent(String traceId,
@@ -235,5 +260,41 @@ public class IntakeTraceabilityAgent {
 
     private String safeText(String value) {
         return value != null ? value : "";
+    }
+
+    private DecisionTraceEventResponse parseTraceLine(String line) {
+        try {
+            Map<String, Object> record = objectMapper.readValue(line, new TypeReference<Map<String, Object>>() {});
+            DecisionTraceEventResponse response = new DecisionTraceEventResponse();
+            response.setTraceId(safeText(asString(record.get("traceId"))));
+            response.setSessionId(safeText(asString(record.get("sessionId"))));
+            response.setCorrelationId(safeText(asString(record.get("correlationId"))));
+            response.setEventType(safeText(asString(record.get("eventType"))));
+            response.setTimestamp(safeText(asString(record.get("timestamp"))));
+            response.setStatus(safeText(asString(record.get("status"))));
+            response.setActor(safeText(asString(record.get("actor"))));
+            response.setSummary(safeText(asString(record.get("summary"))));
+            response.setDecisionMetadata(asMap(record.get("decisionMetadata")));
+            response.setInputSummary(asMap(record.get("inputSummary")));
+            response.setArtifactSummary(asMap(record.get("artifactSummary")));
+            response.setGovernanceMetadata(asMap(record.get("governanceMetadata")));
+            return response;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String asString(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> asMap(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> normalized = new LinkedHashMap<>();
+            map.forEach((key, entryValue) -> normalized.put(String.valueOf(key), entryValue));
+            return normalized;
+        }
+        return Collections.emptyMap();
     }
 }

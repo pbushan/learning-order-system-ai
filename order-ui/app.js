@@ -6,9 +6,17 @@ const state = {
     intakeLoading: false,
     lastIntakeSentAt: 0,
     intakeResult: null,
+    intakeTraceId: "",
     decompositionLoading: false,
     githubIssueCreationError: "",
     githubIssueCreationResult: null,
+    decisionTrace: {
+        traceId: "",
+        events: [],
+        loading: false,
+        error: "",
+        mode: "customer"
+    },
     decompositionElementsWarningShown: false
 };
 const MAX_INTAKE_MESSAGES = 30;
@@ -39,6 +47,10 @@ const intakeWorkflowStatus = document.getElementById("intake-workflow-status");
 const intakeDecomposeLoading = document.getElementById("intake-decompose-loading");
 const intakeDecomposition = document.getElementById("intake-decomposition");
 const intakeDecompositionList = document.getElementById("intake-decomposition-list");
+const decisionTraceSection = document.getElementById("decision-trace-section");
+const decisionTraceMeta = document.getElementById("decision-trace-meta");
+const decisionTraceList = document.getElementById("decision-trace-list");
+const decisionTraceModeButtons = Array.from(document.querySelectorAll("[data-trace-mode]"));
 let tabButtons = [];
 let tabPanels = [];
 
@@ -63,7 +75,9 @@ document.addEventListener("DOMContentLoaded", () => {
     setDecompositionLoading(false);
     renderIntakeChatHistory();
     renderDecompositionUI();
+    renderDecisionTrace();
     initializeTabs();
+    initializeDecisionTraceMode();
 
     loadDashboard();
     window.setInterval(() => loadDashboard(false, true), 15000);
@@ -343,6 +357,7 @@ async function handleIntakeChatSubmit(event) {
         const response = await apiRequestWithTimeout("/api/intake/chat", {
             method: "POST",
             body: JSON.stringify({
+                traceId: state.intakeTraceId || "",
                 messages: state.intakeMessages.map((message) => ({
                     role: message.role,
                     content: message.content
@@ -355,11 +370,13 @@ async function handleIntakeChatSubmit(event) {
         const reply = response.reply.trim();
         state.intakeMessages.push({ role: "assistant", content: reply });
         updateIntakeResult(response);
+        await loadDecisionTrace();
         if (hasCompleteIntakeResult(state.intakeResult)) {
             await runAutomatedIntakeFlow(state.intakeResult);
         } else if (response?.intakeComplete === true) {
             state.githubIssueCreationResult = {
                 requestId: typeof response?.requestId === "string" ? response.requestId.trim() : "",
+                traceId: typeof response?.traceId === "string" ? response.traceId.trim() : state.intakeTraceId,
                 issuesCreated: false,
                 issues: [],
                 note: "Intake completed without an actionable bug/feature request. No GitHub issues were created."
@@ -418,8 +435,10 @@ function updateIntakeResult(response) {
         ? response.structuredData
         : null;
     const intakeComplete = response?.intakeComplete === true;
+    const traceId = typeof response?.traceId === "string" ? response.traceId.trim() : "";
+    state.intakeTraceId = traceId || state.intakeTraceId;
     if (requestId && intakeComplete && structuredData) {
-        state.intakeResult = { requestId, structuredData, intakeComplete: true };
+        state.intakeResult = { requestId, traceId: state.intakeTraceId, structuredData, intakeComplete: true };
         return;
     }
     state.intakeResult = null;
@@ -452,6 +471,7 @@ async function runAutomatedIntakeFlow(intakeResult) {
             method: "POST",
             body: JSON.stringify({
                 requestId: intakeResult.requestId,
+                traceId: intakeResult.traceId || state.intakeTraceId || "",
                 structuredData: intakeResult.structuredData
             })
         }, INTAKE_ORCHESTRATION_TIMEOUT_MS);
@@ -463,6 +483,7 @@ async function runAutomatedIntakeFlow(intakeResult) {
         }
         state.githubIssueCreationResult = {
             requestId: response.requestId || intakeResult.requestId,
+            traceId: response.traceId || intakeResult.traceId || state.intakeTraceId || "",
             issuesCreated: true,
             issues: response.issues
         };
@@ -473,6 +494,7 @@ async function runAutomatedIntakeFlow(intakeResult) {
         state.githubIssueCreationResult = null;
     } finally {
         setDecompositionLoading(false);
+        await loadDecisionTrace();
         renderDecompositionUI();
     }
 }
@@ -655,6 +677,192 @@ function createGithubIssueResultsElement(result) {
     wrapper.appendChild(note);
 
     return wrapper;
+}
+
+function initializeDecisionTraceMode() {
+    if (!decisionTraceModeButtons.length) {
+        return;
+    }
+    decisionTraceModeButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+            const nextMode = button.dataset.traceMode === "engineer" ? "engineer" : "customer";
+            state.decisionTrace.mode = nextMode;
+            renderDecisionTrace();
+        });
+    });
+}
+
+function clearDecisionTrace() {
+    state.decisionTrace.traceId = "";
+    state.decisionTrace.events = [];
+    state.decisionTrace.error = "";
+    state.decisionTrace.loading = false;
+}
+
+async function loadDecisionTrace() {
+    const traceId = state.githubIssueCreationResult?.traceId || state.intakeResult?.traceId || state.intakeTraceId;
+    if (!traceId) {
+        renderDecisionTrace();
+        return;
+    }
+    state.decisionTrace.traceId = traceId;
+    state.decisionTrace.loading = true;
+    state.decisionTrace.error = "";
+    renderDecisionTrace();
+    try {
+        const response = await apiRequest(`/api/intake/trace/${encodeURIComponent(traceId)}`);
+        const normalized = window.DecisionTraceUi?.normalizeTraceResponse
+            ? window.DecisionTraceUi.normalizeTraceResponse(response || {})
+            : { traceId, events: Array.isArray(response?.events) ? response.events : [] };
+        state.decisionTrace.traceId = normalized.traceId || traceId;
+        state.decisionTrace.events = Array.isArray(normalized.events) ? normalized.events : [];
+        state.decisionTrace.error = "";
+    } catch (error) {
+        state.decisionTrace.error = "Decision trace is unavailable right now.";
+    } finally {
+        state.decisionTrace.loading = false;
+        renderDecisionTrace();
+    }
+}
+
+function renderDecisionTrace() {
+    if (!decisionTraceSection || !decisionTraceList) {
+        return;
+    }
+    const hasTraceContext = state.decisionTrace.loading
+        || !!state.decisionTrace.traceId
+        || (Array.isArray(state.decisionTrace.events) && state.decisionTrace.events.length > 0)
+        || !!state.decisionTrace.error;
+    decisionTraceSection.classList.toggle("hidden", !hasTraceContext);
+    decisionTraceModeButtons.forEach((button) => {
+        const isActive = button.dataset.traceMode === state.decisionTrace.mode;
+        button.classList.toggle("active", isActive);
+    });
+
+    if (decisionTraceMeta) {
+        const showMeta = state.decisionTrace.mode === "engineer" && !!state.decisionTrace.traceId;
+        decisionTraceMeta.classList.toggle("hidden", !showMeta);
+        decisionTraceMeta.textContent = showMeta ? `Trace ID: ${state.decisionTrace.traceId}` : "";
+    }
+
+    const nodes = [];
+    if (state.decisionTrace.loading) {
+        const loading = document.createElement("p");
+        loading.className = "intake-decomposition-empty";
+        loading.textContent = "Loading decision trace...";
+        nodes.push(loading);
+        replaceElementChildren(decisionTraceList, nodes);
+        return;
+    }
+    if (state.decisionTrace.error) {
+        const error = document.createElement("p");
+        error.className = "intake-decomposition-empty";
+        error.textContent = state.decisionTrace.error;
+        nodes.push(error);
+        replaceElementChildren(decisionTraceList, nodes);
+        return;
+    }
+
+    const traceEvents = Array.isArray(state.decisionTrace.events) ? state.decisionTrace.events : [];
+    const timeline = state.decisionTrace.mode === "engineer"
+        ? (window.DecisionTraceUi?.buildEngineerTimeline ? window.DecisionTraceUi.buildEngineerTimeline(traceEvents) : [])
+        : (window.DecisionTraceUi?.buildCustomerTimeline ? window.DecisionTraceUi.buildCustomerTimeline(traceEvents) : []);
+    if (!timeline.length) {
+        const empty = document.createElement("p");
+        empty.className = "intake-decomposition-empty";
+        empty.textContent = "No decision trace events are available yet.";
+        nodes.push(empty);
+        replaceElementChildren(decisionTraceList, nodes);
+        return;
+    }
+
+    timeline.forEach((item) => {
+        nodes.push(createDecisionTraceItem(item));
+    });
+    replaceElementChildren(decisionTraceList, nodes);
+}
+
+function createDecisionTraceItem(item) {
+    const article = document.createElement("article");
+    article.className = "decision-trace-item";
+
+    const header = document.createElement("div");
+    header.className = "decision-trace-item-header";
+
+    const step = document.createElement("p");
+    step.className = "decision-trace-step";
+    step.textContent = item.stepTitle || "Trace event";
+    header.appendChild(step);
+
+    const status = document.createElement("span");
+    status.className = `decision-trace-status ${resolveTraceStatusClass(item.status)}`;
+    status.textContent = item.status || "recorded";
+    header.appendChild(status);
+
+    article.appendChild(header);
+
+    const summary = document.createElement("p");
+    summary.className = "decision-trace-summary";
+    summary.textContent = item.summary || "";
+    article.appendChild(summary);
+
+    if (item.timestamp) {
+        const ts = document.createElement("p");
+        ts.className = "decision-trace-time";
+        ts.textContent = window.DecisionTraceUi?.formatTimestamp
+            ? window.DecisionTraceUi.formatTimestamp(item.timestamp)
+            : item.timestamp;
+        article.appendChild(ts);
+    }
+
+    const details = document.createElement("details");
+    details.className = "decision-trace-details";
+    const detailsSummary = document.createElement("summary");
+    detailsSummary.textContent = state.decisionTrace.mode === "engineer" ? "Expand details" : "View context";
+    details.appendChild(detailsSummary);
+
+    const pre = document.createElement("pre");
+    pre.textContent = JSON.stringify(item.details || {}, null, 2);
+    details.appendChild(pre);
+
+    const links = Array.isArray(item?.details?.issueLinks) ? item.details.issueLinks : [];
+    const fallbackLinks = Array.isArray(state.githubIssueCreationResult?.issues)
+        ? state.githubIssueCreationResult.issues.map((issue) => issue?.issueUrl).filter((url) => typeof url === "string" && url.trim())
+        : [];
+    const mergedLinks = [...new Set([...links, ...fallbackLinks])];
+    if (mergedLinks.length) {
+        const linksLabel = document.createElement("p");
+        linksLabel.className = "decision-trace-links-label";
+        linksLabel.textContent = "Issue links:";
+        details.appendChild(linksLabel);
+        const linksList = document.createElement("ul");
+        linksList.className = "decision-trace-links";
+        mergedLinks.forEach((url) => {
+            const li = document.createElement("li");
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.target = "_blank";
+            anchor.rel = "noopener noreferrer";
+            anchor.textContent = url;
+            li.appendChild(anchor);
+            linksList.appendChild(li);
+        });
+        details.appendChild(linksList);
+    }
+
+    article.appendChild(details);
+    return article;
+}
+
+function resolveTraceStatusClass(status) {
+    const normalized = typeof status === "string" ? status.trim().toLowerCase() : "";
+    if (normalized === "completed" || normalized === "accepted" || normalized === "approved" || normalized === "recorded") {
+        return "is-success";
+    }
+    if (normalized === "failed" || normalized === "rejected") {
+        return "is-failure";
+    }
+    return "is-pending";
 }
 
 function trimIntakeMessages() {
