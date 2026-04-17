@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -54,6 +55,8 @@ class GitHubIssueCreationServiceTest {
         verify(gitHubIssueClientService, times(2)).addIssueComment(anyLong(), contains("- Classification: `feature`"));
         verify(gitHubIssueClientService, times(2)).addIssueComment(anyLong(), contains("- Decomposed multi-issue set: yes (2 issues)"));
         verify(gitHubIssueClientService, times(2)).addIssueComment(anyLong(), contains("- Trace ID: `trace-123`"));
+        verify(intakeTraceabilityAgent, times(1))
+                .recordGitHubSummaryCommentResult(eq("trace-123"), eq("req-123"), eq("feature"), eq(2), eq(2), eq(0), argThat(List::isEmpty));
     }
 
     @Test
@@ -86,6 +89,8 @@ class GitHubIssueCreationServiceTest {
         assertEquals(2, response.getIssues().size());
         verify(gitHubIssueClientService, times(2)).createIssueForStory(eq("bug"), any(DecompositionStory.class));
         verify(gitHubIssueClientService, times(2)).addIssueComment(anyLong(), contains("- Trace ID: `trace-789`"));
+        verify(intakeTraceabilityAgent, times(1))
+                .recordGitHubSummaryCommentResult(eq("trace-789"), eq("req-789"), eq("bug"), eq(2), eq(1), eq(1), eq(List.of(201L)));
     }
 
     @Test
@@ -124,6 +129,8 @@ class GitHubIssueCreationServiceTest {
         assertTrue(response.isIssuesCreated());
         verify(gitHubIssueClientService, times(1))
                 .addIssueComment(anyLong(), contains("- Rationale summary: Newer rationale from refined classification."));
+        verify(intakeTraceabilityAgent, times(1))
+                .recordGitHubSummaryCommentResult(eq("trace-456"), eq("req-456"), eq("feature"), eq(1), eq(1), eq(0), argThat(List::isEmpty));
     }
 
     @Test
@@ -153,6 +160,42 @@ class GitHubIssueCreationServiceTest {
         assertTrue(response.isIssuesCreated());
         assertEquals(1, response.getIssues().size());
         verify(gitHubIssueClientService, times(1)).addIssueComment(anyLong(), contains("- Trace ID: `trace-999`"));
+        verify(intakeTraceabilityAgent, times(1))
+                .recordGitHubSummaryCommentResult(eq("trace-999"), eq("req-999"), eq("bug"), eq(1), eq(0), eq(1), eq(List.of(401L)));
+    }
+
+    @Test
+    void createFromDecomposition_recordsCommentFailureWhenIssueNumberMissing() {
+        GitHubIssueClientService gitHubIssueClientService = mock(GitHubIssueClientService.class);
+        FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
+        IntakeTraceabilityAgent intakeTraceabilityAgent = mock(IntakeTraceabilityAgent.class);
+        GitHubIssueCreationService service = new GitHubIssueCreationService(
+                gitHubIssueClientService,
+                fileAuditLogService,
+                intakeTraceabilityAgent,
+                new TraceabilityGitHubSummaryCommentBuilder()
+        );
+
+        when(intakeTraceabilityAgent.resolveTraceId(eq("trace-missing-number"), eq("req-number")))
+                .thenReturn("trace-missing-number");
+        when(intakeTraceabilityAgent.readTraceEvents("trace-missing-number")).thenReturn(List.of());
+
+        GitHubIssueSummary missingNumberIssue = new GitHubIssueSummary();
+        missingNumberIssue.setIssueNumber(0L);
+        missingNumberIssue.setTitle("Issue without number");
+        when(gitHubIssueClientService.createIssueForStory(eq("feature"), any(DecompositionStory.class)))
+                .thenReturn(missingNumberIssue);
+
+        GitHubIssueCreateResponse response = service.createFromDecomposition(request(
+                "trace-missing-number",
+                "feature",
+                List.of(story("story-1", "First"))
+        ));
+
+        assertTrue(response.isIssuesCreated());
+        verify(gitHubIssueClientService, times(0)).addIssueComment(anyLong(), any(String.class));
+        verify(intakeTraceabilityAgent, times(1))
+                .recordGitHubSummaryCommentResult(eq("trace-missing-number"), eq("req-number"), eq("feature"), eq(1), eq(0), eq(1), eq(List.of()));
     }
 
     private static GitHubIssueCreateRequest request(String traceId, String sourceType, List<DecompositionStory> stories) {

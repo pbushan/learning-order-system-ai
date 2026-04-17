@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -27,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -119,6 +121,7 @@ class IntakeTraceabilityAgentIntegrationTest {
         assertTrue(eventTypes.contains("intake.decomposition.completed"));
         assertTrue(eventTypes.contains("intake.github.payload.prepared"));
         assertTrue(eventTypes.contains("intake.github.issue-creation.completed"));
+        assertTrue(eventTypes.contains("intake.github.summary-comment.completed"));
         assertTrue(events.stream().allMatch(event -> chatResponse.getTraceId().equals(event.path("traceId").asText(""))));
         verify(gitHubIssueClientService, times(1))
                 .addIssueComment(eq(321L), org.mockito.ArgumentMatchers.contains("Generated via agent-assisted intake."));
@@ -234,6 +237,146 @@ class IntakeTraceabilityAgentIntegrationTest {
         assertTrue(issueResponse.isIssuesCreated());
         assertEquals(2, issueResponse.getIssues().size());
         verify(gitHubIssueClientService, times(2)).addIssueComment(anyLong(), org.mockito.ArgumentMatchers.contains("- Decomposed multi-issue set: yes (2 issues)"));
+
+        List<JsonNode> events = readEvents(traceLogPath, objectMapper);
+        Set<String> eventTypes = events.stream()
+                .map(event -> event.path("eventType").asText(""))
+                .collect(Collectors.toSet());
+        assertTrue(eventTypes.contains("intake.github.summary-comment.completed"));
+    }
+
+    @Test
+    void emitsSummaryCommentFailureEventWhenCommentPostingFailsForOneIssue() throws Exception {
+        Path traceLogPath = Files.createTempFile("decision-trace-comment-failure", ".jsonl");
+        ObjectMapper objectMapper = new ObjectMapper();
+        IntakeTraceabilityAgent traceabilityAgent = new IntakeTraceabilityAgent(objectMapper, traceLogPath.toString());
+
+        GitHubIssueClientService gitHubIssueClientService = mock(GitHubIssueClientService.class);
+        FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
+        GitHubIssueCreationService issueCreationService = new GitHubIssueCreationService(
+                gitHubIssueClientService,
+                fileAuditLogService,
+                traceabilityAgent,
+                new TraceabilityGitHubSummaryCommentBuilder()
+        );
+
+        when(gitHubIssueClientService.createIssueForStory(eq("feature"), any(DecompositionStory.class)))
+                .thenReturn(issue(1101L), issue(1102L));
+        doThrow(new IllegalStateException("comment endpoint unavailable"))
+                .when(gitHubIssueClientService)
+                .addIssueComment(eq(1101L), any());
+
+        GitHubIssueCreateRequest request = new GitHubIssueCreateRequest();
+        request.setRequestId("req-comment-failure");
+        request.setTraceId("trace-comment-failure");
+        request.setSourceType("feature");
+        request.setStories(List.of(story("story-a"), story("story-b")));
+
+        GitHubIssueCreateResponse issueResponse = issueCreationService.createFromDecomposition(request);
+        assertTrue(issueResponse.isIssuesCreated());
+        assertEquals(2, issueResponse.getIssues().size());
+
+        List<JsonNode> events = readEvents(traceLogPath, objectMapper);
+        JsonNode summaryCommentFailure = events.stream()
+                .filter(event -> "intake.github.summary-comment.failed".equals(event.path("eventType").asText("")))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(2, summaryCommentFailure.path("artifactSummary").path("issueCount").asInt());
+        assertEquals(1, summaryCommentFailure.path("artifactSummary").path("commentedIssueCount").asInt());
+        assertEquals(1, summaryCommentFailure.path("artifactSummary").path("failedIssueCount").asInt());
+    }
+
+    @Test
+    void clampsCommentedCountAndMarksSummaryCommentResultFailedWhenCallerOvercounts() throws Exception {
+        Path traceLogPath = Files.createTempFile("decision-trace-comment-overcount", ".jsonl");
+        ObjectMapper objectMapper = new ObjectMapper();
+        IntakeTraceabilityAgent traceabilityAgent = new IntakeTraceabilityAgent(objectMapper, traceLogPath.toString());
+
+        traceabilityAgent.recordGitHubSummaryCommentResult(
+                "trace-overcount",
+                "req-overcount",
+                "feature",
+                2,
+                3,
+                0,
+                List.of()
+        );
+
+        List<JsonNode> events = readEvents(traceLogPath, objectMapper);
+        JsonNode event = events.stream()
+                .filter(node -> "intake.github.summary-comment.failed".equals(node.path("eventType").asText("")))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(2, event.path("artifactSummary").path("issueCount").asInt());
+        assertEquals(2, event.path("artifactSummary").path("commentedIssueCount").asInt());
+        assertEquals(1, event.path("artifactSummary").path("failedIssueCount").asInt());
+        assertEquals(0, event.path("artifactSummary").path("knownFailedIssueCount").asInt());
+        assertEquals(1, event.path("artifactSummary").path("unknownFailedIssueCount").asInt());
+        assertEquals(0, event.path("artifactSummary").path("failedCommentCount").asInt());
+        assertTrue(event.path("artifactSummary").path("countInconsistencyDetected").asBoolean());
+    }
+
+    @Test
+    void recordsSummaryCommentEventWhenFailedIssueNumbersIsNull() throws Exception {
+        Path traceLogPath = Files.createTempFile("decision-trace-comment-null-list", ".jsonl");
+        ObjectMapper objectMapper = new ObjectMapper();
+        IntakeTraceabilityAgent traceabilityAgent = new IntakeTraceabilityAgent(objectMapper, traceLogPath.toString());
+
+        traceabilityAgent.recordGitHubSummaryCommentResult(
+                "trace-null-failures",
+                "req-null-failures",
+                "bug",
+                1,
+                1,
+                0,
+                null
+        );
+
+        List<JsonNode> events = readEvents(traceLogPath, objectMapper);
+        JsonNode event = events.stream()
+                .filter(node -> "intake.github.summary-comment.completed".equals(node.path("eventType").asText("")))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(1, event.path("artifactSummary").path("issueCount").asInt());
+        assertEquals(1, event.path("artifactSummary").path("commentedIssueCount").asInt());
+        assertEquals(0, event.path("artifactSummary").path("failedIssueCount").asInt());
+        assertEquals(0, event.path("artifactSummary").path("knownFailedIssueCount").asInt());
+        assertEquals(0, event.path("artifactSummary").path("unknownFailedIssueCount").asInt());
+        assertEquals(0, event.path("artifactSummary").path("failedCommentCount").asInt());
+        assertTrue(event.path("artifactSummary").path("failedIssueNumbers").isArray());
+    }
+
+    @Test
+    void recordsUnknownSummaryCommentFailureWhenIssueNumbersAreUnavailable() throws Exception {
+        Path traceLogPath = Files.createTempFile("decision-trace-comment-unknown-failure", ".jsonl");
+        ObjectMapper objectMapper = new ObjectMapper();
+        IntakeTraceabilityAgent traceabilityAgent = new IntakeTraceabilityAgent(objectMapper, traceLogPath.toString());
+
+        traceabilityAgent.recordGitHubSummaryCommentResult(
+                "trace-unknown-failure",
+                "req-unknown-failure",
+                "feature",
+                2,
+                1,
+                1,
+                null
+        );
+
+        List<JsonNode> events = readEvents(traceLogPath, objectMapper);
+        JsonNode event = events.stream()
+                .filter(node -> "intake.github.summary-comment.failed".equals(node.path("eventType").asText("")))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(2, event.path("artifactSummary").path("issueCount").asInt());
+        assertEquals(1, event.path("artifactSummary").path("commentedIssueCount").asInt());
+        assertEquals(1, event.path("artifactSummary").path("failedIssueCount").asInt());
+        assertEquals(0, event.path("artifactSummary").path("knownFailedIssueCount").asInt());
+        assertEquals(1, event.path("artifactSummary").path("unknownFailedIssueCount").asInt());
+        assertEquals(1, event.path("artifactSummary").path("failedCommentCount").asInt());
+        assertTrue(event.path("artifactSummary").path("failedIssueNumbers").isArray());
     }
 
     private static StructuredIntakeData structuredData(String type, String title, String description) {
@@ -255,6 +398,14 @@ class IntakeTraceabilityAgentIntegrationTest {
         story.setAffectedComponents(List.of("order-api"));
         story.setEstimatedSize("small");
         return story;
+    }
+
+    private static GitHubIssueSummary issue(long issueNumber) {
+        GitHubIssueSummary summary = new GitHubIssueSummary();
+        summary.setIssueNumber(issueNumber);
+        summary.setIssueUrl("https://example.test/issues/" + issueNumber);
+        summary.setTitle("Issue " + issueNumber);
+        return summary;
     }
 
     private static List<JsonNode> readEvents(Path traceLogPath, ObjectMapper objectMapper) throws Exception {

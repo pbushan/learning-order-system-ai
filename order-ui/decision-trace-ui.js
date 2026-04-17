@@ -10,7 +10,8 @@
         "classification",
         "decomposition",
         "github_payload",
-        "github_issues"
+        "github_issues",
+        "github_comments"
     ];
 
     function normalizeTraceResponse(response) {
@@ -72,6 +73,7 @@
 
     function buildTraceItem(event, stepTitle, hideDenseDetail) {
         const issueLinks = extractIssueLinks(event);
+        const resolvedTitle = resolveStepTitle(stepTitle, event);
         const details = {
             traceId: event.traceId,
             sessionId: event.sessionId,
@@ -85,20 +87,24 @@
 
         if (hideDenseDetail) {
             return {
-                stepTitle,
+                stepTitle: resolvedTitle,
                 status: event.status || "recorded",
                 summary: event.summary || readableEventType(event.eventType),
                 timestamp: event.timestamp,
-                details: {
+                details: compactDetails({
                     issueLinks,
                     sourceType: toText(event.decisionMetadata?.sourceType),
-                    classifiedType: toText(event.decisionMetadata?.classifiedType)
-                }
+                    classifiedType: toText(event.decisionMetadata?.classifiedType),
+                    issueCount: optionalCount(event.artifactSummary, "issueCount"),
+                    commentedIssueCount: optionalCount(event.artifactSummary, "commentedIssueCount"),
+                    failedIssueCount: optionalCount(event.artifactSummary, "failedIssueCount"),
+                    unknownFailedIssueCount: optionalCount(event.artifactSummary, "unknownFailedIssueCount")
+                })
             };
         }
 
         return {
-            stepTitle,
+            stepTitle: resolvedTitle,
             status: event.status || "recorded",
             summary: event.summary || readableEventType(event.eventType),
             timestamp: event.timestamp,
@@ -128,7 +134,37 @@
         if (eventType.startsWith("intake.github.issue-creation")) {
             return { key: "github_issues", title: "GitHub issues created" };
         }
+        if (eventType.startsWith("intake.github.summary-comment")) {
+            return { key: "github_comments", title: "GitHub trace summary comments" };
+        }
         return { key: "", title: readableEventType(eventType) };
+    }
+
+    function resolveStepTitle(baseTitle, event) {
+        const eventType = toText(event?.eventType);
+        const status = (event?.status ?? "").toString().toLowerCase();
+        const failed = isFailedEvent(status, eventType);
+        if (eventType.startsWith("intake.classification") && status === "pending") {
+            return "Classification needs clarification";
+        }
+        if (eventType.startsWith("intake.decomposition") && failed) {
+            return "Decomposition failed";
+        }
+        if (eventType.startsWith("intake.github.issue-creation") && failed) {
+            return "GitHub issue creation failed";
+        }
+        if (eventType.startsWith("intake.github.summary-comment") && failed) {
+            return "GitHub summary comment posting had failures";
+        }
+        return baseTitle;
+    }
+
+    function isFailedEvent(status, eventType) {
+        const normalizedStatus = (status || "").toLowerCase();
+        if (normalizedStatus === "failed" || normalizedStatus.startsWith("fail") || normalizedStatus === "error") {
+            return true;
+        }
+        return /\.failed$|failed$/i.test(eventType || "");
     }
 
     function readableEventType(eventType) {
@@ -173,6 +209,32 @@
             return {};
         }
         return value;
+    }
+
+    function optionalCount(source, key) {
+        if (!source || typeof source !== "object" || !(key in source)) {
+            return undefined;
+        }
+        const value = source[key];
+        if (value === null || value === undefined || value === "") {
+            return undefined;
+        }
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+        return toText(value) || undefined;
+    }
+
+    function compactDetails(details) {
+        const compact = {};
+        Object.entries(details).forEach(([key, value]) => {
+            if (value === undefined || value === null || value === "") {
+                return;
+            }
+            compact[key] = value;
+        });
+        return compact;
     }
 
     return {

@@ -46,3 +46,55 @@ test('buildEngineerTimeline keeps all events with detailed payload', () => {
   assert.equal(timeline[0].details.traceId, 'trace-1');
   assert.equal(timeline[0].details.issueLinks.length, 1);
 });
+
+test('buildCustomerTimeline surfaces failure states with clear step titles', () => {
+  const timeline = ui.buildCustomerTimeline([
+    { eventType: 'intake.classification.completed', timestamp: '2026-04-17T10:00:01Z', status: 'pending', summary: 'classification uncertain', decisionMetadata: {}, inputSummary: {}, artifactSummary: {}, governanceMetadata: {} },
+    { eventType: 'intake.github.issue-creation.failed', timestamp: '2026-04-17T10:00:05Z', status: 'FAILED', summary: 'issue creation failed', decisionMetadata: {}, inputSummary: {}, artifactSummary: {}, governanceMetadata: {} },
+    { eventType: 'intake.github.summary-comment.failed', timestamp: '2026-04-17T10:00:06Z', summary: 'comments partially failed', decisionMetadata: {}, inputSummary: {}, artifactSummary: { failedIssueCount: 1 }, governanceMetadata: {} }
+  ]);
+
+  const titles = timeline.map((entry) => entry.stepTitle);
+  assert.ok(titles.includes('Classification needs clarification'));
+  assert.ok(titles.includes('GitHub issue creation failed'));
+  assert.ok(titles.includes('GitHub summary comment posting had failures'));
+});
+
+test('buildCustomerTimeline omits absent count fields and parses numeric strings', () => {
+  const timeline = ui.buildCustomerTimeline([
+    {
+      eventType: 'intake.github.summary-comment.failed',
+      timestamp: '2026-04-17T10:00:06Z',
+      status: 'failed',
+      summary: 'comments partially failed',
+      decisionMetadata: {},
+      inputSummary: {},
+      artifactSummary: { commentedIssueCount: '2', unexpected: 'n/a' },
+      governanceMetadata: {}
+    }
+  ]);
+
+  assert.equal(timeline.length, 1);
+  assert.equal(timeline[0].details.commentedIssueCount, 2);
+  assert.equal(Object.prototype.hasOwnProperty.call(timeline[0].details, 'issueCount'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(timeline[0].details, 'failedIssueCount'), false);
+});
+
+test('buildCustomerTimeline detects failure when eventType ends with failed without dot delimiter', () => {
+  const timeline = ui.buildCustomerTimeline([
+    {
+      eventType: 'intake.github.summary-comment-failed',
+      timestamp: '2026-04-17T10:00:07Z',
+      status: 'completed',
+      summary: 'legacy failed suffix event',
+      decisionMetadata: {},
+      inputSummary: {},
+      artifactSummary: {},
+      governanceMetadata: {}
+    }
+  ]);
+
+  assert.equal(timeline.length, 1);
+  assert.equal(timeline[0].status, 'completed');
+  assert.equal(timeline[0].stepTitle, 'GitHub summary comment posting had failures');
+});

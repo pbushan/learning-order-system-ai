@@ -73,9 +73,40 @@ This repo now includes an end-to-end portfolio workflow from intake to GitHub is
   - customer summary view
   - engineer detail view (trace ID + expanded event details)
   - issue links when available
+- GitHub issues created from intake also receive concise engineer-facing trace summary comments:
+  - generated-via-agent marker
+  - classification
+  - decomposed set indicator
+  - trace ID
+  - optional short rationale summary
+- Summary-comment posting outcomes are audited in trace events:
+  - `intake.github.summary-comment.completed`
+  - `intake.github.summary-comment.failed`
 - Guardrails:
   - summary-only rationale metadata
   - no raw chain-of-thought/prompt internals persisted or rendered
+
+### Traceability audience model
+
+- Intake chat UI serves two audiences:
+  - Customer view: compact, step-based timeline focused on what happened.
+  - Engineer view: expanded event metadata for debugging and audit review.
+- GitHub issue comments serve handoff context only:
+  - concise summary for engineers reading the issue
+  - never a full decision trace dump
+- Full trace fidelity stays in append-only trace logs and trace read APIs/UI.
+
+### Demo walkthrough (quick)
+
+Example request: "Fix typo in checkout label and update wording."
+1. Intake captures and classifies the request (`bug`/`feature` or `pending` if ambiguous).
+2. Decomposition emits one or more implementation stories.
+3. GitHub issue payloads are prepared and issues are created.
+4. Each created issue receives a concise engineer trace summary comment.
+5. Intake chat Decision Trace shows lifecycle events and statuses, including failures if:
+   - decomposition did not complete
+   - issue creation failed
+   - summary comment posting partially failed
 
 ### Step 5: Approved issue pickup and execution scaffolding
 

@@ -196,6 +196,60 @@ public class IntakeTraceabilityAgent {
         );
     }
 
+    public void recordGitHubSummaryCommentResult(String traceId,
+                                                 String requestId,
+                                                 String sourceType,
+                                                 int issueCount,
+                                                 int commentedIssueCount,
+                                                 int failedCommentCount,
+                                                 List<Long> failedIssueNumbers) {
+        if (issueCount <= 0) {
+            return;
+        }
+        List<Long> safeFailures = failedIssueNumbers != null ? failedIssueNumbers : Collections.emptyList();
+        int normalizedIssueCount = Math.max(0, issueCount);
+        int normalizedCommentedIssueCount = Math.max(0, Math.min(commentedIssueCount, normalizedIssueCount));
+        int normalizedFailedCommentCount = Math.max(0, Math.min(failedCommentCount, normalizedIssueCount));
+        int rawCommentedIssueCount = Math.max(0, commentedIssueCount);
+        int rawFailedCommentCount = Math.max(0, failedCommentCount);
+        boolean countInconsistencyDetected = rawCommentedIssueCount != normalizedCommentedIssueCount;
+        countInconsistencyDetected = countInconsistencyDetected || rawFailedCommentCount != normalizedFailedCommentCount;
+        int knownFailedIssueCount = safeFailures.size();
+        int derivedFailureDelta = Math.max(0, normalizedIssueCount - normalizedCommentedIssueCount);
+        int expectedFailedIssueCount = Math.max(derivedFailureDelta, normalizedFailedCommentCount);
+        int unknownFailedIssueCount = Math.max(0, expectedFailedIssueCount - knownFailedIssueCount);
+        if (countInconsistencyDetected) {
+            unknownFailedIssueCount = Math.max(unknownFailedIssueCount, 1);
+            expectedFailedIssueCount = Math.max(expectedFailedIssueCount, knownFailedIssueCount + unknownFailedIssueCount);
+        }
+        boolean allSucceeded = safeFailures.isEmpty() && expectedFailedIssueCount == 0 && !countInconsistencyDetected;
+
+        appendEvent(
+                traceId,
+                requestId,
+                allSucceeded ? "intake.github.summary-comment.completed" : "intake.github.summary-comment.failed",
+                allSucceeded ? "completed" : "failed",
+                "github-issue-creation-service",
+                allSucceeded
+                        ? "Posted engineer-facing trace summary comments to created GitHub issues."
+                        : "One or more GitHub trace summary comments could not be posted.",
+                Map.of("sourceType", safeText(sourceType),
+                        "rationaleSummary", "Summary comments provide concise engineering context while keeping full trace detail in the decision trace log."),
+                Collections.emptyMap(),
+                Map.of(
+                        "issueCount", normalizedIssueCount,
+                        "commentedIssueCount", normalizedCommentedIssueCount,
+                        "failedIssueCount", expectedFailedIssueCount,
+                        "knownFailedIssueCount", knownFailedIssueCount,
+                        "unknownFailedIssueCount", unknownFailedIssueCount,
+                        "failedCommentCount", normalizedFailedCommentCount,
+                        "failedIssueNumbers", safeFailures,
+                        "countInconsistencyDetected", countInconsistencyDetected
+                ),
+                governanceMetadata()
+        );
+    }
+
     public synchronized List<DecisionTraceEventResponse> readTraceEvents(String traceId) {
         if (!StringUtils.hasText(traceId) || !Files.exists(traceLogPath)) {
             return Collections.emptyList();
