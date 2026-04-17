@@ -164,6 +164,40 @@ class GitHubIssueCreationServiceTest {
                 .recordGitHubSummaryCommentResult(eq("trace-999"), eq("req-999"), eq("bug"), eq(1), eq(0), eq(List.of(401L)));
     }
 
+    @Test
+    void createFromDecomposition_recordsCommentFailureWhenIssueNumberMissing() {
+        GitHubIssueClientService gitHubIssueClientService = mock(GitHubIssueClientService.class);
+        FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
+        IntakeTraceabilityAgent intakeTraceabilityAgent = mock(IntakeTraceabilityAgent.class);
+        GitHubIssueCreationService service = new GitHubIssueCreationService(
+                gitHubIssueClientService,
+                fileAuditLogService,
+                intakeTraceabilityAgent,
+                new TraceabilityGitHubSummaryCommentBuilder()
+        );
+
+        when(intakeTraceabilityAgent.resolveTraceId(eq("trace-missing-number"), eq("req-number")))
+                .thenReturn("trace-missing-number");
+        when(intakeTraceabilityAgent.readTraceEvents("trace-missing-number")).thenReturn(List.of());
+
+        GitHubIssueSummary missingNumberIssue = new GitHubIssueSummary();
+        missingNumberIssue.setIssueNumber(0L);
+        missingNumberIssue.setTitle("Issue without number");
+        when(gitHubIssueClientService.createIssueForStory(eq("feature"), any(DecompositionStory.class)))
+                .thenReturn(missingNumberIssue);
+
+        GitHubIssueCreateResponse response = service.createFromDecomposition(request(
+                "trace-missing-number",
+                "feature",
+                List.of(story("story-1", "First"))
+        ));
+
+        assertTrue(response.isIssuesCreated());
+        verify(gitHubIssueClientService, times(0)).addIssueComment(anyLong(), any(String.class));
+        verify(intakeTraceabilityAgent, times(1))
+                .recordGitHubSummaryCommentResult(eq("trace-missing-number"), eq("req-number"), eq("feature"), eq(1), eq(0), eq(List.of()));
+    }
+
     private static GitHubIssueCreateRequest request(String traceId, String sourceType, List<DecompositionStory> stories) {
         GitHubIssueCreateRequest request = new GitHubIssueCreateRequest();
         request.setRequestId("req-" + traceId.substring(traceId.lastIndexOf('-') + 1));

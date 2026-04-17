@@ -208,9 +208,14 @@ public class IntakeTraceabilityAgent {
         List<Long> safeFailures = failedIssueNumbers != null ? failedIssueNumbers : Collections.emptyList();
         int normalizedIssueCount = Math.max(0, issueCount);
         int normalizedCommentedIssueCount = Math.max(0, Math.min(commentedIssueCount, normalizedIssueCount));
-        int failedIssueCount = safeFailures.size();
         int rawCommentedIssueCount = Math.max(0, commentedIssueCount);
-        boolean allSucceeded = safeFailures.isEmpty() && rawCommentedIssueCount == normalizedIssueCount;
+        boolean countInconsistencyDetected = rawCommentedIssueCount != normalizedCommentedIssueCount;
+        int derivedFailedIssueCount = Math.max(0, normalizedIssueCount - normalizedCommentedIssueCount);
+        int failedIssueCount = Math.max(safeFailures.size(), derivedFailedIssueCount);
+        if (countInconsistencyDetected) {
+            failedIssueCount = Math.max(failedIssueCount, 1);
+        }
+        boolean allSucceeded = safeFailures.isEmpty() && failedIssueCount == 0 && !countInconsistencyDetected;
 
         appendEvent(
                 traceId,
@@ -228,7 +233,8 @@ public class IntakeTraceabilityAgent {
                         "issueCount", normalizedIssueCount,
                         "commentedIssueCount", normalizedCommentedIssueCount,
                         "failedIssueCount", failedIssueCount,
-                        "failedIssueNumbers", safeFailures
+                        "failedIssueNumbers", safeFailures,
+                        "countInconsistencyDetected", countInconsistencyDetected
                 ),
                 governanceMetadata()
         );

@@ -309,7 +309,8 @@ class IntakeTraceabilityAgentIntegrationTest {
 
         assertEquals(2, event.path("artifactSummary").path("issueCount").asInt());
         assertEquals(2, event.path("artifactSummary").path("commentedIssueCount").asInt());
-        assertEquals(0, event.path("artifactSummary").path("failedIssueCount").asInt());
+        assertEquals(1, event.path("artifactSummary").path("failedIssueCount").asInt());
+        assertTrue(event.path("artifactSummary").path("countInconsistencyDetected").asBoolean());
     }
 
     @Test
