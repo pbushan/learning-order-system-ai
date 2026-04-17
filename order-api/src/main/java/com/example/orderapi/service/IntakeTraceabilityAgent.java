@@ -210,11 +210,13 @@ public class IntakeTraceabilityAgent {
         int normalizedCommentedIssueCount = Math.max(0, Math.min(commentedIssueCount, normalizedIssueCount));
         int rawCommentedIssueCount = Math.max(0, commentedIssueCount);
         boolean countInconsistencyDetected = rawCommentedIssueCount != normalizedCommentedIssueCount;
-        int derivedFailedIssueCount = Math.max(0, normalizedIssueCount - normalizedCommentedIssueCount);
-        int failedIssueCount = Math.max(safeFailures.size(), derivedFailedIssueCount);
+        int knownFailedIssueCount = safeFailures.size();
+        int derivedFailureDelta = Math.max(0, normalizedIssueCount - normalizedCommentedIssueCount);
+        int unknownFailedIssueCount = Math.max(0, derivedFailureDelta - knownFailedIssueCount);
         if (countInconsistencyDetected) {
-            failedIssueCount = Math.max(failedIssueCount, 1);
+            unknownFailedIssueCount = Math.max(unknownFailedIssueCount, 1);
         }
+        int failedIssueCount = knownFailedIssueCount + unknownFailedIssueCount;
         boolean allSucceeded = safeFailures.isEmpty() && failedIssueCount == 0 && !countInconsistencyDetected;
 
         appendEvent(
@@ -233,6 +235,8 @@ public class IntakeTraceabilityAgent {
                         "issueCount", normalizedIssueCount,
                         "commentedIssueCount", normalizedCommentedIssueCount,
                         "failedIssueCount", failedIssueCount,
+                        "knownFailedIssueCount", knownFailedIssueCount,
+                        "unknownFailedIssueCount", unknownFailedIssueCount,
                         "failedIssueNumbers", safeFailures,
                         "countInconsistencyDetected", countInconsistencyDetected
                 ),

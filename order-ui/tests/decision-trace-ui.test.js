@@ -59,3 +59,23 @@ test('buildCustomerTimeline surfaces failure states with clear step titles', () 
   assert.ok(titles.includes('GitHub issue creation failed'));
   assert.ok(titles.includes('GitHub summary comment posting had failures'));
 });
+
+test('buildCustomerTimeline omits absent count fields and parses numeric strings', () => {
+  const timeline = ui.buildCustomerTimeline([
+    {
+      eventType: 'intake.github.summary-comment.failed',
+      timestamp: '2026-04-17T10:00:06Z',
+      status: 'failed',
+      summary: 'comments partially failed',
+      decisionMetadata: {},
+      inputSummary: {},
+      artifactSummary: { commentedIssueCount: '2', unexpected: 'n/a' },
+      governanceMetadata: {}
+    }
+  ]);
+
+  assert.equal(timeline.length, 1);
+  assert.equal(timeline[0].details.commentedIssueCount, 2);
+  assert.equal(Object.prototype.hasOwnProperty.call(timeline[0].details, 'issueCount'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(timeline[0].details, 'failedIssueCount'), false);
+});

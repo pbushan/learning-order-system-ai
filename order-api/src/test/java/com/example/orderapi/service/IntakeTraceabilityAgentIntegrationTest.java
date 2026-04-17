@@ -310,6 +310,8 @@ class IntakeTraceabilityAgentIntegrationTest {
         assertEquals(2, event.path("artifactSummary").path("issueCount").asInt());
         assertEquals(2, event.path("artifactSummary").path("commentedIssueCount").asInt());
         assertEquals(1, event.path("artifactSummary").path("failedIssueCount").asInt());
+        assertEquals(0, event.path("artifactSummary").path("knownFailedIssueCount").asInt());
+        assertEquals(1, event.path("artifactSummary").path("unknownFailedIssueCount").asInt());
         assertTrue(event.path("artifactSummary").path("countInconsistencyDetected").asBoolean());
     }
 
@@ -337,6 +339,8 @@ class IntakeTraceabilityAgentIntegrationTest {
         assertEquals(1, event.path("artifactSummary").path("issueCount").asInt());
         assertEquals(1, event.path("artifactSummary").path("commentedIssueCount").asInt());
         assertEquals(0, event.path("artifactSummary").path("failedIssueCount").asInt());
+        assertEquals(0, event.path("artifactSummary").path("knownFailedIssueCount").asInt());
+        assertEquals(0, event.path("artifactSummary").path("unknownFailedIssueCount").asInt());
         assertTrue(event.path("artifactSummary").path("failedIssueNumbers").isArray());
     }
 

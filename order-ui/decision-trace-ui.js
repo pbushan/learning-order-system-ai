@@ -91,14 +91,15 @@
                 status: event.status || "recorded",
                 summary: event.summary || readableEventType(event.eventType),
                 timestamp: event.timestamp,
-                details: {
+                details: compactDetails({
                     issueLinks,
                     sourceType: toText(event.decisionMetadata?.sourceType),
                     classifiedType: toText(event.decisionMetadata?.classifiedType),
-                    issueCount: toNumber(event.artifactSummary?.issueCount),
-                    commentedIssueCount: toNumber(event.artifactSummary?.commentedIssueCount),
-                    failedIssueCount: toNumber(event.artifactSummary?.failedIssueCount)
-                }
+                    issueCount: optionalCount(event.artifactSummary, "issueCount"),
+                    commentedIssueCount: optionalCount(event.artifactSummary, "commentedIssueCount"),
+                    failedIssueCount: optionalCount(event.artifactSummary, "failedIssueCount"),
+                    unknownFailedIssueCount: optionalCount(event.artifactSummary, "unknownFailedIssueCount")
+                })
             };
         }
 
@@ -209,9 +210,30 @@
         return value;
     }
 
-    function toNumber(value) {
+    function optionalCount(source, key) {
+        if (!source || typeof source !== "object" || !(key in source)) {
+            return undefined;
+        }
+        const value = source[key];
+        if (value === null || value === undefined || value === "") {
+            return undefined;
+        }
         const parsed = Number(value);
-        return Number.isFinite(parsed) ? parsed : 0;
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+        return toText(value) || undefined;
+    }
+
+    function compactDetails(details) {
+        const compact = {};
+        Object.entries(details).forEach(([key, value]) => {
+            if (value === undefined || value === null || value === "") {
+                return;
+            }
+            compact[key] = value;
+        });
+        return compact;
     }
 
     return {
