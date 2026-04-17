@@ -25,8 +25,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class IntakeTraceabilityAgentIntegrationTest {
@@ -56,7 +59,8 @@ class IntakeTraceabilityAgentIntegrationTest {
         GitHubIssueCreationService issueCreationService = new GitHubIssueCreationService(
                 gitHubIssueClientService,
                 fileAuditLogService,
-                traceabilityAgent
+                traceabilityAgent,
+                new TraceabilityGitHubSummaryCommentBuilder()
         );
 
         StructuredIntakeData structuredData = structuredData("bug", "Checkout fails", "Checkout request times out");
@@ -116,6 +120,8 @@ class IntakeTraceabilityAgentIntegrationTest {
         assertTrue(eventTypes.contains("intake.github.payload.prepared"));
         assertTrue(eventTypes.contains("intake.github.issue-creation.completed"));
         assertTrue(events.stream().allMatch(event -> chatResponse.getTraceId().equals(event.path("traceId").asText(""))));
+        verify(gitHubIssueClientService, times(1))
+                .addIssueComment(eq(321L), org.mockito.ArgumentMatchers.contains("Generated via agent-assisted intake."));
     }
 
     @Test
@@ -129,7 +135,8 @@ class IntakeTraceabilityAgentIntegrationTest {
         GitHubIssueCreationService issueCreationService = new GitHubIssueCreationService(
                 gitHubIssueClientService,
                 fileAuditLogService,
-                traceabilityAgent
+                traceabilityAgent,
+                new TraceabilityGitHubSummaryCommentBuilder()
         );
 
         when(gitHubIssueClientService.createIssueForStory(eq("feature"), any(DecompositionStory.class)))
@@ -150,6 +157,83 @@ class IntakeTraceabilityAgentIntegrationTest {
 
         assertTrue(eventTypes.contains("intake.github.payload.prepared"));
         assertTrue(eventTypes.contains("intake.github.issue-creation.failed"));
+    }
+
+    @Test
+    void emitsCommentsForEachIssueInDecomposedMultiIssueFlow() throws Exception {
+        Path traceLogPath = Files.createTempFile("decision-trace-multi", ".jsonl");
+        ObjectMapper objectMapper = new ObjectMapper();
+        IntakeTraceabilityAgent traceabilityAgent = new IntakeTraceabilityAgent(objectMapper, traceLogPath.toString());
+
+        IntakeOpenAiClient intakeOpenAiClient = mock(IntakeOpenAiClient.class);
+        FileAuditLogService fileAuditLogService = mock(FileAuditLogService.class);
+        GitHubIssueClientService gitHubIssueClientService = mock(GitHubIssueClientService.class);
+
+        IntakeChatService intakeChatService = new IntakeChatService(
+                intakeOpenAiClient,
+                fileAuditLogService,
+                traceabilityAgent,
+                "gpt-4.1-mini"
+        );
+        DecompositionService decompositionService = new DecompositionService(
+                intakeOpenAiClient,
+                fileAuditLogService,
+                traceabilityAgent,
+                "gpt-4.1-mini"
+        );
+        GitHubIssueCreationService issueCreationService = new GitHubIssueCreationService(
+                gitHubIssueClientService,
+                fileAuditLogService,
+                traceabilityAgent,
+                new TraceabilityGitHubSummaryCommentBuilder()
+        );
+
+        StructuredIntakeData structuredData = structuredData("feature", "Order filters", "Add advanced order filters");
+        when(intakeOpenAiClient.collectIntake(any()))
+                .thenReturn(new IntakeOpenAiClient.NormalizedIntakeResult("Captured intake", true, structuredData));
+
+        DecompositionResponse decompositionResponse = new DecompositionResponse();
+        decompositionResponse.setRequestId("req-multi");
+        decompositionResponse.setDecompositionComplete(true);
+        decompositionResponse.setStories(List.of(story("story-a"), story("story-b")));
+        when(intakeOpenAiClient.decompose(eq("req-multi"), any(StructuredIntakeData.class)))
+                .thenReturn(decompositionResponse);
+
+        GitHubIssueSummary issueA = new GitHubIssueSummary();
+        issueA.setIssueNumber(901L);
+        issueA.setIssueUrl("https://example.test/issues/901");
+        issueA.setTitle("Implement order filter API");
+        GitHubIssueSummary issueB = new GitHubIssueSummary();
+        issueB.setIssueNumber(902L);
+        issueB.setIssueUrl("https://example.test/issues/902");
+        issueB.setTitle("Add order filter UI");
+        when(gitHubIssueClientService.createIssueForStory(eq("feature"), any(DecompositionStory.class)))
+                .thenReturn(issueA, issueB);
+
+        IntakeChatRequest chatRequest = new IntakeChatRequest();
+        ChatMessage chatMessage = new ChatMessage();
+        chatMessage.setRole("user");
+        chatMessage.setContent("Need advanced filtering for orders");
+        chatRequest.setMessages(List.of(chatMessage));
+
+        IntakeChatResponse chatResponse = intakeChatService.chat("req-multi", chatRequest);
+
+        DecompositionRequest decompositionRequest = new DecompositionRequest();
+        decompositionRequest.setRequestId("req-multi");
+        decompositionRequest.setTraceId(chatResponse.getTraceId());
+        decompositionRequest.setStructuredData(chatResponse.getStructuredData());
+        DecompositionResponse decomposeResult = decompositionService.decompose(decompositionRequest);
+
+        GitHubIssueCreateRequest issueRequest = new GitHubIssueCreateRequest();
+        issueRequest.setRequestId("req-multi");
+        issueRequest.setTraceId(decomposeResult.getTraceId());
+        issueRequest.setSourceType("feature");
+        issueRequest.setStories(decomposeResult.getStories());
+        GitHubIssueCreateResponse issueResponse = issueCreationService.createFromDecomposition(issueRequest);
+
+        assertTrue(issueResponse.isIssuesCreated());
+        assertEquals(2, issueResponse.getIssues().size());
+        verify(gitHubIssueClientService, times(2)).addIssueComment(anyLong(), org.mockito.ArgumentMatchers.contains("- Decomposed multi-issue set: yes (2 issues)"));
     }
 
     private static StructuredIntakeData structuredData(String type, String title, String description) {

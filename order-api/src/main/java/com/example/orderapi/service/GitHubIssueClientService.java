@@ -582,25 +582,37 @@ public class GitHubIssueClientService {
     }
 
     public void addPullRequestComment(long pullNumber, String body) {
+        addIssueComment(pullNumber, body);
+    }
+
+    public void addIssueComment(long issueNumber, String body) {
         validateTokenConfigured();
         validateRepositoryConfigured();
-        if (pullNumber <= 0) {
-            throw new IllegalArgumentException("pullNumber must be > 0");
+        if (issueNumber <= 0) {
+            throw new IllegalArgumentException("issueNumber must be > 0");
         }
         if (!StringUtils.hasText(body)) {
             throw new IllegalArgumentException("body is required");
         }
 
-        if (!useMcpProvider()) {
-            throw new IllegalStateException("Step 6 pull request commenting requires app.github.provider=mcp");
+        if (useMcpProvider()) {
+            Map<String, Object> arguments = new LinkedHashMap<>();
+            arguments.put("owner", owner.trim());
+            arguments.put("repo", repo.trim());
+            arguments.put("issue_number", issueNumber);
+            arguments.put("body", body.trim());
+            callMcpTool("add_issue_comment", arguments);
+            return;
         }
 
-        Map<String, Object> arguments = new LinkedHashMap<>();
-        arguments.put("owner", owner.trim());
-        arguments.put("repo", repo.trim());
-        arguments.put("issue_number", pullNumber);
-        arguments.put("body", body.trim());
-        callMcpTool("add_issue_comment", arguments);
+        Map<String, String> commentBody = Map.of("body", body.trim());
+        restClient.post()
+                .uri("/repos/{owner}/{repo}/issues/{issueNumber}/comments",
+                        owner.trim(), repo.trim(), issueNumber)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim())
+                .body(commentBody)
+                .retrieve()
+                .toBodilessEntity();
     }
 
     public void updatePullRequest(long pullNumber, String title, String body) {

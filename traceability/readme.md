@@ -17,7 +17,7 @@ Non-goals in the current phase:
 - no standalone external traceability service
 - no autonomous governance workflow engine
 - no hidden chain-of-thought or raw reasoning logs
-- no automatic GitHub summary comments yet
+- no full trace dump into GitHub comments (summary only)
 
 ## Event Schema
 
@@ -62,6 +62,7 @@ Schema contract notes:
 - `read_trace_events(trace_id=..., session_id=..., path=None)` (keyword-only filters)
   - default mode skips malformed lines and returns valid matching events
   - set `strict=True` to fail fast on malformed JSON or invalid records
+- `build_issue_trace_summary(...)` for concise engineer-facing GitHub issue comments
 
 ## Intake Lifecycle Events (current)
 
