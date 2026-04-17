@@ -298,6 +298,7 @@ class IntakeTraceabilityAgentIntegrationTest {
                 "feature",
                 2,
                 3,
+                0,
                 List.of()
         );
 
@@ -312,6 +313,7 @@ class IntakeTraceabilityAgentIntegrationTest {
         assertEquals(1, event.path("artifactSummary").path("failedIssueCount").asInt());
         assertEquals(0, event.path("artifactSummary").path("knownFailedIssueCount").asInt());
         assertEquals(1, event.path("artifactSummary").path("unknownFailedIssueCount").asInt());
+        assertEquals(0, event.path("artifactSummary").path("failedCommentCount").asInt());
         assertTrue(event.path("artifactSummary").path("countInconsistencyDetected").asBoolean());
     }
 
@@ -327,6 +329,7 @@ class IntakeTraceabilityAgentIntegrationTest {
                 "bug",
                 1,
                 1,
+                0,
                 null
         );
 
@@ -341,6 +344,38 @@ class IntakeTraceabilityAgentIntegrationTest {
         assertEquals(0, event.path("artifactSummary").path("failedIssueCount").asInt());
         assertEquals(0, event.path("artifactSummary").path("knownFailedIssueCount").asInt());
         assertEquals(0, event.path("artifactSummary").path("unknownFailedIssueCount").asInt());
+        assertEquals(0, event.path("artifactSummary").path("failedCommentCount").asInt());
+        assertTrue(event.path("artifactSummary").path("failedIssueNumbers").isArray());
+    }
+
+    @Test
+    void recordsUnknownSummaryCommentFailureWhenIssueNumbersAreUnavailable() throws Exception {
+        Path traceLogPath = Files.createTempFile("decision-trace-comment-unknown-failure", ".jsonl");
+        ObjectMapper objectMapper = new ObjectMapper();
+        IntakeTraceabilityAgent traceabilityAgent = new IntakeTraceabilityAgent(objectMapper, traceLogPath.toString());
+
+        traceabilityAgent.recordGitHubSummaryCommentResult(
+                "trace-unknown-failure",
+                "req-unknown-failure",
+                "feature",
+                2,
+                1,
+                1,
+                null
+        );
+
+        List<JsonNode> events = readEvents(traceLogPath, objectMapper);
+        JsonNode event = events.stream()
+                .filter(node -> "intake.github.summary-comment.failed".equals(node.path("eventType").asText("")))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(2, event.path("artifactSummary").path("issueCount").asInt());
+        assertEquals(1, event.path("artifactSummary").path("commentedIssueCount").asInt());
+        assertEquals(1, event.path("artifactSummary").path("failedIssueCount").asInt());
+        assertEquals(0, event.path("artifactSummary").path("knownFailedIssueCount").asInt());
+        assertEquals(1, event.path("artifactSummary").path("unknownFailedIssueCount").asInt());
+        assertEquals(1, event.path("artifactSummary").path("failedCommentCount").asInt());
         assertTrue(event.path("artifactSummary").path("failedIssueNumbers").isArray());
     }
 

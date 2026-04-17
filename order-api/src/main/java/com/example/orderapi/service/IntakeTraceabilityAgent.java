@@ -201,6 +201,7 @@ public class IntakeTraceabilityAgent {
                                                  String sourceType,
                                                  int issueCount,
                                                  int commentedIssueCount,
+                                                 int failedCommentCount,
                                                  List<Long> failedIssueNumbers) {
         if (issueCount <= 0) {
             return;
@@ -208,16 +209,20 @@ public class IntakeTraceabilityAgent {
         List<Long> safeFailures = failedIssueNumbers != null ? failedIssueNumbers : Collections.emptyList();
         int normalizedIssueCount = Math.max(0, issueCount);
         int normalizedCommentedIssueCount = Math.max(0, Math.min(commentedIssueCount, normalizedIssueCount));
+        int normalizedFailedCommentCount = Math.max(0, Math.min(failedCommentCount, normalizedIssueCount));
         int rawCommentedIssueCount = Math.max(0, commentedIssueCount);
+        int rawFailedCommentCount = Math.max(0, failedCommentCount);
         boolean countInconsistencyDetected = rawCommentedIssueCount != normalizedCommentedIssueCount;
+        countInconsistencyDetected = countInconsistencyDetected || rawFailedCommentCount != normalizedFailedCommentCount;
         int knownFailedIssueCount = safeFailures.size();
         int derivedFailureDelta = Math.max(0, normalizedIssueCount - normalizedCommentedIssueCount);
-        int unknownFailedIssueCount = Math.max(0, derivedFailureDelta - knownFailedIssueCount);
+        int expectedFailedIssueCount = Math.max(derivedFailureDelta, normalizedFailedCommentCount);
+        int unknownFailedIssueCount = Math.max(0, expectedFailedIssueCount - knownFailedIssueCount);
         if (countInconsistencyDetected) {
             unknownFailedIssueCount = Math.max(unknownFailedIssueCount, 1);
+            expectedFailedIssueCount = Math.max(expectedFailedIssueCount, knownFailedIssueCount + unknownFailedIssueCount);
         }
-        int failedIssueCount = knownFailedIssueCount + unknownFailedIssueCount;
-        boolean allSucceeded = safeFailures.isEmpty() && failedIssueCount == 0 && !countInconsistencyDetected;
+        boolean allSucceeded = safeFailures.isEmpty() && expectedFailedIssueCount == 0 && !countInconsistencyDetected;
 
         appendEvent(
                 traceId,
@@ -234,9 +239,10 @@ public class IntakeTraceabilityAgent {
                 Map.of(
                         "issueCount", normalizedIssueCount,
                         "commentedIssueCount", normalizedCommentedIssueCount,
-                        "failedIssueCount", failedIssueCount,
+                        "failedIssueCount", expectedFailedIssueCount,
                         "knownFailedIssueCount", knownFailedIssueCount,
                         "unknownFailedIssueCount", unknownFailedIssueCount,
+                        "failedCommentCount", normalizedFailedCommentCount,
                         "failedIssueNumbers", safeFailures,
                         "countInconsistencyDetected", countInconsistencyDetected
                 ),

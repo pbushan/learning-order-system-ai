@@ -60,6 +60,7 @@ public class GitHubIssueCreationService {
             intakeTraceabilityAgent.recordGitHubPayloadPrepared(traceId, requestId, sourceType, stories.size());
             String rationaleSummary = resolveRationaleSummary(traceId);
             int commentsPosted = 0;
+            int commentFailuresCount = 0;
             List<Long> commentFailures = new ArrayList<>();
             for (DecompositionStory story : stories) {
                 GitHubIssueSummary issue = gitHubIssueClientService.createIssueForStory(sourceType, story);
@@ -68,8 +69,11 @@ public class GitHubIssueCreationService {
                 boolean commentPosted = safeAddTraceSummaryComment(issue, traceId, sourceType, stories.size(), rationaleSummary);
                 if (commentPosted) {
                     commentsPosted++;
-                } else if (issue.getIssueNumber() > 0) {
-                    commentFailures.add(issue.getIssueNumber());
+                } else {
+                    commentFailuresCount++;
+                    if (issue.getIssueNumber() > 0) {
+                        commentFailures.add(issue.getIssueNumber());
+                    }
                 }
             }
             intakeTraceabilityAgent.recordGitHubSummaryCommentResult(
@@ -78,6 +82,7 @@ public class GitHubIssueCreationService {
                     sourceType,
                     issues.size(),
                     commentsPosted,
+                    commentFailuresCount,
                     commentFailures
             );
             GitHubIssueCreateResponse response = new GitHubIssueCreateResponse();
