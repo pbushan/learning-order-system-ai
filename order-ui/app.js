@@ -343,10 +343,8 @@ async function handleIntakeChatSubmit(event) {
     }
 
     state.intakeResult = null;
-    state.intakeTraceId = "";
     state.githubIssueCreationError = "";
     state.githubIssueCreationResult = null;
-    clearDecisionTrace();
     state.intakeMessages.push({ role: "user", content });
     trimIntakeMessages();
     intakeChatInput.value = "";
