@@ -55,6 +55,28 @@ This repo now includes an end-to-end portfolio workflow from intake to GitHub is
   - `portfolio`
 - GitHub issue creation audit events are append-only and non-blocking on logger failures.
 
+### Step 4: Decision traceability foundation + intake UI timeline
+
+- Shared traceability domain model and append-only store live in [`traceability/`](traceability/).
+- A dedicated orchestration seam, [`IntakeTraceabilityAgent`](order-api/src/main/java/com/example/orderapi/service/IntakeTraceabilityAgent.java), records lifecycle events for:
+  - intake session start/capture
+  - bug-vs-feature classification
+  - structured intake capture
+  - decomposition outcome
+  - GitHub payload preparation
+  - GitHub issue creation success/failure
+- Trace events are correlated under one `traceId` for a single intake journey and persisted to:
+  - `traceability/audit/decision-trace.jsonl` (configurable via `app.intake.traceability.log-path`)
+- Trace events are exposed by:
+  - `GET /api/intake/trace/{traceId}`
+- `order-ui` Intake chat includes a **Decision Trace** section with:
+  - customer summary view
+  - engineer detail view (trace ID + expanded event details)
+  - issue links when available
+- Guardrails:
+  - summary-only rationale metadata
+  - no raw chain-of-thought/prompt internals persisted or rendered
+
 ### Step 5: Approved issue pickup and execution scaffolding
 
 - Approval conventions documented in [`docs/step5-approval-and-execution-conventions.md`](docs/step5-approval-and-execution-conventions.md).

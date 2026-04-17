@@ -4,12 +4,20 @@ This folder provides a reusable, append-only decision trace model for intake wor
 
 ## Purpose
 
-The module records concise, reviewable decision events that can later be rendered in UI views and GitHub summaries.
+The module records concise, reviewable decision events for the intake lifecycle and acts as the shared traceability source of truth.
 
-Non-goals for this foundation:
-- no deep intake UI integration yet
-- no GitHub summary comment integration yet
+Current implementation scope:
+- shared domain model + append-only JSONL persistence in this folder
+- backend orchestration via `IntakeTraceabilityAgent` (`order-api`)
+- `traceId` propagation through intake -> decomposition -> GitHub issue creation
+- trace read API: `GET /api/intake/trace/{traceId}`
+- intake chat Decision Trace UI rendering in `order-ui`
+
+Non-goals in the current phase:
+- no standalone external traceability service
+- no autonomous governance workflow engine
 - no hidden chain-of-thought or raw reasoning logs
+- no automatic GitHub summary comments yet
 
 ## Event Schema
 
@@ -43,6 +51,9 @@ Schema contract notes:
 - Default log path: `traceability/audit/decision-trace.jsonl`
 - Override with env var: `TRACEABILITY_LOG_PATH`
 
+`order-api` runtime can also override its path with:
+- `app.intake.traceability.log-path`
+
 ## Helpers
 
 - `create_trace_id(prefix="trace")`
@@ -51,3 +62,15 @@ Schema contract notes:
 - `read_trace_events(trace_id=..., session_id=..., path=None)` (keyword-only filters)
   - default mode skips malformed lines and returns valid matching events
   - set `strict=True` to fail fast on malformed JSON or invalid records
+
+## Intake Lifecycle Events (current)
+
+Typical event types written by `IntakeTraceabilityAgent`:
+- `intake.session.started`
+- `intake.classification.completed`
+- `intake.structured-data.captured`
+- `intake.decomposition.completed` or `intake.decomposition.failed`
+- `intake.github.payload.prepared`
+- `intake.github.issue-creation.completed` or `intake.github.issue-creation.failed`
+
+All events are append-only and correlated by `traceId`.
