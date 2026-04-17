@@ -141,7 +141,7 @@
 
     function resolveStepTitle(baseTitle, event) {
         const eventType = toText(event?.eventType);
-        const status = toText(event?.status).toLowerCase();
+        const status = (event?.status ?? "").toString().toLowerCase();
         if (eventType.startsWith("intake.classification") && status === "pending") {
             return "Classification needs clarification";
         }

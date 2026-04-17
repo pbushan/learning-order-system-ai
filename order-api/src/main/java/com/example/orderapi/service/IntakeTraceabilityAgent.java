@@ -206,8 +206,11 @@ public class IntakeTraceabilityAgent {
             return;
         }
         List<Long> safeFailures = failedIssueNumbers != null ? failedIssueNumbers : Collections.emptyList();
-        boolean allSucceeded = safeFailures.isEmpty() && commentedIssueCount >= issueCount;
+        int normalizedIssueCount = Math.max(0, issueCount);
+        int normalizedCommentedIssueCount = Math.max(0, Math.min(commentedIssueCount, normalizedIssueCount));
         int failedIssueCount = safeFailures.size();
+        int rawCommentedIssueCount = Math.max(0, commentedIssueCount);
+        boolean allSucceeded = safeFailures.isEmpty() && rawCommentedIssueCount == normalizedIssueCount;
 
         appendEvent(
                 traceId,
@@ -222,8 +225,8 @@ public class IntakeTraceabilityAgent {
                         "rationaleSummary", "Summary comments provide concise engineering context while keeping full trace detail in the decision trace log."),
                 Collections.emptyMap(),
                 Map.of(
-                        "issueCount", issueCount,
-                        "commentedIssueCount", commentedIssueCount,
+                        "issueCount", normalizedIssueCount,
+                        "commentedIssueCount", normalizedCommentedIssueCount,
                         "failedIssueCount", failedIssueCount,
                         "failedIssueNumbers", safeFailures
                 ),

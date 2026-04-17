@@ -286,6 +286,32 @@ class IntakeTraceabilityAgentIntegrationTest {
         assertEquals(1, summaryCommentFailure.path("artifactSummary").path("failedIssueCount").asInt());
     }
 
+    @Test
+    void clampsCommentedCountAndMarksSummaryCommentResultFailedWhenCallerOvercounts() throws Exception {
+        Path traceLogPath = Files.createTempFile("decision-trace-comment-overcount", ".jsonl");
+        ObjectMapper objectMapper = new ObjectMapper();
+        IntakeTraceabilityAgent traceabilityAgent = new IntakeTraceabilityAgent(objectMapper, traceLogPath.toString());
+
+        traceabilityAgent.recordGitHubSummaryCommentResult(
+                "trace-overcount",
+                "req-overcount",
+                "feature",
+                2,
+                3,
+                List.of()
+        );
+
+        List<JsonNode> events = readEvents(traceLogPath, objectMapper);
+        JsonNode event = events.stream()
+                .filter(node -> "intake.github.summary-comment.failed".equals(node.path("eventType").asText("")))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(2, event.path("artifactSummary").path("issueCount").asInt());
+        assertEquals(2, event.path("artifactSummary").path("commentedIssueCount").asInt());
+        assertEquals(0, event.path("artifactSummary").path("failedIssueCount").asInt());
+    }
+
     private static StructuredIntakeData structuredData(String type, String title, String description) {
         StructuredIntakeData data = new StructuredIntakeData();
         data.setType(type);
