@@ -10,7 +10,8 @@
         "classification",
         "decomposition",
         "github_payload",
-        "github_issues"
+        "github_issues",
+        "github_comments"
     ];
 
     function normalizeTraceResponse(response) {
@@ -72,6 +73,7 @@
 
     function buildTraceItem(event, stepTitle, hideDenseDetail) {
         const issueLinks = extractIssueLinks(event);
+        const resolvedTitle = resolveStepTitle(stepTitle, event);
         const details = {
             traceId: event.traceId,
             sessionId: event.sessionId,
@@ -85,20 +87,23 @@
 
         if (hideDenseDetail) {
             return {
-                stepTitle,
+                stepTitle: resolvedTitle,
                 status: event.status || "recorded",
                 summary: event.summary || readableEventType(event.eventType),
                 timestamp: event.timestamp,
                 details: {
                     issueLinks,
                     sourceType: toText(event.decisionMetadata?.sourceType),
-                    classifiedType: toText(event.decisionMetadata?.classifiedType)
+                    classifiedType: toText(event.decisionMetadata?.classifiedType),
+                    issueCount: toNumber(event.artifactSummary?.issueCount),
+                    commentedIssueCount: toNumber(event.artifactSummary?.commentedIssueCount),
+                    failedIssueCount: toNumber(event.artifactSummary?.failedIssueCount)
                 }
             };
         }
 
         return {
-            stepTitle,
+            stepTitle: resolvedTitle,
             status: event.status || "recorded",
             summary: event.summary || readableEventType(event.eventType),
             timestamp: event.timestamp,
@@ -128,7 +133,28 @@
         if (eventType.startsWith("intake.github.issue-creation")) {
             return { key: "github_issues", title: "GitHub issues created" };
         }
+        if (eventType.startsWith("intake.github.summary-comment")) {
+            return { key: "github_comments", title: "GitHub trace summary comments" };
+        }
         return { key: "", title: readableEventType(eventType) };
+    }
+
+    function resolveStepTitle(baseTitle, event) {
+        const eventType = toText(event?.eventType);
+        const status = toText(event?.status).toLowerCase();
+        if (eventType.startsWith("intake.classification") && status === "pending") {
+            return "Classification needs clarification";
+        }
+        if (eventType.startsWith("intake.decomposition") && status === "failed") {
+            return "Decomposition failed";
+        }
+        if (eventType.startsWith("intake.github.issue-creation") && status === "failed") {
+            return "GitHub issue creation failed";
+        }
+        if (eventType.startsWith("intake.github.summary-comment") && status === "failed") {
+            return "GitHub summary comment posting had failures";
+        }
+        return baseTitle;
     }
 
     function readableEventType(eventType) {
@@ -173,6 +199,11 @@
             return {};
         }
         return value;
+    }
+
+    function toNumber(value) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : 0;
     }
 
     return {

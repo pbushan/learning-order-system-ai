@@ -196,6 +196,41 @@ public class IntakeTraceabilityAgent {
         );
     }
 
+    public void recordGitHubSummaryCommentResult(String traceId,
+                                                 String requestId,
+                                                 String sourceType,
+                                                 int issueCount,
+                                                 int commentedIssueCount,
+                                                 List<Long> failedIssueNumbers) {
+        if (issueCount <= 0) {
+            return;
+        }
+        List<Long> safeFailures = failedIssueNumbers != null ? failedIssueNumbers : Collections.emptyList();
+        boolean allSucceeded = safeFailures.isEmpty() && commentedIssueCount >= issueCount;
+        int failedIssueCount = safeFailures.size();
+
+        appendEvent(
+                traceId,
+                requestId,
+                allSucceeded ? "intake.github.summary-comment.completed" : "intake.github.summary-comment.failed",
+                allSucceeded ? "completed" : "failed",
+                "github-issue-creation-service",
+                allSucceeded
+                        ? "Posted engineer-facing trace summary comments to created GitHub issues."
+                        : "One or more GitHub trace summary comments could not be posted.",
+                Map.of("sourceType", safeText(sourceType),
+                        "rationaleSummary", "Summary comments provide concise engineering context while keeping full trace detail in the decision trace log."),
+                Collections.emptyMap(),
+                Map.of(
+                        "issueCount", issueCount,
+                        "commentedIssueCount", commentedIssueCount,
+                        "failedIssueCount", failedIssueCount,
+                        "failedIssueNumbers", safeFailures
+                ),
+                governanceMetadata()
+        );
+    }
+
     public synchronized List<DecisionTraceEventResponse> readTraceEvents(String traceId) {
         if (!StringUtils.hasText(traceId) || !Files.exists(traceLogPath)) {
             return Collections.emptyList();

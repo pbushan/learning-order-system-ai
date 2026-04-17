@@ -12,6 +12,7 @@ Current implementation scope:
 - `traceId` propagation through intake -> decomposition -> GitHub issue creation
 - trace read API: `GET /api/intake/trace/{traceId}`
 - intake chat Decision Trace UI rendering in `order-ui`
+- concise engineer-facing GitHub issue summary comments for intake-created issues
 
 Non-goals in the current phase:
 - no standalone external traceability service
@@ -73,5 +74,19 @@ Typical event types written by `IntakeTraceabilityAgent`:
 - `intake.decomposition.completed` or `intake.decomposition.failed`
 - `intake.github.payload.prepared`
 - `intake.github.issue-creation.completed` or `intake.github.issue-creation.failed`
+- `intake.github.summary-comment.completed` or `intake.github.summary-comment.failed`
 
 All events are append-only and correlated by `traceId`.
+
+## Audience split
+
+- Customer-facing UI timeline:
+  - simple lifecycle progress and status
+  - no dense trace internals
+- Engineer-facing UI timeline:
+  - trace IDs and expanded metadata for diagnostics
+- GitHub issue comments:
+  - concise handoff summary only
+  - intentionally not a full trace replay
+
+This keeps traceability reviewable and portfolio-friendly while preserving full audit detail in the append-only store.

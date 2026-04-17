@@ -59,12 +59,27 @@ public class GitHubIssueCreationService {
             stories = request.getStories();
             intakeTraceabilityAgent.recordGitHubPayloadPrepared(traceId, requestId, sourceType, stories.size());
             String rationaleSummary = resolveRationaleSummary(traceId);
+            int commentsPosted = 0;
+            List<Long> commentFailures = new ArrayList<>();
             for (DecompositionStory story : stories) {
                 GitHubIssueSummary issue = gitHubIssueClientService.createIssueForStory(sourceType, story);
                 issue.setStoryId(story.getStoryId());
                 issues.add(issue);
-                safeAddTraceSummaryComment(issue, traceId, sourceType, stories.size(), rationaleSummary);
+                boolean commentPosted = safeAddTraceSummaryComment(issue, traceId, sourceType, stories.size(), rationaleSummary);
+                if (commentPosted) {
+                    commentsPosted++;
+                } else if (issue.getIssueNumber() > 0) {
+                    commentFailures.add(issue.getIssueNumber());
+                }
             }
+            intakeTraceabilityAgent.recordGitHubSummaryCommentResult(
+                    traceId,
+                    requestId,
+                    sourceType,
+                    issues.size(),
+                    commentsPosted,
+                    commentFailures
+            );
             GitHubIssueCreateResponse response = new GitHubIssueCreateResponse();
             response.setRequestId(requestId);
             response.setTraceId(traceId);
@@ -116,13 +131,13 @@ public class GitHubIssueCreationService {
         }
     }
 
-    private void safeAddTraceSummaryComment(GitHubIssueSummary issue,
-                                            String traceId,
-                                            String sourceType,
-                                            int issueCount,
-                                            String rationaleSummary) {
+    private boolean safeAddTraceSummaryComment(GitHubIssueSummary issue,
+                                               String traceId,
+                                               String sourceType,
+                                               int issueCount,
+                                               String rationaleSummary) {
         if (issue == null || issue.getIssueNumber() <= 0) {
-            return;
+            return false;
         }
 
         try {
@@ -133,9 +148,11 @@ public class GitHubIssueCreationService {
                     rationaleSummary
             );
             gitHubIssueClientService.addIssueComment(issue.getIssueNumber(), comment);
+            return true;
         } catch (Exception ex) {
             log.warn("Failed to add trace summary comment for issue={} traceId={}",
                     issue.getIssueNumber(), traceId, ex);
+            return false;
         }
     }
 

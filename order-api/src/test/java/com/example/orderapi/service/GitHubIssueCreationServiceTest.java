@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -54,6 +55,8 @@ class GitHubIssueCreationServiceTest {
         verify(gitHubIssueClientService, times(2)).addIssueComment(anyLong(), contains("- Classification: `feature`"));
         verify(gitHubIssueClientService, times(2)).addIssueComment(anyLong(), contains("- Decomposed multi-issue set: yes (2 issues)"));
         verify(gitHubIssueClientService, times(2)).addIssueComment(anyLong(), contains("- Trace ID: `trace-123`"));
+        verify(intakeTraceabilityAgent, times(1))
+                .recordGitHubSummaryCommentResult(eq("trace-123"), eq("req-123"), eq("feature"), eq(2), eq(2), argThat(List::isEmpty));
     }
 
     @Test
@@ -86,6 +89,8 @@ class GitHubIssueCreationServiceTest {
         assertEquals(2, response.getIssues().size());
         verify(gitHubIssueClientService, times(2)).createIssueForStory(eq("bug"), any(DecompositionStory.class));
         verify(gitHubIssueClientService, times(2)).addIssueComment(anyLong(), contains("- Trace ID: `trace-789`"));
+        verify(intakeTraceabilityAgent, times(1))
+                .recordGitHubSummaryCommentResult(eq("trace-789"), eq("req-789"), eq("bug"), eq(2), eq(1), eq(List.of(201L)));
     }
 
     @Test
@@ -124,6 +129,8 @@ class GitHubIssueCreationServiceTest {
         assertTrue(response.isIssuesCreated());
         verify(gitHubIssueClientService, times(1))
                 .addIssueComment(anyLong(), contains("- Rationale summary: Newer rationale from refined classification."));
+        verify(intakeTraceabilityAgent, times(1))
+                .recordGitHubSummaryCommentResult(eq("trace-456"), eq("req-456"), eq("feature"), eq(1), eq(1), argThat(List::isEmpty));
     }
 
     @Test
@@ -153,6 +160,8 @@ class GitHubIssueCreationServiceTest {
         assertTrue(response.isIssuesCreated());
         assertEquals(1, response.getIssues().size());
         verify(gitHubIssueClientService, times(1)).addIssueComment(anyLong(), contains("- Trace ID: `trace-999`"));
+        verify(intakeTraceabilityAgent, times(1))
+                .recordGitHubSummaryCommentResult(eq("trace-999"), eq("req-999"), eq("bug"), eq(1), eq(0), eq(List.of(401L)));
     }
 
     private static GitHubIssueCreateRequest request(String traceId, String sourceType, List<DecompositionStory> stories) {

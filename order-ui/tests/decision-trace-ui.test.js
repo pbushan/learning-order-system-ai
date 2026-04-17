@@ -46,3 +46,16 @@ test('buildEngineerTimeline keeps all events with detailed payload', () => {
   assert.equal(timeline[0].details.traceId, 'trace-1');
   assert.equal(timeline[0].details.issueLinks.length, 1);
 });
+
+test('buildCustomerTimeline surfaces failure states with clear step titles', () => {
+  const timeline = ui.buildCustomerTimeline([
+    { eventType: 'intake.classification.completed', timestamp: '2026-04-17T10:00:01Z', status: 'pending', summary: 'classification uncertain', decisionMetadata: {}, inputSummary: {}, artifactSummary: {}, governanceMetadata: {} },
+    { eventType: 'intake.github.issue-creation.failed', timestamp: '2026-04-17T10:00:05Z', status: 'failed', summary: 'issue creation failed', decisionMetadata: {}, inputSummary: {}, artifactSummary: {}, governanceMetadata: {} },
+    { eventType: 'intake.github.summary-comment.failed', timestamp: '2026-04-17T10:00:06Z', status: 'failed', summary: 'comments partially failed', decisionMetadata: {}, inputSummary: {}, artifactSummary: { failedIssueCount: 1 }, governanceMetadata: {} }
+  ]);
+
+  const titles = timeline.map((entry) => entry.stepTitle);
+  assert.ok(titles.includes('Classification needs clarification'));
+  assert.ok(titles.includes('GitHub issue creation failed'));
+  assert.ok(titles.includes('GitHub summary comment posting had failures'));
+});
