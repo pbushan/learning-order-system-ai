@@ -1,29 +1,38 @@
 package com.example.orderapi.service;
 
 import com.example.orderapi.dto.DecompositionStory;
+import com.example.orderapi.dto.DecisionTraceEventResponse;
 import com.example.orderapi.dto.GitHubIssueCreateRequest;
 import com.example.orderapi.dto.GitHubIssueCreateResponse;
 import com.example.orderapi.dto.GitHubIssueSummary;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class GitHubIssueCreationService {
 
+    private static final Logger log = LoggerFactory.getLogger(GitHubIssueCreationService.class);
+
     private final GitHubIssueClientService gitHubIssueClientService;
     private final FileAuditLogService fileAuditLogService;
     private final IntakeTraceabilityAgent intakeTraceabilityAgent;
+    private final TraceabilityGitHubSummaryCommentBuilder traceabilityGitHubSummaryCommentBuilder;
 
     public GitHubIssueCreationService(GitHubIssueClientService gitHubIssueClientService,
                                       FileAuditLogService fileAuditLogService,
-                                      IntakeTraceabilityAgent intakeTraceabilityAgent) {
+                                      IntakeTraceabilityAgent intakeTraceabilityAgent,
+                                      TraceabilityGitHubSummaryCommentBuilder traceabilityGitHubSummaryCommentBuilder) {
         this.gitHubIssueClientService = gitHubIssueClientService;
         this.fileAuditLogService = fileAuditLogService;
         this.intakeTraceabilityAgent = intakeTraceabilityAgent;
+        this.traceabilityGitHubSummaryCommentBuilder = traceabilityGitHubSummaryCommentBuilder;
     }
 
     public GitHubIssueCreateResponse createFromDecomposition(GitHubIssueCreateRequest request) {
@@ -44,10 +53,12 @@ public class GitHubIssueCreationService {
             sourceType = request.getSourceType().trim();
             stories = request.getStories();
             intakeTraceabilityAgent.recordGitHubPayloadPrepared(traceId, requestId, sourceType, stories.size());
+            String rationaleSummary = resolveRationaleSummary(traceId);
             for (DecompositionStory story : stories) {
                 GitHubIssueSummary issue = gitHubIssueClientService.createIssueForStory(sourceType, story);
                 issue.setStoryId(story.getStoryId());
                 issues.add(issue);
+                safeAddTraceSummaryComment(issue, traceId, sourceType, stories.size(), rationaleSummary);
             }
             GitHubIssueCreateResponse response = new GitHubIssueCreateResponse();
             response.setRequestId(requestId);
@@ -98,5 +109,46 @@ public class GitHubIssueCreationService {
         } catch (Exception ignored) {
             // Do not fail issue creation due to audit logging.
         }
+    }
+
+    private void safeAddTraceSummaryComment(GitHubIssueSummary issue,
+                                            String traceId,
+                                            String sourceType,
+                                            int issueCount,
+                                            String rationaleSummary) {
+        if (issue == null || issue.getIssueNumber() <= 0) {
+            return;
+        }
+
+        try {
+            String comment = traceabilityGitHubSummaryCommentBuilder.buildIssueTraceSummary(
+                    traceId,
+                    sourceType,
+                    issueCount,
+                    rationaleSummary
+            );
+            gitHubIssueClientService.addIssueComment(issue.getIssueNumber(), comment);
+        } catch (Exception ex) {
+            log.warn("Failed to add trace summary comment for issue={} traceId={}",
+                    issue.getIssueNumber(), traceId, ex);
+        }
+    }
+
+    private String resolveRationaleSummary(String traceId) {
+        List<DecisionTraceEventResponse> events = intakeTraceabilityAgent.readTraceEvents(traceId);
+        for (DecisionTraceEventResponse event : events) {
+            if (event == null) {
+                continue;
+            }
+            Map<String, Object> decisionMetadata = event.getDecisionMetadata();
+            if (decisionMetadata == null) {
+                continue;
+            }
+            Object rationale = decisionMetadata.get("rationaleSummary");
+            if (rationale != null && StringUtils.hasText(String.valueOf(rationale))) {
+                return String.valueOf(rationale).trim();
+            }
+        }
+        return "";
     }
 }
