@@ -125,12 +125,22 @@ test('normalizeTraceResponse trims traceId and string event fields', () => {
   const normalized = ui.normalizeTraceResponse({
     traceId: ' trace-abc ',
     events: [
-      { eventType: ' intake.session.started ', timestamp: '2026-04-17T10:00:00Z', status: ' recorded ', summary: ' hi ' }
+      {
+        eventType: ' intake.session.started ',
+        timestamp: ' 2026-04-17T10:00:00Z ',
+        status: ' recorded ',
+        summary: ' hi ',
+        actor: ' intake-api ',
+        correlationId: ' corr-1 '
+      }
     ]
   });
 
   assert.equal(normalized.traceId, 'trace-abc');
   assert.equal(normalized.events[0].eventType, 'intake.session.started');
+  assert.equal(normalized.events[0].timestamp, '2026-04-17T10:00:00Z');
   assert.equal(normalized.events[0].status, 'recorded');
   assert.equal(normalized.events[0].summary, 'hi');
+  assert.equal(normalized.events[0].actor, 'intake-api');
+  assert.equal(normalized.events[0].correlationId, 'corr-1');
 });

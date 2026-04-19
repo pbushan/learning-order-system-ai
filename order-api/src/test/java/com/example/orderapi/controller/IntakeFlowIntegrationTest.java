@@ -21,6 +21,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 
@@ -28,7 +29,8 @@ import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.blankString;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -108,7 +110,7 @@ class IntakeFlowIntegrationTest {
         DecisionTraceEventResponse eventC = new DecisionTraceEventResponse();
         eventC.setTraceId("trace-flow-1");
         eventC.setEventType("intake.github.issue-creation.completed");
-        when(intakeTraceabilityAgent.readTraceEvents(eq("trace-flow-1"))).thenReturn(List.of(eventA, eventB, eventC));
+        when(intakeTraceabilityAgent.readTraceEvents(anyString())).thenReturn(List.of(eventA, eventB, eventC));
 
         mockMvc.perform(post("/api/intake/chat")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -151,5 +153,22 @@ class IntakeFlowIntegrationTest {
                 .andExpect(jsonPath("$.events[*].eventType", hasItem("intake.session.started")))
                 .andExpect(jsonPath("$.events[*].eventType", hasItem("intake.decomposition.completed")))
                 .andExpect(jsonPath("$.events[*].eventType", hasItem("intake.github.issue-creation.completed")));
+
+        ArgumentCaptor<DecompositionRequest> decompositionRequestCaptor = ArgumentCaptor.forClass(DecompositionRequest.class);
+        verify(decompositionService).decompose(decompositionRequestCaptor.capture());
+        DecompositionRequest capturedDecompositionRequest = decompositionRequestCaptor.getValue();
+        org.junit.jupiter.api.Assertions.assertEquals("req-flow-1", capturedDecompositionRequest.getRequestId());
+        org.junit.jupiter.api.Assertions.assertEquals("trace-flow-1", capturedDecompositionRequest.getTraceId());
+        org.junit.jupiter.api.Assertions.assertEquals("bug", capturedDecompositionRequest.getStructuredData().getType());
+
+        ArgumentCaptor<GitHubIssueCreateRequest> issueRequestCaptor = ArgumentCaptor.forClass(GitHubIssueCreateRequest.class);
+        verify(gitHubIssueCreationService).createFromDecomposition(issueRequestCaptor.capture());
+        GitHubIssueCreateRequest capturedIssueRequest = issueRequestCaptor.getValue();
+        org.junit.jupiter.api.Assertions.assertEquals("req-flow-1", capturedIssueRequest.getRequestId());
+        org.junit.jupiter.api.Assertions.assertEquals("trace-flow-1", capturedIssueRequest.getTraceId());
+        org.junit.jupiter.api.Assertions.assertEquals("bug", capturedIssueRequest.getSourceType());
+        org.junit.jupiter.api.Assertions.assertEquals(1, capturedIssueRequest.getStories().size());
+
+        verify(intakeTraceabilityAgent).readTraceEvents("trace-flow-1");
     }
 }

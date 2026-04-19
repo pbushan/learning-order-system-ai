@@ -44,9 +44,10 @@ public class IntakeChatController {
 
     @GetMapping("/trace/{traceId}")
     public ResponseEntity<DecisionTraceResponse> trace(@PathVariable String traceId) {
+        String normalizedTraceId = traceId != null ? traceId.trim() : "";
         DecisionTraceResponse response = new DecisionTraceResponse();
-        response.setTraceId(traceId != null ? traceId.trim() : "");
-        response.setEvents(intakeTraceabilityAgent.readTraceEvents(traceId));
+        response.setTraceId(normalizedTraceId);
+        response.setEvents(intakeTraceabilityAgent.readTraceEvents(normalizedTraceId));
         return ResponseEntity.ok(response);
     }
 

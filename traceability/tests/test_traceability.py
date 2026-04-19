@@ -12,14 +12,15 @@ from traceability.store import resolve_trace_log_path
 
 class TraceabilityFoundationTest(unittest.TestCase):
     def test_resolve_trace_log_path_prefers_explicit_path_then_env(self) -> None:
-        explicit = resolve_trace_log_path("traceability/audit/custom.jsonl")
-        self.assertTrue(str(explicit).endswith("traceability/audit/custom.jsonl"))
+        explicit_input = Path("traceability/audit/custom.jsonl")
+        explicit = resolve_trace_log_path(explicit_input)
+        self.assertEqual(explicit, explicit_input.resolve())
 
         original = os.environ.get("TRACEABILITY_LOG_PATH")
         try:
             os.environ["TRACEABILITY_LOG_PATH"] = "traceability/audit/from-env.jsonl"
             resolved = resolve_trace_log_path()
-            self.assertTrue(str(resolved).endswith("traceability/audit/from-env.jsonl"))
+            self.assertEqual(resolved, Path("traceability/audit/from-env.jsonl").resolve())
         finally:
             if original is None:
                 os.environ.pop("TRACEABILITY_LOG_PATH", None)
