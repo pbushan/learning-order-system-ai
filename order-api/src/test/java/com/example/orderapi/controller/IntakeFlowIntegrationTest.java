@@ -35,11 +35,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest({IntakeChatController.class, DecompositionController.class})
 class IntakeFlowIntegrationTest {
+    private static final String INTAKE_NO_ACTIONABLE_MESSAGE =
+            "Intake completed without actionable bug/feature details, so no GitHub issues were created.";
 
     @Autowired
     private MockMvc mockMvc;
@@ -211,9 +214,11 @@ class IntakeFlowIntegrationTest {
                                 }
                                 """))
                 .andExpect(status().isBadRequest())
+                .andExpect(header().string("X-Error-Message", INTAKE_NO_ACTIONABLE_MESSAGE))
                 .andExpect(jsonPath("$.requestId").value("req-negative"))
                 .andExpect(jsonPath("$.traceId").value("trace-negative"))
-                .andExpect(jsonPath("$.issuesCreated").value(false));
+                .andExpect(jsonPath("$.issuesCreated").value(false))
+                .andExpect(jsonPath("$.error").value(INTAKE_NO_ACTIONABLE_MESSAGE));
 
         verify(decompositionService).decompose(any(DecompositionRequest.class));
         verify(gitHubIssueCreationService, never()).createFromDecomposition(any(GitHubIssueCreateRequest.class));
