@@ -30,6 +30,7 @@ import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.blankString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -170,5 +171,39 @@ class IntakeFlowIntegrationTest {
         org.junit.jupiter.api.Assertions.assertEquals(1, capturedIssueRequest.getStories().size());
 
         verify(intakeTraceabilityAgent).readTraceEvents("trace-flow-1");
+    }
+
+    @Test
+    void completeToGitHub_returnsBadRequestWhenStructuredTypeMissing_andDoesNotInvokeIssueCreation() throws Exception {
+        DecompositionStory story = new DecompositionStory();
+        story.setStoryId("story-negative");
+        story.setTitle("Fallback");
+        story.setDescription("Fallback");
+
+        DecompositionResponse decompositionResponse = new DecompositionResponse();
+        decompositionResponse.setRequestId("req-negative");
+        decompositionResponse.setTraceId("trace-negative");
+        decompositionResponse.setDecompositionComplete(true);
+        decompositionResponse.setStories(List.of(story));
+        when(decompositionService.decompose(any(DecompositionRequest.class))).thenReturn(decompositionResponse);
+
+        mockMvc.perform(post("/api/intake/complete-to-github")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "requestId": "req-negative",
+                                  "traceId": "trace-negative",
+                                  "structuredData": {
+                                    "description": "Type is intentionally missing for validation path coverage."
+                                  }
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.requestId").value("req-negative"))
+                .andExpect(jsonPath("$.traceId").value("trace-negative"))
+                .andExpect(jsonPath("$.issuesCreated").value(false));
+
+        verify(decompositionService).decompose(any(DecompositionRequest.class));
+        verify(gitHubIssueCreationService, never()).createFromDecomposition(any(GitHubIssueCreateRequest.class));
     }
 }

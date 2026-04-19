@@ -94,7 +94,24 @@ class IntakeChatControllerTest {
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals("trace-xyz", response.getBody().getTraceId());
+        assertTrue(response.getBody().getEvents().isEmpty());
         verify(intakeTraceabilityAgent).readTraceEvents("trace-xyz");
+    }
+
+    @Test
+    void trace_withWhitespaceOnlyTraceId_readsUsingEmptyNormalizedId() {
+        IntakeChatService intakeChatService = mock(IntakeChatService.class);
+        IntakeTraceabilityAgent intakeTraceabilityAgent = mock(IntakeTraceabilityAgent.class);
+        IntakeChatController controller = new IntakeChatController(intakeChatService, intakeTraceabilityAgent);
+
+        when(intakeTraceabilityAgent.readTraceEvents("")).thenReturn(List.of());
+
+        ResponseEntity<DecisionTraceResponse> response = controller.trace("   ");
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals("", response.getBody().getTraceId());
+        assertTrue(response.getBody().getEvents().isEmpty());
+        verify(intakeTraceabilityAgent).readTraceEvents("");
     }
 
     private IntakeChatRequest sampleRequest(String traceId) {
