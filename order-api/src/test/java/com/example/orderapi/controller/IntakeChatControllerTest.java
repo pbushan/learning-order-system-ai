@@ -108,6 +108,8 @@ class IntakeChatControllerTest {
         ResponseEntity<DecisionTraceResponse> response = controller.trace("   ");
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("", response.getBody().getTraceId());
+        assertTrue(response.getBody().getEvents().isEmpty());
         verify(intakeTraceabilityAgent, never()).readTraceEvents(anyString());
     }
 

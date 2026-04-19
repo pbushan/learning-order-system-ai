@@ -47,7 +47,10 @@ public class IntakeChatController {
     public ResponseEntity<DecisionTraceResponse> trace(@PathVariable String traceId) {
         String normalizedTraceId = traceId != null ? traceId.trim() : "";
         if (!StringUtils.hasText(normalizedTraceId)) {
-            return ResponseEntity.badRequest().build();
+            DecisionTraceResponse response = new DecisionTraceResponse();
+            response.setTraceId("");
+            response.setEvents(Collections.emptyList());
+            return ResponseEntity.badRequest().body(response);
         }
         DecisionTraceResponse response = new DecisionTraceResponse();
         response.setTraceId(normalizedTraceId);

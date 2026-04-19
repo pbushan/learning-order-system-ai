@@ -227,7 +227,9 @@ class IntakeFlowIntegrationTest {
     @Test
     void traceEndpoint_returnsBadRequestWhenTraceIdIsWhitespace() throws Exception {
         mockMvc.perform(get("/api/intake/trace/{traceId}", "   "))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.traceId").value(""))
+                .andExpect(jsonPath("$.events").isArray());
 
         verify(intakeTraceabilityAgent, never()).readTraceEvents(any(String.class));
     }
