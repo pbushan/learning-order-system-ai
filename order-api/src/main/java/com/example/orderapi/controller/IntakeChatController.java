@@ -9,6 +9,7 @@ import com.example.orderapi.service.IntakeTraceabilityAgent;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Collections;
@@ -44,9 +45,16 @@ public class IntakeChatController {
 
     @GetMapping("/trace/{traceId}")
     public ResponseEntity<DecisionTraceResponse> trace(@PathVariable String traceId) {
+        String normalizedTraceId = traceId != null ? traceId.trim() : "";
+        if (!StringUtils.hasText(normalizedTraceId)) {
+            DecisionTraceResponse response = new DecisionTraceResponse();
+            response.setTraceId("");
+            response.setEvents(Collections.emptyList());
+            return ResponseEntity.badRequest().body(response);
+        }
         DecisionTraceResponse response = new DecisionTraceResponse();
-        response.setTraceId(traceId != null ? traceId.trim() : "");
-        response.setEvents(intakeTraceabilityAgent.readTraceEvents(traceId));
+        response.setTraceId(normalizedTraceId);
+        response.setEvents(intakeTraceabilityAgent.readTraceEvents(normalizedTraceId));
         return ResponseEntity.ok(response);
     }
 

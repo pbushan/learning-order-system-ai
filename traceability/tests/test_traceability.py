@@ -1,14 +1,32 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
 from traceability import append_trace_event, create_trace_event, create_trace_id, read_trace_events
+from traceability.store import resolve_trace_log_path
 
 
 class TraceabilityFoundationTest(unittest.TestCase):
+    def test_resolve_trace_log_path_prefers_explicit_path_then_env(self) -> None:
+        explicit_input = Path("traceability/audit/custom.jsonl")
+        explicit = resolve_trace_log_path(explicit_input)
+        self.assertEqual(explicit, explicit_input.resolve())
+
+        original = os.environ.get("TRACEABILITY_LOG_PATH")
+        try:
+            os.environ["TRACEABILITY_LOG_PATH"] = "traceability/audit/from-env.jsonl"
+            resolved = resolve_trace_log_path()
+            self.assertEqual(resolved, Path("traceability/audit/from-env.jsonl").resolve())
+        finally:
+            if original is None:
+                os.environ.pop("TRACEABILITY_LOG_PATH", None)
+            else:
+                os.environ["TRACEABILITY_LOG_PATH"] = original
+
     def test_create_trace_id_uses_prefix_and_unique_suffix(self) -> None:
         first = create_trace_id("intake")
         second = create_trace_id("intake")
@@ -257,6 +275,36 @@ class TraceabilityFoundationTest(unittest.TestCase):
             path.write_text("{bad-json}\n", encoding="utf-8")
             with self.assertRaises(ValueError):
                 read_trace_events(trace_id="trace-123", path=path, strict=True)
+
+    def test_read_filters_with_trace_and_session_together(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decision-trace.jsonl"
+            event = create_trace_event(
+                trace_id="trace-123",
+                session_id="session-abc",
+                correlation_id="corr-1",
+                event_type="intake.received",
+                status="recorded",
+                actor="intake-api",
+                summary="match",
+                timestamp="2026-04-16T10:00:00+00:00",
+            )
+            other_session = create_trace_event(
+                trace_id="trace-123",
+                session_id="session-other",
+                correlation_id="corr-2",
+                event_type="intake.received",
+                status="recorded",
+                actor="intake-api",
+                summary="other session",
+                timestamp="2026-04-16T10:00:01+00:00",
+            )
+            append_trace_event(event, path)
+            append_trace_event(other_session, path)
+
+            events = read_trace_events(trace_id="trace-123", session_id="session-abc", path=path)
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].correlation_id, "corr-1")
 
 
 if __name__ == "__main__":

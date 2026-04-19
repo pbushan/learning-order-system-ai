@@ -18,6 +18,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class IntakeChatControllerTest {
@@ -79,6 +81,37 @@ class IntakeChatControllerTest {
         assertEquals("trace-123", response.getBody().getTraceId());
         assertEquals(1, response.getBody().getEvents().size());
         assertEquals("intake.session.started", response.getBody().getEvents().get(0).getEventType());
+    }
+
+    @Test
+    void trace_trimsTraceIdBeforeReadingEvents() {
+        IntakeChatService intakeChatService = mock(IntakeChatService.class);
+        IntakeTraceabilityAgent intakeTraceabilityAgent = mock(IntakeTraceabilityAgent.class);
+        IntakeChatController controller = new IntakeChatController(intakeChatService, intakeTraceabilityAgent);
+
+        when(intakeTraceabilityAgent.readTraceEvents("trace-xyz")).thenReturn(List.of());
+
+        ResponseEntity<DecisionTraceResponse> response = controller.trace("  trace-xyz  ");
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals("trace-xyz", response.getBody().getTraceId());
+        assertTrue(response.getBody().getEvents().isEmpty());
+        verify(intakeTraceabilityAgent).readTraceEvents("trace-xyz");
+        verify(intakeTraceabilityAgent, never()).readTraceEvents("  trace-xyz  ");
+    }
+
+    @Test
+    void trace_withWhitespaceOnlyTraceId_returnsBadRequest() {
+        IntakeChatService intakeChatService = mock(IntakeChatService.class);
+        IntakeTraceabilityAgent intakeTraceabilityAgent = mock(IntakeTraceabilityAgent.class);
+        IntakeChatController controller = new IntakeChatController(intakeChatService, intakeTraceabilityAgent);
+
+        ResponseEntity<DecisionTraceResponse> response = controller.trace("   ");
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("", response.getBody().getTraceId());
+        assertTrue(response.getBody().getEvents().isEmpty());
+        verify(intakeTraceabilityAgent, never()).readTraceEvents(anyString());
     }
 
     private IntakeChatRequest sampleRequest(String traceId) {
