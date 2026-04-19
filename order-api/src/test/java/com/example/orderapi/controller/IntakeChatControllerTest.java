@@ -97,6 +97,7 @@ class IntakeChatControllerTest {
         assertEquals("trace-xyz", response.getBody().getTraceId());
         assertTrue(response.getBody().getEvents().isEmpty());
         verify(intakeTraceabilityAgent).readTraceEvents("trace-xyz");
+        verify(intakeTraceabilityAgent, never()).readTraceEvents("  trace-xyz  ");
     }
 
     @Test
