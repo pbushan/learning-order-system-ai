@@ -29,7 +29,7 @@ import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.blankString;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -111,7 +111,7 @@ class IntakeFlowIntegrationTest {
         DecisionTraceEventResponse eventC = new DecisionTraceEventResponse();
         eventC.setTraceId("trace-flow-1");
         eventC.setEventType("intake.github.issue-creation.completed");
-        when(intakeTraceabilityAgent.readTraceEvents(anyString())).thenReturn(List.of(eventA, eventB, eventC));
+        when(intakeTraceabilityAgent.readTraceEvents(eq("trace-flow-1"))).thenReturn(List.of(eventA, eventB, eventC));
 
         mockMvc.perform(post("/api/intake/chat")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -161,6 +161,18 @@ class IntakeFlowIntegrationTest {
         org.junit.jupiter.api.Assertions.assertEquals("req-flow-1", capturedDecompositionRequest.getRequestId());
         org.junit.jupiter.api.Assertions.assertEquals("trace-flow-1", capturedDecompositionRequest.getTraceId());
         org.junit.jupiter.api.Assertions.assertEquals("bug", capturedDecompositionRequest.getStructuredData().getType());
+
+        ArgumentCaptor<String> intakeRequestIdCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<IntakeChatRequest> intakeChatRequestCaptor = ArgumentCaptor.forClass(IntakeChatRequest.class);
+        verify(intakeChatService).chat(intakeRequestIdCaptor.capture(), intakeChatRequestCaptor.capture());
+        org.junit.jupiter.api.Assertions.assertFalse(intakeRequestIdCaptor.getValue().isBlank());
+        IntakeChatRequest capturedChatRequest = intakeChatRequestCaptor.getValue();
+        org.junit.jupiter.api.Assertions.assertEquals(1, capturedChatRequest.getMessages().size());
+        org.junit.jupiter.api.Assertions.assertEquals("user", capturedChatRequest.getMessages().get(0).getRole());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "Checkout fails when I place an order.",
+                capturedChatRequest.getMessages().get(0).getContent()
+        );
 
         ArgumentCaptor<GitHubIssueCreateRequest> issueRequestCaptor = ArgumentCaptor.forClass(GitHubIssueCreateRequest.class);
         verify(gitHubIssueCreationService).createFromDecomposition(issueRequestCaptor.capture());
