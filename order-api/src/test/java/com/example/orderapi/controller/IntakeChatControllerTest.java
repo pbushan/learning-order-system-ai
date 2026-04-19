@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -99,19 +100,15 @@ class IntakeChatControllerTest {
     }
 
     @Test
-    void trace_withWhitespaceOnlyTraceId_readsUsingEmptyNormalizedId() {
+    void trace_withWhitespaceOnlyTraceId_returnsBadRequest() {
         IntakeChatService intakeChatService = mock(IntakeChatService.class);
         IntakeTraceabilityAgent intakeTraceabilityAgent = mock(IntakeTraceabilityAgent.class);
         IntakeChatController controller = new IntakeChatController(intakeChatService, intakeTraceabilityAgent);
 
-        when(intakeTraceabilityAgent.readTraceEvents("")).thenReturn(List.of());
-
         ResponseEntity<DecisionTraceResponse> response = controller.trace("   ");
 
-        assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertEquals("", response.getBody().getTraceId());
-        assertTrue(response.getBody().getEvents().isEmpty());
-        verify(intakeTraceabilityAgent).readTraceEvents("");
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        verify(intakeTraceabilityAgent, never()).readTraceEvents(anyString());
     }
 
     private IntakeChatRequest sampleRequest(String traceId) {
