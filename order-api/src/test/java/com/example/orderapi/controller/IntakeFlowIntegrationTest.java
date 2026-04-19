@@ -26,9 +26,11 @@ import org.mockito.ArgumentCaptor;
 import java.util.List;
 
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.blankString;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -229,8 +231,25 @@ class IntakeFlowIntegrationTest {
         mockMvc.perform(get("/api/intake/trace/{traceId}", "   "))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.traceId").value(""))
-                .andExpect(jsonPath("$.events").isArray());
+                .andExpect(jsonPath("$.events", hasSize(0)));
 
         verify(intakeTraceabilityAgent, never()).readTraceEvents(any(String.class));
+    }
+
+    @Test
+    void traceEndpoint_trimsTraceIdBeforeDownstreamRead_andNeverUsesRawPathValue() throws Exception {
+        DecisionTraceEventResponse event = new DecisionTraceEventResponse();
+        event.setTraceId("trace-flow-1");
+        event.setEventType("intake.session.started");
+        when(intakeTraceabilityAgent.readTraceEvents(eq("trace-flow-1"))).thenReturn(List.of(event));
+
+        mockMvc.perform(get("/api/intake/trace/{traceId}", "  trace-flow-1  "))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.traceId").value("trace-flow-1"))
+                .andExpect(jsonPath("$.events", hasSize(1)))
+                .andExpect(jsonPath("$.events[0].eventType").value("intake.session.started"));
+
+        verify(intakeTraceabilityAgent).readTraceEvents("trace-flow-1");
+        verify(intakeTraceabilityAgent, never()).readTraceEvents("  trace-flow-1  ");
     }
 }
