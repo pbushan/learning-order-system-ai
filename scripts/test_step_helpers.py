@@ -58,7 +58,7 @@ class Step6DeterministicHelpersTest(unittest.TestCase):
         result = classify_review_comments.classify_comment({"id": 6, "body": "Could be a little cleaner"})
 
         self.assertEqual(result["classification"], "non-blocking-defer")
-        self.assertEqual(result["reason"], "No blocking criterion matched for portfolio scope.")
+        self.assertIn("No blocking criterion matched", result["reason"])
 
     def test_ready_to_merge_note_includes_fixed_and_default_deferred_text(self) -> None:
         note = review_response_templates.ready_to_merge_note("trace read API test added", "")

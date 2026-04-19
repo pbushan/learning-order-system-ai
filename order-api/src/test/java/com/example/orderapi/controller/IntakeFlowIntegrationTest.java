@@ -223,4 +223,12 @@ class IntakeFlowIntegrationTest {
         verify(decompositionService).decompose(any(DecompositionRequest.class));
         verify(gitHubIssueCreationService, never()).createFromDecomposition(any(GitHubIssueCreateRequest.class));
     }
+
+    @Test
+    void traceEndpoint_returnsBadRequestWhenTraceIdIsWhitespace() throws Exception {
+        mockMvc.perform(get("/api/intake/trace/{traceId}", "   "))
+                .andExpect(status().isBadRequest());
+
+        verify(intakeTraceabilityAgent, never()).readTraceEvents(any(String.class));
+    }
 }
