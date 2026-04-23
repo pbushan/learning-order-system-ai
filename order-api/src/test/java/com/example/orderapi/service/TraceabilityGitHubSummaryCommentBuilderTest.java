@@ -1,5 +1,6 @@
 package com.example.orderapi.service;
 
+import com.example.orderapi.dto.DecisionTraceEventResponse;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -46,5 +47,25 @@ class TraceabilityGitHubSummaryCommentBuilderTest {
         assertTrue(comment.contains("- Classification: `bug`"));
         assertTrue(comment.contains("- Rationale summary:"));
         assertTrue(comment.endsWith("..."));
+    }
+
+    @Test
+    void buildsDecisionTraceSummaryAndFallsBackForMissingFields() {
+        DecisionTraceEventResponse event = new DecisionTraceEventResponse();
+        event.setEventType("decision");
+        event.setStatus("approved");
+        event.setActor("  policy-engine  ");
+        event.setSummary("  Approved after automated checks passed.  ");
+
+        String summary = builder.buildDecisionTraceSummary(event);
+
+        assertTrue(summary.contains("decision"));
+        assertTrue(summary.contains("status=approved"));
+        assertTrue(summary.contains("actor=policy-engine"));
+        assertTrue(summary.contains("summary=Approved after automated checks passed."));
+
+        DecisionTraceEventResponse emptyEvent = new DecisionTraceEventResponse();
+        assertTrue(builder.buildDecisionTraceSummary(emptyEvent).contains("decision-event"));
+        assertTrue(builder.buildDecisionTraceSummary(null).contains("unavailable"));
     }
 }
