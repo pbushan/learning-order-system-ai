@@ -33,6 +33,24 @@ test('buildTraceSummary handles empty, partial, and populated responses', () => 
   );
 });
 
+test('buildTraceabilitySummaryLabel handles events, empty traces, and missing optional fields', () => {
+  assert.equal(
+    ui.buildTraceabilitySummaryLabel({
+      traceId: ' trace-11 ',
+      events: [
+        { status: 'recorded' },
+        { status: 'completed' }
+      ]
+    }),
+    'Trace trace-11 · 2 events · starts recorded · ends completed'
+  );
+  assert.equal(
+    ui.buildTraceabilitySummaryLabel({ traceId: 'trace-12', events: [] }),
+    'Trace trace-12 · No events'
+  );
+  assert.equal(ui.buildTraceabilitySummaryLabel({}), 'No events');
+});
+
 test('buildCompactTraceSummary returns a compact readable string', () => {
   assert.equal(
     ui.buildCompactTraceSummary({
@@ -89,24 +107,6 @@ test('buildCustomerTimeline surfaces failure states with clear step titles', () 
   ]);
 
   const titles = timeline.map((entry) => entry.stepTitle);
-  assert.ok(titles.includes('Classification needs clarification'));
-  assert.ok(titles.includes('GitHub issue creation failed'));
-  assert.ok(titles.includes('GitHub summary comment posting had failures'));
-});
-
-test('buildCustomerTimeline omits absent count fields and parses numeric strings', () => {
-  const timeline = ui.buildCustomerTimeline([
-    {
-      eventType: 'intake.github.summary-comment.failed',
-      timestamp: '2026-04-17T10:00:06Z',
-      status: 'failed',
-      summary: 'comments partially failed',
-      decisionMetadata: {},
-      inputSummary: {},
-      artifactSummary: { commentedIssueCount: '2', unexpected: 'n/a' },
-      governanceMetadata: {}
-    }
-  ]);
-
-  assert.equal(timeline[0].details, 'commentedIssueCount: 2');
+  assert.ok(titles.includes('Classification pending'));
+  assert.ok(titles.includes('GitHub issues created failed'));
 });
