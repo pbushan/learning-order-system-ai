@@ -5,9 +5,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.hamcrest.Matchers.is;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -19,6 +21,34 @@ class ProductControllerIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Test
+    void productsTable_shouldUseWeightValueColumnName() {
+        Integer weightValueColumnCount = jdbcTemplate.queryForObject(
+                """
+                        SELECT COUNT(*)
+                        FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_NAME = 'PRODUCTS'
+                          AND COLUMN_NAME = 'WEIGHT_VALUE'
+                        """,
+                Integer.class
+        );
+        Integer valueColumnCount = jdbcTemplate.queryForObject(
+                """
+                        SELECT COUNT(*)
+                        FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_NAME = 'PRODUCTS'
+                          AND COLUMN_NAME = 'VALUE'
+                        """,
+                Integer.class
+        );
+
+        assertEquals(1, weightValueColumnCount);
+        assertEquals(0, valueColumnCount);
+    }
 
     @Test
     void createProduct_shouldReturnCreatedProduct() throws Exception {
