@@ -13,6 +13,7 @@ test('normalizeTraceResponse sorts events and keeps traceId', () => {
   assert.equal(normalized.traceId, 'trace-1');
   assert.equal(normalized.events[0].eventType, 'intake.session.started');
   assert.equal(normalized.summary, 'Trace trace-1 · 2 events · starts completed · ends recorded');
+  assert.equal(normalized.summaryLabel, 'Decision trace summary: Trace trace-1 · 2 events · starts completed · ends recorded');
 });
 
 test('buildTraceSummary handles empty, partial, and populated responses', () => {
@@ -31,6 +32,18 @@ test('buildTraceSummary handles empty, partial, and populated responses', () => 
     }),
     '2 events · starts recorded'
   );
+});
+
+test('buildTraceSummaryLabel returns a concise label with fallback for missing data', () => {
+  assert.equal(
+    ui.buildTraceSummaryLabel({
+      traceId: 'trace-11',
+      events: [{ status: 'recorded' }, { status: 'completed' }]
+    }),
+    'Decision trace summary: Trace trace-11 · 2 events · starts recorded · ends completed'
+  );
+  assert.equal(ui.buildTraceSummaryLabel(null), 'Decision trace summary unavailable');
+  assert.equal(ui.buildTraceSummaryLabel({}), 'Decision trace summary unavailable');
 });
 
 test('buildCompactTraceSummary returns a compact readable string', () => {

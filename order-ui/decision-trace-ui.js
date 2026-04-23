@@ -18,12 +18,13 @@
         const traceId = typeof response?.traceId === "string" ? response.traceId.trim() : "";
         const events = Array.isArray(response?.events) ? response.events.filter(Boolean).map(normalizeEvent) : [];
         const summary = buildTraceSummary(response);
+        const summaryLabel = buildTraceSummaryLabel(response);
         events.sort((left, right) => {
             const leftTime = Date.parse(left.timestamp || "") || 0;
             const rightTime = Date.parse(right.timestamp || "") || 0;
             return leftTime - rightTime;
         });
-        return { traceId, events, summary };
+        return { traceId, events, summary, summaryLabel };
     }
 
     function normalizeEvent(event) {
@@ -41,6 +42,14 @@
             artifactSummary: asObject(event?.artifactSummary),
             governanceMetadata: asObject(event?.governanceMetadata)
         };
+    }
+
+    function buildTraceSummaryLabel(response) {
+        const summary = buildTraceSummary(response);
+        if (summary) {
+            return `Decision trace summary: ${summary}`;
+        }
+        return "Decision trace summary unavailable";
     }
 
     function buildTraceSummary(response) {
@@ -173,32 +182,23 @@
             return { key: "github_issues", title: "GitHub issues created" };
         }
         if (eventType.startsWith("intake.github.summary-comment")) {
-            return { key: "github_comments", title: "GitHub trace summary comments" };
+            return { key: "github_comments", title: "GitHub summary comment posted" };
         }
         return { key: "", title: readableEventType(eventType) };
     }
 
-    function resolveStepTitle(baseTitle, event) {
-        const eventType = toText(event?.eventType);
-        const status = (event?.status ?? "").toString().toLowerCase();
-        const failed = isFailedEvent(status, eventType);
-        if (eventType.startsWith("intake.classification") && status === "pending") {
+    function resolveStepTitle(stepTitle, event) {
+        const status = toText(event?.status).toLowerCase();
+        if (stepTitle === "Classified as bug or feature" && status === "pending") {
             return "Classification needs clarification";
         }
-        if (eventType.startsWith("intake.decomposition") && failed) {
-            return "Decomposition failed";
-        }
-        if (eventType.startsWith("intake.github.issue-creation") && failed) {
+        if (stepTitle === "GitHub issues created" && status === "failed") {
             return "GitHub issue creation failed";
         }
-        if (eventType.startsWith("intake.github.summary-comment") && failed) {
+        if (stepTitle === "GitHub summary comment posted" && status === "failed") {
             return "GitHub summary comment posting had failures";
         }
-        return baseTitle;
-    }
-
-    function isFailedEvent(status, eventType) {
-        return status === "failed" || status === "error" || eventType.endsWith(".failed");
+        return stepTitle;
     }
 
     function extractIssueLinks(event) {
@@ -206,27 +206,26 @@
         return Array.isArray(links) ? links.filter((link) => typeof link === "string" && link.trim()) : [];
     }
 
-    function compactDetails(parts) {
-        return Object.entries(parts)
-            .filter(([, value]) => Array.isArray(value) ? value.length > 0 : Boolean(value))
-            .map(([key, value]) => Array.isArray(value) ? `${key}: ${value.join(", ")}` : `${key}: ${value}`)
+    function compactDetails(details) {
+        return Object.entries(details)
+            .filter(([, value]) => value !== undefined && value !== null && value !== "" && !(Array.isArray(value) && value.length === 0))
+            .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(", ") : value}`)
             .join(" · ");
     }
 
-    function optionalCount(summary, key) {
-        const value = summary?.[key];
+    function optionalCount(object, key) {
+        const value = object?.[key];
         if (typeof value === "number" && Number.isFinite(value)) {
             return value;
         }
-        if (typeof value === "string" && value.trim() !== "") {
-            const parsed = Number(value);
-            return Number.isFinite(parsed) ? parsed : null;
+        if (typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value))) {
+            return Number(value);
         }
         return null;
     }
 
     function readableEventType(eventType) {
-        return toText(eventType).replace(/[._-]+/g, " ").trim() || "Trace event";
+        return toText(eventType).replace(/\./g, " ");
     }
 
     function toText(value) {
@@ -239,20 +238,10 @@
 
     return {
         normalizeTraceResponse,
-        normalizeEvent,
         buildTraceSummary,
+        buildTraceSummaryLabel,
         buildCompactTraceSummary,
         buildCustomerTimeline,
-        buildEngineerTimeline,
-        buildTraceItem,
-        classifyStep,
-        resolveStepTitle,
-        isFailedEvent,
-        extractIssueLinks,
-        compactDetails,
-        optionalCount,
-        readableEventType,
-        toText,
-        asObject
+        buildEngineerTimeline
     };
 }));
