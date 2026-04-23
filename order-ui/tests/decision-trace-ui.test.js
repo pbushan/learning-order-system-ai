@@ -12,6 +12,12 @@ test('normalizeTraceResponse sorts events and keeps traceId', () => {
   });
   assert.equal(normalized.traceId, 'trace-1');
   assert.equal(normalized.events[0].eventType, 'intake.session.started');
+  assert.equal(Object.prototype.hasOwnProperty.call(normalized, 'summary'), false);
+});
+
+test('summary helper exports are intentionally absent after revert', () => {
+  assert.equal(typeof ui.buildTraceSummary, 'undefined');
+  assert.equal(typeof ui.buildCompactTraceSummary, 'undefined');
 });
 
 test('buildCustomerTimeline presents lifecycle steps compactly', () => {
@@ -121,6 +127,10 @@ test('formatTimestamp returns original value when input is not parseable', () =>
   assert.equal(ui.formatTimestamp('not-a-date'), 'not-a-date');
 });
 
+test('formatTimestamp returns deterministic UTC ISO output for parseable timestamps', () => {
+  assert.equal(ui.formatTimestamp('2026-04-17T10:00:00Z'), '2026-04-17T10:00:00.000Z');
+});
+
 test('normalizeTraceResponse trims traceId and string event fields', () => {
   const normalized = ui.normalizeTraceResponse({
     traceId: ' trace-abc ',
@@ -143,4 +153,28 @@ test('normalizeTraceResponse trims traceId and string event fields', () => {
   assert.equal(normalized.events[0].summary, 'hi');
   assert.equal(normalized.events[0].actor, 'intake-api');
   assert.equal(normalized.events[0].correlationId, 'corr-1');
+});
+
+test('buildCustomerTimeline keeps non-numeric count strings and omits nullish values', () => {
+  const timeline = ui.buildCustomerTimeline([
+    {
+      eventType: 'intake.github.summary-comment.failed',
+      timestamp: '2026-04-17T10:00:09Z',
+      status: 'failed',
+      summary: 'mixed value details',
+      decisionMetadata: {},
+      inputSummary: {},
+      artifactSummary: {
+        issueCount: null,
+        failedIssueCount: '',
+        unknownFailedIssueCount: 'n/a'
+      },
+      governanceMetadata: {}
+    }
+  ]);
+
+  assert.equal(timeline.length, 1);
+  assert.equal(Object.prototype.hasOwnProperty.call(timeline[0].details, 'issueCount'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(timeline[0].details, 'failedIssueCount'), false);
+  assert.equal(timeline[0].details.unknownFailedIssueCount, 'n/a');
 });

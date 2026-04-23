@@ -161,10 +161,10 @@
 
     function isFailedEvent(status, eventType) {
         const normalizedStatus = (status || "").toLowerCase();
-        if (normalizedStatus === "failed" || normalizedStatus.startsWith("fail") || normalizedStatus === "error") {
+        if (normalizedStatus === "failed" || normalizedStatus === "error") {
             return true;
         }
-        return /\.failed$|failed$/i.test(eventType || "");
+        return /(?:^|[.-])failed$/i.test(eventType || "");
     }
 
     function readableEventType(eventType) {
@@ -197,7 +197,7 @@
         if (Number.isNaN(parsed.getTime())) {
             return timestamp;
         }
-        return parsed.toLocaleString();
+        return parsed.toISOString();
     }
 
     function toText(value) {
