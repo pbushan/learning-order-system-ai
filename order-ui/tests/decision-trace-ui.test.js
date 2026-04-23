@@ -105,6 +105,24 @@ test('buildCustomerTimeline detects failure when eventType ends with failed with
   assert.equal(timeline[0].stepTitle, 'GitHub summary comment posting had failures');
 });
 
+test('buildCustomerTimeline does not classify non-failed status values as failure', () => {
+  const timeline = ui.buildCustomerTimeline([
+    {
+      eventType: 'intake.github.summary-comment.completed',
+      timestamp: '2026-04-17T10:00:07Z',
+      status: 'failure',
+      summary: 'non-standard status text',
+      decisionMetadata: {},
+      inputSummary: {},
+      artifactSummary: {},
+      governanceMetadata: {}
+    }
+  ]);
+
+  assert.equal(timeline.length, 1);
+  assert.equal(timeline[0].stepTitle, 'GitHub trace summary comments');
+});
+
 test('buildCustomerTimeline falls back to issueUrl when issueLinks are not present', () => {
   const timeline = ui.buildCustomerTimeline([
     {
@@ -153,6 +171,28 @@ test('normalizeTraceResponse trims traceId and string event fields', () => {
   assert.equal(normalized.events[0].summary, 'hi');
   assert.equal(normalized.events[0].actor, 'intake-api');
   assert.equal(normalized.events[0].correlationId, 'corr-1');
+});
+
+test('normalizeTraceResponse keeps normalized timestamps stable for sorting input', () => {
+  const normalized = ui.normalizeTraceResponse({
+    traceId: 'trace-time',
+    events: [
+      {
+        eventType: 'intake.github.issue-creation.completed',
+        timestamp: '2026-04-17T10:00:02Z',
+        status: 'completed'
+      },
+      {
+        eventType: 'intake.session.started',
+        timestamp: '2026-04-17T10:00:00.000Z',
+        status: 'recorded'
+      }
+    ]
+  });
+
+  assert.equal(normalized.events[0].eventType, 'intake.session.started');
+  assert.equal(normalized.events[0].timestamp, '2026-04-17T10:00:00.000Z');
+  assert.equal(normalized.events[1].timestamp, '2026-04-17T10:00:02Z');
 });
 
 test('buildCustomerTimeline keeps non-numeric count strings and omits nullish values', () => {
