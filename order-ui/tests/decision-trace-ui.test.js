@@ -33,21 +33,6 @@ test('buildTraceSummary handles empty, partial, and populated responses', () => 
   );
 });
 
-test('buildCompactTraceSummary returns a compact readable string', () => {
-  assert.equal(
-    ui.buildCompactTraceSummary({
-      traceId: 'trace-9',
-      eventType: 'intake.classification.completed',
-      status: 'accepted',
-      actor: 'classifier-service',
-      decisionMetadata: { sourceType: 'bug', classifiedType: 'feature' }
-    }),
-    'Trace trace-9 · intake.classification.completed · accepted · by classifier-service · bug → feature'
-  );
-  assert.equal(ui.buildCompactTraceSummary({ traceId: 'trace-10' }), 'Trace trace-10');
-  assert.equal(ui.buildCompactTraceSummary({}), '');
-});
-
 test('buildCustomerTimeline presents lifecycle steps compactly', () => {
   const timeline = ui.buildCustomerTimeline([
     { eventType: 'intake.session.started', timestamp: '2026-04-17T10:00:00Z', status: 'recorded', summary: 'start', decisionMetadata: {}, inputSummary: {}, artifactSummary: {}, governanceMetadata: {} },
@@ -108,5 +93,25 @@ test('buildCustomerTimeline omits absent count fields and parses numeric strings
     }
   ]);
 
-  assert.equal(timeline[0].details, 'commentedIssueCount: 2');
+  assert.equal(timeline.length, 1);
+  assert.equal(timeline[0].details.commentedIssueCount, 2);
+  assert.equal(Object.prototype.hasOwnProperty.call(timeline[0].details, 'issueCount'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(timeline[0].details, 'failedIssueCount'), false);
+});
+
+test('buildCustomerTimeline detects failure when eventType ends with failed without dot delimiter', () => {
+  const timeline = ui.buildCustomerTimeline([
+    {
+      eventType: 'intake.github.summary-comment-failed',
+      timestamp: '2026-04-17T10:00:07Z',
+      status: 'completed',
+      summary: 'legacy failed suffix event',
+      decisionMetadata: {},
+      inputSummary: {},
+      artifactSummary: {},
+      governanceMetadata: {}
+    }
+  ]);
+
+  assert.equal(timeline[0].stepTitle, 'GitHub summary comment posting had failures');
 });

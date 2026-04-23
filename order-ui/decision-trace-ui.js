@@ -59,27 +59,6 @@
         return parts.join(" · ");
     }
 
-    function buildCompactTraceSummary(trace) {
-        const parts = [];
-        const traceId = toText(trace?.traceId);
-        const eventType = toText(trace?.eventType);
-        const status = toText(trace?.status);
-        const actor = toText(trace?.actor);
-
-        if (traceId) parts.push(`Trace ${traceId}`);
-        if (eventType) parts.push(eventType);
-        if (status) parts.push(status);
-        if (actor) parts.push(`by ${actor}`);
-
-        const sourceType = toText(trace?.decisionMetadata?.sourceType);
-        const classifiedType = toText(trace?.decisionMetadata?.classifiedType);
-        if (sourceType || classifiedType) {
-            parts.push([sourceType, classifiedType].filter(Boolean).join(" → "));
-        }
-
-        return parts.join(" · ");
-    }
-
     function buildCustomerTimeline(events) {
         const byStep = new Map();
         events.forEach((event) => {
@@ -198,35 +177,21 @@
     }
 
     function isFailedEvent(status, eventType) {
-        return status === "failed" || status === "error" || eventType.endsWith(".failed");
-    }
-
-    function extractIssueLinks(event) {
-        const links = event?.artifactSummary?.issueLinks;
-        return Array.isArray(links) ? links.filter((link) => typeof link === "string" && link.trim()) : [];
-    }
-
-    function compactDetails(parts) {
-        return Object.entries(parts)
-            .filter(([, value]) => Array.isArray(value) ? value.length > 0 : Boolean(value))
-            .map(([key, value]) => Array.isArray(value) ? `${key}: ${value.join(", ")}` : `${key}: ${value}`)
-            .join(" · ");
-    }
-
-    function optionalCount(summary, key) {
-        const value = summary?.[key];
-        if (typeof value === "number" && Number.isFinite(value)) {
-            return value;
+        const normalizedStatus = (status || "").toLowerCase();
+        if (normalizedStatus === "failed" || normalizedStatus.startsWith("fail") || normalizedStatus === "error") {
+            return true;
         }
-        if (typeof value === "string" && value.trim() !== "") {
-            const parsed = Number(value);
-            return Number.isFinite(parsed) ? parsed : null;
-        }
-        return null;
+        return /\.failed$|failed$/i.test(eventType || "");
     }
 
     function readableEventType(eventType) {
-        return toText(eventType).replace(/[._-]+/g, " ").trim() || "Trace event";
+        if (!eventType) {
+            return "Trace event";
+        }
+        return eventType
+            .replace(/\./g, " ")
+            .replace(/\-/g, " ")
+            .replace(/\b\w/g, (match) => match.toUpperCase());
     }
 
     function toText(value) {
@@ -237,22 +202,34 @@
         return value && typeof value === "object" && !Array.isArray(value) ? value : {};
     }
 
+    function compactDetails(details) {
+        return Object.fromEntries(Object.entries(details).filter(([, value]) => value !== "" && value !== null && value !== undefined && !(Array.isArray(value) && value.length === 0)));
+    }
+
+    function optionalCount(source, key) {
+        const value = source?.[key];
+        if (value === null || value === undefined || value === "") {
+            return undefined;
+        }
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : undefined;
+    }
+
+    function extractIssueLinks(event) {
+        const links = event?.artifactSummary?.issueLinks;
+        return Array.isArray(links) ? links.filter((link) => typeof link === "string" && link.trim()) : [];
+    }
+
     return {
         normalizeTraceResponse,
-        normalizeEvent,
         buildTraceSummary,
-        buildCompactTraceSummary,
+        normalizeEvent,
         buildCustomerTimeline,
         buildEngineerTimeline,
         buildTraceItem,
         classifyStep,
         resolveStepTitle,
         isFailedEvent,
-        extractIssueLinks,
-        compactDetails,
-        optionalCount,
-        readableEventType,
-        toText,
-        asObject
+        readableEventType
     };
 }));
