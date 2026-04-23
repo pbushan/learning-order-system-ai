@@ -8,7 +8,7 @@ import java.math.BigDecimal;
 @Embeddable
 public class ProductWeight {
 
-    @Column(nullable = false, precision = 10, scale = 4)
+    @Column(name = "weight_value", nullable = false, precision = 10, scale = 4)
     private BigDecimal value;
 
     @Column(name = "weight_unit", nullable = false, length = 16)
