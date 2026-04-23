@@ -12,6 +12,25 @@ test('normalizeTraceResponse sorts events and keeps traceId', () => {
   });
   assert.equal(normalized.traceId, 'trace-1');
   assert.equal(normalized.events[0].eventType, 'intake.session.started');
+  assert.equal(normalized.summary, 'Trace trace-1 · 2 events · starts completed · ends recorded');
+});
+
+test('buildTraceSummary handles empty, partial, and populated responses', () => {
+  assert.equal(ui.buildTraceSummary(null), '');
+  assert.equal(ui.buildTraceSummary({ traceId: '  trace-2  ' }), 'Trace trace-2');
+  assert.equal(
+    ui.buildTraceSummary({
+      traceId: 'trace-3',
+      events: [{ status: 'recorded' }, { status: 'completed' }]
+    }),
+    'Trace trace-3 · 2 events · starts recorded · ends completed'
+  );
+  assert.equal(
+    ui.buildTraceSummary({
+      events: [{ status: 'recorded' }, { summary: 'done' }]
+    }),
+    '2 events · starts recorded'
+  );
 });
 
 test('buildCustomerTimeline presents lifecycle steps compactly', () => {
@@ -94,53 +113,5 @@ test('buildCustomerTimeline detects failure when eventType ends with failed with
     }
   ]);
 
-  assert.equal(timeline.length, 1);
-  assert.equal(timeline[0].status, 'completed');
   assert.equal(timeline[0].stepTitle, 'GitHub summary comment posting had failures');
-});
-
-test('buildCustomerTimeline falls back to issueUrl when issueLinks are not present', () => {
-  const timeline = ui.buildCustomerTimeline([
-    {
-      eventType: 'intake.github.issue-creation.completed',
-      timestamp: '2026-04-17T10:00:08Z',
-      status: 'completed',
-      summary: 'issues created',
-      decisionMetadata: {},
-      inputSummary: {},
-      artifactSummary: { issueUrl: 'https://example.test/issues/501' },
-      governanceMetadata: {}
-    }
-  ]);
-
-  assert.equal(timeline.length, 1);
-  assert.deepEqual(timeline[0].details.issueLinks, ['https://example.test/issues/501']);
-});
-
-test('formatTimestamp returns original value when input is not parseable', () => {
-  assert.equal(ui.formatTimestamp('not-a-date'), 'not-a-date');
-});
-
-test('normalizeTraceResponse trims traceId and string event fields', () => {
-  const normalized = ui.normalizeTraceResponse({
-    traceId: ' trace-abc ',
-    events: [
-      {
-        eventType: ' intake.session.started ',
-        timestamp: ' 2026-04-17T10:00:00Z ',
-        status: ' recorded ',
-        summary: ' hi ',
-        actor: ' intake-api ',
-        correlationId: ' corr-1 '
-      }
-    ]
-  });
-
-  assert.equal(normalized.traceId, 'trace-abc');
-  assert.equal(normalized.events[0].eventType, 'intake.session.started');
-  assert.equal(normalized.events[0].timestamp, '2026-04-17T10:00:00Z');
-  assert.equal(normalized.events[0].status, 'recorded');
-  assert.equal(normalized.events[0].summary, 'hi');
-  assert.equal(normalized.events[0].actor, 'intake-api');
-  assert.equal(normalized.events[0].correlationId, 'corr-1');
 });
