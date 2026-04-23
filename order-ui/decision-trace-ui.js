@@ -80,6 +80,11 @@
         return parts.join(" · ");
     }
 
+    function buildTraceStateSummary(trace) {
+        const summary = buildCompactTraceSummary(trace);
+        return summary || "No trace events available";
+    }
+
     function buildCustomerTimeline(events) {
         const byStep = new Map();
         events.forEach((event) => {
@@ -128,16 +133,11 @@
                 stepTitle: resolvedTitle,
                 status: event.status || "recorded",
                 summary: event.summary || readableEventType(event.eventType),
-                timestamp: event.timestamp,
-                details: compactDetails({
-                    issueLinks,
-                    sourceType: toText(event.decisionMetadata?.sourceType),
-                    classifiedType: toText(event.decisionMetadata?.classifiedType),
-                    issueCount: optionalCount(event.artifactSummary, "issueCount"),
-                    commentedIssueCount: optionalCount(event.artifactSummary, "commentedIssueCount"),
-                    failedIssueCount: optionalCount(event.artifactSummary, "failedIssueCount"),
-                    unknownFailedIssueCount: optionalCount(event.artifactSummary, "unknownFailedIssueCount")
-                })
+                details: {
+                    traceId: event.traceId,
+                    actor: event.actor,
+                    issueLinks
+                }
             };
         }
 
@@ -145,7 +145,6 @@
             stepTitle: resolvedTitle,
             status: event.status || "recorded",
             summary: event.summary || readableEventType(event.eventType),
-            timestamp: event.timestamp,
             details: {
                 ...details,
                 issueLinks
@@ -154,51 +153,18 @@
     }
 
     function classifyStep(eventType) {
-        if (!eventType) {
-            return { key: "", title: "Trace event" };
-        }
-        if (eventType.startsWith("intake.session") || eventType.startsWith("intake.structured-data")) {
-            return { key: "intake_captured", title: "Intake captured" };
-        }
-        if (eventType.startsWith("intake.classification")) {
-            return { key: "classification", title: "Classified as bug or feature" };
-        }
-        if (eventType.startsWith("intake.decomposition")) {
-            return { key: "decomposition", title: "Decomposition completed" };
-        }
-        if (eventType.startsWith("intake.github.payload")) {
-            return { key: "github_payload", title: "GitHub payload prepared" };
-        }
-        if (eventType.startsWith("intake.github.issue-creation")) {
-            return { key: "github_issues", title: "GitHub issues created" };
-        }
-        if (eventType.startsWith("intake.github.summary-comment")) {
-            return { key: "github_comments", title: "GitHub trace summary comments" };
-        }
+        const type = toText(eventType).toLowerCase();
+        if (type.includes("session.started") || type.includes("intake.captured")) return { key: "intake_captured", title: "Intake captured" };
+        if (type.includes("classification")) return { key: "classification", title: "Classification" };
+        if (type.includes("decomposition")) return { key: "decomposition", title: "Decomposition" };
+        if (type.includes("github.payload")) return { key: "github_payload", title: "GitHub payload" };
+        if (type.includes("issue-creation")) return { key: "github_issues", title: "GitHub issues created" };
+        if (type.includes("summary-comment")) return { key: "github_comments", title: "GitHub comments" };
         return { key: "", title: readableEventType(eventType) };
     }
 
-    function resolveStepTitle(baseTitle, event) {
-        const eventType = toText(event?.eventType);
-        const status = (event?.status ?? "").toString().toLowerCase();
-        const failed = isFailedEvent(status, eventType);
-        if (eventType.startsWith("intake.classification") && status === "pending") {
-            return "Classification needs clarification";
-        }
-        if (eventType.startsWith("intake.decomposition") && failed) {
-            return "Decomposition failed";
-        }
-        if (eventType.startsWith("intake.github.issue-creation") && failed) {
-            return "GitHub issue creation failed";
-        }
-        if (eventType.startsWith("intake.github.summary-comment") && failed) {
-            return "GitHub summary comment posting had failures";
-        }
-        return baseTitle;
-    }
-
-    function isFailedEvent(status, eventType) {
-        return status === "failed" || status === "error" || eventType.endsWith(".failed");
+    function resolveStepTitle(stepTitle, event) {
+        return stepTitle || readableEventType(event?.eventType);
     }
 
     function extractIssueLinks(event) {
@@ -206,27 +172,8 @@
         return Array.isArray(links) ? links.filter((link) => typeof link === "string" && link.trim()) : [];
     }
 
-    function compactDetails(parts) {
-        return Object.entries(parts)
-            .filter(([, value]) => Array.isArray(value) ? value.length > 0 : Boolean(value))
-            .map(([key, value]) => Array.isArray(value) ? `${key}: ${value.join(", ")}` : `${key}: ${value}`)
-            .join(" · ");
-    }
-
-    function optionalCount(summary, key) {
-        const value = summary?.[key];
-        if (typeof value === "number" && Number.isFinite(value)) {
-            return value;
-        }
-        if (typeof value === "string" && value.trim() !== "") {
-            const parsed = Number(value);
-            return Number.isFinite(parsed) ? parsed : null;
-        }
-        return null;
-    }
-
     function readableEventType(eventType) {
-        return toText(eventType).replace(/[._-]+/g, " ").trim() || "Trace event";
+        return toText(eventType).replace(/[._-]+/g, " ").replace(/\b\w/g, (match) => match.toUpperCase()).trim();
     }
 
     function toText(value) {
@@ -242,15 +189,13 @@
         normalizeEvent,
         buildTraceSummary,
         buildCompactTraceSummary,
+        buildTraceStateSummary,
         buildCustomerTimeline,
         buildEngineerTimeline,
         buildTraceItem,
         classifyStep,
         resolveStepTitle,
-        isFailedEvent,
         extractIssueLinks,
-        compactDetails,
-        optionalCount,
         readableEventType,
         toText,
         asObject

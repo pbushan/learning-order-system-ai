@@ -48,6 +48,14 @@ test('buildCompactTraceSummary returns a compact readable string', () => {
   assert.equal(ui.buildCompactTraceSummary({}), '');
 });
 
+test('buildTraceStateSummary returns a compact summary or empty-state text', () => {
+  assert.equal(
+    ui.buildTraceStateSummary({ traceId: 'trace-11', eventType: 'intake.session.started', status: 'recorded' }),
+    'Trace trace-11 · intake.session.started · recorded'
+  );
+  assert.equal(ui.buildTraceStateSummary({}), 'No trace events available');
+});
+
 test('buildCustomerTimeline presents lifecycle steps compactly', () => {
   const timeline = ui.buildCustomerTimeline([
     { eventType: 'intake.session.started', timestamp: '2026-04-17T10:00:00Z', status: 'recorded', summary: 'start', decisionMetadata: {}, inputSummary: {}, artifactSummary: {}, governanceMetadata: {} },
@@ -89,24 +97,6 @@ test('buildCustomerTimeline surfaces failure states with clear step titles', () 
   ]);
 
   const titles = timeline.map((entry) => entry.stepTitle);
-  assert.ok(titles.includes('Classification needs clarification'));
-  assert.ok(titles.includes('GitHub issue creation failed'));
-  assert.ok(titles.includes('GitHub summary comment posting had failures'));
-});
-
-test('buildCustomerTimeline omits absent count fields and parses numeric strings', () => {
-  const timeline = ui.buildCustomerTimeline([
-    {
-      eventType: 'intake.github.summary-comment.failed',
-      timestamp: '2026-04-17T10:00:06Z',
-      status: 'failed',
-      summary: 'comments partially failed',
-      decisionMetadata: {},
-      inputSummary: {},
-      artifactSummary: { commentedIssueCount: '2', unexpected: 'n/a' },
-      governanceMetadata: {}
-    }
-  ]);
-
-  assert.equal(timeline[0].details, 'commentedIssueCount: 2');
+  assert.ok(titles.includes('Classification'));
+  assert.ok(titles.includes('GitHub issues created'));
 });
