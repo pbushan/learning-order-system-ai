@@ -27,19 +27,4 @@ public class DecisionTraceResponse {
     public void setEvents(List<DecisionTraceEventResponse> events) {
         this.events = events;
     }
-
-    public String buildConciseSummary() {
-        if (events == null || events.isEmpty()) {
-            return "No trace events available.";
-        }
-        StringBuilder builder = new StringBuilder();
-        builder.append("Trace ");
-        builder.append(traceId == null || traceId.isBlank() ? "unavailable" : traceId.trim());
-        builder.append(": ");
-        builder.append(events.get(0).buildConciseSummary());
-        if (events.size() > 1) {
-            builder.append(" (+").append(events.size() - 1).append(" more)");
-        }
-        return builder.toString();
-    }
 }

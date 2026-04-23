@@ -1,7 +1,6 @@
 package com.example.orderapi.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import org.springframework.util.StringUtils;
 
 import java.util.Map;
 
@@ -137,24 +136,5 @@ public class DecisionTraceEventResponse {
 
     public void setGovernanceMetadata(Map<String, Object> governanceMetadata) {
         this.governanceMetadata = governanceMetadata;
-    }
-
-    public String buildConciseSummary() {
-        StringBuilder builder = new StringBuilder();
-        appendPart(builder, eventType);
-        appendPart(builder, status);
-        appendPart(builder, actor);
-        appendPart(builder, summary);
-        return builder.length() == 0 ? "trace event details unavailable" : builder.toString();
-    }
-
-    private void appendPart(StringBuilder builder, String value) {
-        if (!StringUtils.hasText(value)) {
-            return;
-        }
-        if (builder.length() > 0) {
-            builder.append(" | ");
-        }
-        builder.append(value.trim());
     }
 }
