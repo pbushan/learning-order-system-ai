@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const ui = require('../decision-trace-ui.js');
 
 test('normalizeTraceResponse sorts events and keeps traceId', () => {
@@ -123,6 +125,24 @@ test('buildCustomerTimeline does not classify non-failed status values as failur
   assert.equal(timeline[0].stepTitle, 'GitHub trace summary comments');
 });
 
+test('buildCustomerTimeline does not treat non-delimited failed suffixes as failures', () => {
+  const timeline = ui.buildCustomerTimeline([
+    {
+      eventType: 'intake.github.summary-comment.notfailed',
+      timestamp: '2026-04-17T10:00:07Z',
+      status: 'completed',
+      summary: 'completed event with notfailed suffix',
+      decisionMetadata: {},
+      inputSummary: {},
+      artifactSummary: {},
+      governanceMetadata: {}
+    }
+  ]);
+
+  assert.equal(timeline.length, 1);
+  assert.equal(timeline[0].stepTitle, 'GitHub trace summary comments');
+});
+
 test('buildCustomerTimeline falls back to issueUrl when issueLinks are not present', () => {
   const timeline = ui.buildCustomerTimeline([
     {
@@ -217,4 +237,13 @@ test('buildCustomerTimeline keeps non-numeric count strings and omits nullish va
   assert.equal(Object.prototype.hasOwnProperty.call(timeline[0].details, 'issueCount'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(timeline[0].details, 'failedIssueCount'), false);
   assert.equal(timeline[0].details.unknownFailedIssueCount, 'n/a');
+});
+
+test('app decision trace integration does not depend on removed summary helpers', () => {
+  const appJsPath = path.join(__dirname, '..', 'app.js');
+  const appJs = fs.readFileSync(appJsPath, 'utf8');
+
+  assert.equal(appJs.includes('buildTraceSummary('), false);
+  assert.equal(appJs.includes('buildCompactTraceSummary('), false);
+  assert.equal(/\bnormalized\s*\.\s*summary\b/.test(appJs), false);
 });
