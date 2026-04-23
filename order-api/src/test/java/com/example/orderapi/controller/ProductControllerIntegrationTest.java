@@ -1,18 +1,21 @@
 package com.example.orderapi.controller;
 
+import com.example.orderapi.domain.Product;
+import com.example.orderapi.repository.ProductRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.hamcrest.Matchers.is;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -26,7 +29,7 @@ class ProductControllerIntegrationTest {
     private MockMvc mockMvc;
 
     @Autowired
-    private JdbcTemplate jdbcTemplate;
+    private ProductRepository productRepository;
 
     @Test
     void createProduct_shouldPersistWeightUsingMappedColumn() throws Exception {
@@ -69,12 +72,10 @@ class ProductControllerIntegrationTest {
                                 """))
                 .andExpect(status().isCreated());
 
-        BigDecimal persistedWeight = jdbcTemplate.queryForObject(
-                "SELECT weight_value FROM products WHERE sku = ?",
-                BigDecimal.class,
-                "WM-12346"
-        );
+        Optional<Product> savedProduct = productRepository.findBySku("WM-12346");
+        assertTrue(savedProduct.isPresent());
 
+        BigDecimal persistedWeight = savedProduct.get().getPhysical().getWeight().getValue();
         assertNotNull(persistedWeight);
         assertEquals(0, persistedWeight.compareTo(new BigDecimal("0.2")));
     }
