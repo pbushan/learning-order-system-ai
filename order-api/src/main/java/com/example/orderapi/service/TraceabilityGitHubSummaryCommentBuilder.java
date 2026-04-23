@@ -1,5 +1,6 @@
 package com.example.orderapi.service;
 
+import com.example.orderapi.dto.DecisionTraceResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -27,6 +28,13 @@ public class TraceabilityGitHubSummaryCommentBuilder {
             builder.append("- Rationale summary: ").append(rationale);
         }
         return builder.toString();
+    }
+
+    public String buildDecisionTraceSummary(DecisionTraceResponse response) {
+        if (response == null) {
+            return "Decision trace unavailable.";
+        }
+        return response.buildConciseSummary();
     }
 
     private String normalizeClassification(String classification) {
