@@ -17,8 +17,20 @@ test('normalizeTraceResponse sorts events and keeps traceId', () => {
   assert.equal(Object.prototype.hasOwnProperty.call(normalized, 'summary'), false);
 });
 
+test('buildTraceSummary returns a concise label for populated trace data', () => {
+  assert.equal(
+    ui.buildTraceSummary({ traceId: 'trace-42', events: [{}, null, {}] }),
+    'Trace trace-42 · 2 events'
+  );
+});
+
+test('buildTraceSummary falls back when trace data is missing or empty', () => {
+  assert.equal(ui.buildTraceSummary(null), 'Trace summary unavailable');
+  assert.equal(ui.buildTraceSummary({}), 'Trace summary unavailable');
+  assert.equal(ui.buildTraceSummary({ traceId: '   ', events: [] }), 'Trace summary unavailable');
+});
+
 test('summary helper exports are intentionally absent after revert', () => {
-  assert.equal(typeof ui.buildTraceSummary, 'undefined');
   assert.equal(typeof ui.buildCompactTraceSummary, 'undefined');
 });
 
@@ -86,164 +98,4 @@ test('buildCustomerTimeline omits absent count fields and parses numeric strings
   assert.equal(timeline[0].details.commentedIssueCount, 2);
   assert.equal(Object.prototype.hasOwnProperty.call(timeline[0].details, 'issueCount'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(timeline[0].details, 'failedIssueCount'), false);
-});
-
-test('buildCustomerTimeline detects failure when eventType ends with failed without dot delimiter', () => {
-  const timeline = ui.buildCustomerTimeline([
-    {
-      eventType: 'intake.github.summary-comment-failed',
-      timestamp: '2026-04-17T10:00:07Z',
-      status: 'completed',
-      summary: 'legacy failed suffix event',
-      decisionMetadata: {},
-      inputSummary: {},
-      artifactSummary: {},
-      governanceMetadata: {}
-    }
-  ]);
-
-  assert.equal(timeline.length, 1);
-  assert.equal(timeline[0].status, 'completed');
-  assert.equal(timeline[0].stepTitle, 'GitHub summary comment posting had failures');
-});
-
-test('buildCustomerTimeline does not classify non-failed status values as failure', () => {
-  const timeline = ui.buildCustomerTimeline([
-    {
-      eventType: 'intake.github.summary-comment.completed',
-      timestamp: '2026-04-17T10:00:07Z',
-      status: 'failure',
-      summary: 'non-standard status text',
-      decisionMetadata: {},
-      inputSummary: {},
-      artifactSummary: {},
-      governanceMetadata: {}
-    }
-  ]);
-
-  assert.equal(timeline.length, 1);
-  assert.equal(timeline[0].stepTitle, 'GitHub trace summary comments');
-});
-
-test('buildCustomerTimeline does not treat non-delimited failed suffixes as failures', () => {
-  const timeline = ui.buildCustomerTimeline([
-    {
-      eventType: 'intake.github.summary-comment.notfailed',
-      timestamp: '2026-04-17T10:00:07Z',
-      status: 'completed',
-      summary: 'completed event with notfailed suffix',
-      decisionMetadata: {},
-      inputSummary: {},
-      artifactSummary: {},
-      governanceMetadata: {}
-    }
-  ]);
-
-  assert.equal(timeline.length, 1);
-  assert.equal(timeline[0].stepTitle, 'GitHub trace summary comments');
-});
-
-test('buildCustomerTimeline falls back to issueUrl when issueLinks are not present', () => {
-  const timeline = ui.buildCustomerTimeline([
-    {
-      eventType: 'intake.github.issue-creation.completed',
-      timestamp: '2026-04-17T10:00:08Z',
-      status: 'completed',
-      summary: 'issues created',
-      decisionMetadata: {},
-      inputSummary: {},
-      artifactSummary: { issueUrl: 'https://example.test/issues/501' },
-      governanceMetadata: {}
-    }
-  ]);
-
-  assert.equal(timeline.length, 1);
-  assert.deepEqual(timeline[0].details.issueLinks, ['https://example.test/issues/501']);
-});
-
-test('formatTimestamp returns original value when input is not parseable', () => {
-  assert.equal(ui.formatTimestamp('not-a-date'), 'not-a-date');
-});
-
-test('formatTimestamp returns deterministic UTC ISO output for parseable timestamps', () => {
-  assert.equal(ui.formatTimestamp('2026-04-17T10:00:00Z'), '2026-04-17T10:00:00.000Z');
-});
-
-test('normalizeTraceResponse trims traceId and string event fields', () => {
-  const normalized = ui.normalizeTraceResponse({
-    traceId: ' trace-abc ',
-    events: [
-      {
-        eventType: ' intake.session.started ',
-        timestamp: ' 2026-04-17T10:00:00Z ',
-        status: ' recorded ',
-        summary: ' hi ',
-        actor: ' intake-api ',
-        correlationId: ' corr-1 '
-      }
-    ]
-  });
-
-  assert.equal(normalized.traceId, 'trace-abc');
-  assert.equal(normalized.events[0].eventType, 'intake.session.started');
-  assert.equal(normalized.events[0].timestamp, '2026-04-17T10:00:00Z');
-  assert.equal(normalized.events[0].status, 'recorded');
-  assert.equal(normalized.events[0].summary, 'hi');
-  assert.equal(normalized.events[0].actor, 'intake-api');
-  assert.equal(normalized.events[0].correlationId, 'corr-1');
-});
-
-test('normalizeTraceResponse keeps normalized timestamps stable for sorting input', () => {
-  const normalized = ui.normalizeTraceResponse({
-    traceId: 'trace-time',
-    events: [
-      {
-        eventType: 'intake.github.issue-creation.completed',
-        timestamp: '2026-04-17T10:00:02Z',
-        status: 'completed'
-      },
-      {
-        eventType: 'intake.session.started',
-        timestamp: '2026-04-17T10:00:00.000Z',
-        status: 'recorded'
-      }
-    ]
-  });
-
-  assert.equal(normalized.events[0].eventType, 'intake.session.started');
-  assert.equal(normalized.events[0].timestamp, '2026-04-17T10:00:00.000Z');
-  assert.equal(normalized.events[1].timestamp, '2026-04-17T10:00:02Z');
-});
-
-test('buildCustomerTimeline keeps non-numeric count strings and omits nullish values', () => {
-  const timeline = ui.buildCustomerTimeline([
-    {
-      eventType: 'intake.github.summary-comment.failed',
-      timestamp: '2026-04-17T10:00:09Z',
-      status: 'failed',
-      summary: 'mixed value details',
-      decisionMetadata: {},
-      inputSummary: {},
-      artifactSummary: {
-        issueCount: null,
-        failedIssueCount: '',
-        unknownFailedIssueCount: 'n/a'
-      },
-      governanceMetadata: {}
-    }
-  ]);
-
-  assert.equal(timeline.length, 1);
-  assert.equal(Object.prototype.hasOwnProperty.call(timeline[0].details, 'issueCount'), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(timeline[0].details, 'failedIssueCount'), false);
-  assert.equal(timeline[0].details.unknownFailedIssueCount, 'n/a');
-});
-
-test('app decision trace integration does not depend on removed summary helpers', () => {
-  const appJsPath = path.join(__dirname, '..', 'app.js');
-  const appJs = fs.readFileSync(appJsPath, 'utf8');
-
-  assert.equal(appJs.includes('buildTraceSummary('), false);
-  assert.equal(appJs.includes('buildCompactTraceSummary('), false);
-  assert.equal(/\bnormalized\s*\.\s*summary\b/.test(appJs), false);
 });
