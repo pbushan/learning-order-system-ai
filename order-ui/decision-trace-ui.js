@@ -17,13 +17,12 @@
     function normalizeTraceResponse(response) {
         const traceId = typeof response?.traceId === "string" ? response.traceId.trim() : "";
         const events = Array.isArray(response?.events) ? response.events.filter(Boolean).map(normalizeEvent) : [];
-        const summary = buildTraceSummary(response);
         events.sort((left, right) => {
             const leftTime = Date.parse(left.timestamp || "") || 0;
             const rightTime = Date.parse(right.timestamp || "") || 0;
             return leftTime - rightTime;
         });
-        return { traceId, events, summary };
+        return { traceId, events };
     }
 
     function normalizeEvent(event) {
@@ -41,43 +40,6 @@
             artifactSummary: asObject(event?.artifactSummary),
             governanceMetadata: asObject(event?.governanceMetadata)
         };
-    }
-
-    function buildTraceSummary(response) {
-        const traceId = typeof response?.traceId === "string" ? response.traceId.trim() : "";
-        const events = Array.isArray(response?.events) ? response.events.filter(Boolean) : [];
-        const eventCount = events.length;
-        const firstEvent = events[0] || {};
-        const lastEvent = events[eventCount - 1] || {};
-        const parts = [];
-
-        if (traceId) parts.push(`Trace ${traceId}`);
-        if (eventCount > 0) parts.push(`${eventCount} event${eventCount === 1 ? "" : "s"}`);
-        if (toText(firstEvent.status)) parts.push(`starts ${toText(firstEvent.status)}`);
-        if (toText(lastEvent.status) && lastEvent.status !== firstEvent.status) parts.push(`ends ${toText(lastEvent.status)}`);
-
-        return parts.join(" · ");
-    }
-
-    function buildCompactTraceSummary(trace) {
-        const parts = [];
-        const traceId = toText(trace?.traceId);
-        const eventType = toText(trace?.eventType);
-        const status = toText(trace?.status);
-        const actor = toText(trace?.actor);
-
-        if (traceId) parts.push(`Trace ${traceId}`);
-        if (eventType) parts.push(eventType);
-        if (status) parts.push(status);
-        if (actor) parts.push(`by ${actor}`);
-
-        const sourceType = toText(trace?.decisionMetadata?.sourceType);
-        const classifiedType = toText(trace?.decisionMetadata?.classifiedType);
-        if (sourceType || classifiedType) {
-            parts.push([sourceType, classifiedType].filter(Boolean).join(" → "));
-        }
-
-        return parts.join(" · ");
     }
 
     function buildCustomerTimeline(events) {
@@ -198,35 +160,44 @@
     }
 
     function isFailedEvent(status, eventType) {
-        return status === "failed" || status === "error" || eventType.endsWith(".failed");
-    }
-
-    function extractIssueLinks(event) {
-        const links = event?.artifactSummary?.issueLinks;
-        return Array.isArray(links) ? links.filter((link) => typeof link === "string" && link.trim()) : [];
-    }
-
-    function compactDetails(parts) {
-        return Object.entries(parts)
-            .filter(([, value]) => Array.isArray(value) ? value.length > 0 : Boolean(value))
-            .map(([key, value]) => Array.isArray(value) ? `${key}: ${value.join(", ")}` : `${key}: ${value}`)
-            .join(" · ");
-    }
-
-    function optionalCount(summary, key) {
-        const value = summary?.[key];
-        if (typeof value === "number" && Number.isFinite(value)) {
-            return value;
+        const normalizedStatus = (status || "").toLowerCase();
+        if (normalizedStatus === "failed" || normalizedStatus === "error") {
+            return true;
         }
-        if (typeof value === "string" && value.trim() !== "") {
-            const parsed = Number(value);
-            return Number.isFinite(parsed) ? parsed : null;
-        }
-        return null;
+        return /(?:^|[.-])failed$/i.test(eventType || "");
     }
 
     function readableEventType(eventType) {
-        return toText(eventType).replace(/[._-]+/g, " ").trim() || "Trace event";
+        if (!eventType) {
+            return "Trace event";
+        }
+        return eventType
+            .replace(/\./g, " ")
+            .replace(/\-/g, " ")
+            .replace(/\b\w/g, (match) => match.toUpperCase());
+    }
+
+    function extractIssueLinks(event) {
+        const direct = event?.artifactSummary?.issueLinks;
+        if (Array.isArray(direct)) {
+            return direct.filter((entry) => typeof entry === "string" && entry.trim());
+        }
+        const single = event?.artifactSummary?.issueUrl;
+        if (typeof single === "string" && single.trim()) {
+            return [single.trim()];
+        }
+        return [];
+    }
+
+    function formatTimestamp(timestamp) {
+        if (!timestamp) {
+            return "";
+        }
+        const parsed = new Date(timestamp);
+        if (Number.isNaN(parsed.getTime())) {
+            return timestamp;
+        }
+        return parsed.toISOString();
     }
 
     function toText(value) {
@@ -234,25 +205,43 @@
     }
 
     function asObject(value) {
-        return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+            return {};
+        }
+        return value;
+    }
+
+    function optionalCount(source, key) {
+        if (!source || typeof source !== "object" || !(key in source)) {
+            return undefined;
+        }
+        const value = source[key];
+        if (value === null || value === undefined || value === "") {
+            return undefined;
+        }
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+        return toText(value) || undefined;
+    }
+
+    function compactDetails(details) {
+        const compact = {};
+        Object.entries(details).forEach(([key, value]) => {
+            if (value === undefined || value === null || value === "") {
+                return;
+            }
+            compact[key] = value;
+        });
+        return compact;
     }
 
     return {
         normalizeTraceResponse,
-        normalizeEvent,
-        buildTraceSummary,
-        buildCompactTraceSummary,
         buildCustomerTimeline,
         buildEngineerTimeline,
-        buildTraceItem,
         classifyStep,
-        resolveStepTitle,
-        isFailedEvent,
-        extractIssueLinks,
-        compactDetails,
-        optionalCount,
-        readableEventType,
-        toText,
-        asObject
+        formatTimestamp
     };
 }));
