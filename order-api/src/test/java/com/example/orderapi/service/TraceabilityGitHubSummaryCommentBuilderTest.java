@@ -27,10 +27,11 @@ class TraceabilityGitHubSummaryCommentBuilderTest {
 
     @Test
     void fallsBackToUnknownClassificationAndOmitsEmptyRationale() {
-        String comment = builder.buildIssueTraceSummary("trace-xyz", "maintenance", 1, "   ");
+        String comment = builder.buildIssueTraceSummary("  ", "maintenance", 1, "   ");
 
         assertTrue(comment.contains("- Classification: `unknown`"));
         assertTrue(comment.contains("- Decomposed multi-issue set: no"));
+        assertTrue(comment.contains("- Trace ID: `trace-unavailable`"));
         assertFalse(comment.contains("Rationale summary:"));
     }
 

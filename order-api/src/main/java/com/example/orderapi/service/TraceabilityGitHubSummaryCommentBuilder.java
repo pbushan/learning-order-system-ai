@@ -12,8 +12,8 @@ public class TraceabilityGitHubSummaryCommentBuilder {
                                          int issueCount,
                                          String rationaleSummary) {
         String normalizedClassification = normalizeClassification(classification);
-        String normalizedTraceId = StringUtils.hasText(traceId) ? traceId.trim() : "trace-unavailable";
-        String decomposedSet = issueCount > 1 ? "yes (" + issueCount + " issues)" : "no";
+        String normalizedTraceId = normalizeTraceId(traceId);
+        String decomposedSet = formatDecomposedSet(issueCount);
 
         StringBuilder builder = new StringBuilder();
         builder.append("Generated via agent-assisted intake.").append(System.lineSeparator()).append(System.lineSeparator());
@@ -38,6 +38,14 @@ public class TraceabilityGitHubSummaryCommentBuilder {
             return value;
         }
         return "unknown";
+    }
+
+    private String normalizeTraceId(String traceId) {
+        return StringUtils.hasText(traceId) ? traceId.trim() : "trace-unavailable";
+    }
+
+    private String formatDecomposedSet(int issueCount) {
+        return issueCount > 1 ? "yes (" + issueCount + " issues)" : "no";
     }
 
     private String trimRationale(String rationaleSummary) {
