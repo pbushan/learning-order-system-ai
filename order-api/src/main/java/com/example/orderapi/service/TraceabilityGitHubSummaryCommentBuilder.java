@@ -29,6 +29,12 @@ public class TraceabilityGitHubSummaryCommentBuilder {
         return builder.toString();
     }
 
+    String buildShortDisplaySummary(String traceId, String classification) {
+        String normalizedTraceId = StringUtils.hasText(traceId) ? traceId.trim() : "trace-unavailable";
+        String normalizedClassification = normalizeClassification(classification);
+        return normalizedTraceId + " / " + normalizedClassification;
+    }
+
     private String normalizeClassification(String classification) {
         if (!StringUtils.hasText(classification)) {
             return "unknown";
