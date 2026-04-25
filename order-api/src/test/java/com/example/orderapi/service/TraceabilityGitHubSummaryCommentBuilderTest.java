@@ -47,4 +47,12 @@ class TraceabilityGitHubSummaryCommentBuilderTest {
         assertTrue(comment.contains("- Rationale summary:"));
         assertTrue(comment.endsWith("..."));
     }
+
+    @Test
+    void formatsDecisionTraceSummaryWithGracefulFallbacks() {
+        String summary = builder.formatDecisionTraceSummary(null, "Approved", "  trace-42  ");
+
+        assertTrue(summary.contains("unknown-decision -> Approved"));
+        assertTrue(summary.contains("[trace=trace-42]"));
+    }
 }

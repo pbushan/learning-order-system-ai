@@ -29,6 +29,13 @@ public class TraceabilityGitHubSummaryCommentBuilder {
         return builder.toString();
     }
 
+    public String formatDecisionTraceSummary(String decision, String outcome, String traceId) {
+        String normalizedDecision = StringUtils.hasText(decision) ? decision.trim() : "unknown-decision";
+        String normalizedOutcome = StringUtils.hasText(outcome) ? outcome.trim() : "unknown-outcome";
+        String normalizedTraceId = StringUtils.hasText(traceId) ? traceId.trim() : "trace-unavailable";
+        return normalizedDecision + " -> " + normalizedOutcome + " [trace=" + normalizedTraceId + "]";
+    }
+
     private String normalizeClassification(String classification) {
         if (!StringUtils.hasText(classification)) {
             return "unknown";
