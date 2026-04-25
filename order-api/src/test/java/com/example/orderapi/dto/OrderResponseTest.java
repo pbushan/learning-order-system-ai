@@ -1,6 +1,7 @@
 package com.example.orderapi.dto;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
 
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
@@ -70,6 +71,7 @@ class OrderResponseTest {
     }
 
     @Test
+    @DisplayName("Unknown status values should fall back to Unknown label")
     void unknownStatusFallsBackToUnknownLabel() {
         OrderResponse response = new OrderResponse();
         response.setStatus("IN_TRANSIT");

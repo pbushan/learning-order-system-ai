@@ -1,6 +1,7 @@
 package com.example.orderapi.dto;
 
 import com.example.orderapi.domain.Customer;
+import com.example.orderapi.domain.OrderStatus;
 import com.example.orderapi.domain.Order;
 import com.example.orderapi.domain.OrderStatus;
 
@@ -27,7 +28,7 @@ public class OrderResponse {
         response.setTotalAmount(order.getTotalAmount());
         OrderStatus orderStatus = order.getStatus();
         response.setStatus(orderStatus != null ? orderStatus.name() : null);
-        response.setShippingType(order.getShippingType() != null ? order.getShippingType().trim() : null);
+        response.setShippingType(order.getShippingType());
         response.setEstimatedDeliveryDays(order.getEstimatedDeliveryDays());
         return response;
     }
