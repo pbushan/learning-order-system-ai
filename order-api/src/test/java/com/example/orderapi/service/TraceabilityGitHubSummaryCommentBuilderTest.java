@@ -32,6 +32,18 @@ class TraceabilityGitHubSummaryCommentBuilderTest {
         assertTrue(comment.contains("- Classification: `unknown`"));
         assertTrue(comment.contains("- Decomposed multi-issue set: no"));
         assertFalse(comment.contains("Rationale summary:"));
+        assertTrue(comment.contains("- Summary: No meaningful decision-trace summary was available."));
+    }
+
+    @Test
+    void returnsFallbackSummaryWhenNoEventsOrMeaningfulTextAreAvailable() {
+        String comment = builder.buildIssueTraceSummary(null, null, 0, null);
+
+        assertTrue(comment.contains("- Classification: `unknown`"));
+        assertTrue(comment.contains("- Decomposed multi-issue set: no"));
+        assertTrue(comment.contains("- Trace ID: `trace-unavailable`"));
+        assertTrue(comment.contains("- Summary: No decision-trace events were available to summarize."));
+        assertFalse(comment.contains("Rationale summary:"));
     }
 
     @Test
