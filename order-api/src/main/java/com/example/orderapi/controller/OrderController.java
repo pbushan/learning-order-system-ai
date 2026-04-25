@@ -4,6 +4,7 @@ import com.example.orderapi.dto.OrderRequest;
 import com.example.orderapi.dto.OrderResponse;
 import com.example.orderapi.service.OrderService;
 import org.springframework.http.HttpStatus;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -50,5 +51,16 @@ public class OrderController {
     @PostMapping("/{id}/submit")
     public OrderResponse submit(@PathVariable Long id) {
         return OrderResponse.from(orderService.submit(id));
+    }
+
+    static String formatOrderStatusLabel(String status) {
+        if (!StringUtils.hasText(status)) {
+            return "Status: Unknown";
+        }
+        String normalized = status.trim();
+        if (normalized.regionMatches(true, 0, "Status:", 0, "Status:".length())) {
+            return normalized;
+        }
+        return "Status: " + normalized;
     }
 }
