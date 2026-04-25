@@ -7,7 +7,6 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 
 class OrderResponseTest {
 
@@ -61,6 +60,5 @@ class OrderResponseTest {
         assertEquals("pending", response.getStatus());
         assertEquals("EXPRESS", response.getShippingType());
         assertEquals(2, response.getEstimatedDeliveryDays());
-        assertNull(null);
     }
 }
