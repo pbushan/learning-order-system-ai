@@ -1,5 +1,6 @@
 package com.example.orderapi.controller;
 
+import com.example.orderapi.dto.HealthSummaryResponse;
 import com.example.orderapi.service.HealthSummaryService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,12 +26,24 @@ class HealthSummaryControllerTest {
     @Test
     void getSummaryReturnsCounts() throws Exception {
         when(healthSummaryService.getSummary())
-                .thenReturn(new com.example.orderapi.dto.HealthSummaryResponse(3L, 5L, 8L));
+                .thenReturn(new HealthSummaryResponse(3L, 5L, 8L));
 
         mockMvc.perform(get("/api/health-summary").accept(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalOrders").value(3))
                 .andExpect(jsonPath("$.totalProducts").value(5))
                 .andExpect(jsonPath("$.totalCustomers").value(8));
+    }
+
+    @Test
+    void getSummaryReturnsZeroCounts() throws Exception {
+        when(healthSummaryService.getSummary())
+                .thenReturn(new HealthSummaryResponse(0L, 0L, 0L));
+
+        mockMvc.perform(get("/api/health-summary").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalOrders").value(0))
+                .andExpect(jsonPath("$.totalProducts").value(0))
+                .andExpect(jsonPath("$.totalCustomers").value(0));
     }
 }
