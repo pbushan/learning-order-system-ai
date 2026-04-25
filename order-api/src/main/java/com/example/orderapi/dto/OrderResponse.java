@@ -2,6 +2,7 @@ package com.example.orderapi.dto;
 
 import com.example.orderapi.domain.Order;
 import com.example.orderapi.domain.OrderStatus;
+import java.util.Objects;
 
 import java.math.BigDecimal;
 import java.util.Locale;
@@ -20,7 +21,10 @@ public class OrderResponse {
     private Integer estimatedDeliveryDays;
 
     public static OrderResponse from(Order order) {
+        Objects.requireNonNull(order, "order must not be null");
+
         OrderResponse response = new OrderResponse();
+
         response.setId(order.getId());
         response.setCustomerId(order.getCustomer() != null ? order.getCustomer().getId() : null);
         response.setProductName(order.getProductName());
