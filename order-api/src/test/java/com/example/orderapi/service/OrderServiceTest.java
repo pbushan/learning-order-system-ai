@@ -39,6 +39,18 @@ class OrderServiceTest {
     private OrderService orderService;
 
     @Test
+    void getStatusLabel_shouldReturnNormalizedLabelForStatusAndStringValues() {
+        assertThat(orderService.getStatusLabel(OrderStatus.SUBMITTED)).isEqualTo("SUBMITTED");
+        assertThat(orderService.getStatusLabel("in_progress")).isEqualTo("IN PROGRESS");
+    }
+
+    @Test
+    void getStatusLabel_shouldReturnEmptyStringForNullOrBlankInput() {
+        assertThat(orderService.getStatusLabel((OrderStatus) null)).isEmpty();
+        assertThat(orderService.getStatusLabel("   ")).isEmpty();
+    }
+
+    @Test
     void submit_shouldInvokeLambda_updateOrder_andPublishEvent() {
         Customer customer = new Customer();
         customer.setId(1L);

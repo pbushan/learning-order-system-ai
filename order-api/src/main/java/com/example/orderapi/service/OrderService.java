@@ -11,8 +11,10 @@ import com.example.orderapi.repository.CustomerRepository;
 import com.example.orderapi.repository.OrderRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.Locale;
 
 @Service
 public class OrderService {
@@ -69,6 +71,17 @@ public class OrderService {
     public void delete(Long id) {
         Order order = getById(id);
         orderRepository.delete(order);
+    }
+
+    public String getStatusLabel(OrderStatus status) {
+        return status == null ? "" : getStatusLabel(status.name());
+    }
+
+    public String getStatusLabel(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        return value.trim().toUpperCase(Locale.ROOT).replace('_', ' ');
     }
 
     @Transactional
