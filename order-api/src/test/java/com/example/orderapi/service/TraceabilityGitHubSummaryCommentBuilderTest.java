@@ -35,6 +35,12 @@ class TraceabilityGitHubSummaryCommentBuilderTest {
     }
 
     @Test
+    void returnsFallbackMessageWhenAllInputsAreMissingOrEmpty() {
+        assertTrue(builder.buildIssueTraceSummary(null, null, 0, null).equals("Traceability summary unavailable."));
+        assertTrue(builder.buildIssueTraceSummary("   ", "", 0, "   ").equals("Traceability summary unavailable."));
+    }
+
+    @Test
     void truncatesLongRationaleToKeepCommentShort() {
         String comment = builder.buildIssueTraceSummary(
                 "trace-xyz",
