@@ -1,6 +1,7 @@
 package com.example.orderapi.dto;
 
 import com.example.orderapi.domain.Order;
+import com.example.orderapi.domain.OrderStatus;
 
 import java.math.BigDecimal;
 import java.util.Locale;
@@ -22,7 +23,8 @@ public class OrderResponse {
         response.setProductName(order.getProductName());
         response.setQuantity(order.getQuantity());
         response.setTotalAmount(order.getTotalAmount());
-        response.setStatus(order.getStatus().name());
+        OrderStatus orderStatus = order.getStatus();
+        response.setStatus(orderStatus != null ? orderStatus.name() : null);
         response.setShippingType(order.getShippingType());
         response.setEstimatedDeliveryDays(order.getEstimatedDeliveryDays());
         return response;
