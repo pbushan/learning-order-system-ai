@@ -6,6 +6,7 @@ import org.springframework.util.StringUtils;
 @Component
 public class TraceabilityGitHubSummaryCommentBuilder {
     // Keep this formatter aligned with traceability/github_summary.py (shared traceability contract).
+    private static final int MAX_RATIONALE_LENGTH = 180;
 
     public String buildIssueTraceSummary(String traceId,
                                          String classification,
@@ -54,10 +55,9 @@ public class TraceabilityGitHubSummaryCommentBuilder {
             return "";
         }
         String cleaned = rationaleSummary.trim().replaceAll("\\s+", " ");
-        int maxLength = 180;
-        if (cleaned.length() <= maxLength) {
+        if (cleaned.length() <= MAX_RATIONALE_LENGTH) {
             return cleaned;
         }
-        return cleaned.substring(0, maxLength - 3).trim() + "...";
+        return cleaned.substring(0, MAX_RATIONALE_LENGTH - 3).trim() + "...";
     }
 }
