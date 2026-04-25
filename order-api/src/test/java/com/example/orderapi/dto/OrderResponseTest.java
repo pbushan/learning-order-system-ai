@@ -23,6 +23,8 @@ class OrderResponseTest {
         expectations.put("CANCELLED", "Cancelled");
         expectations.put("pending", "Pending");
         expectations.put("  shipped  ", "Shipped");
+        expectations.put("in transit", "Unknown");
+        expectations.put("in-transit", "Unknown");
 
         expectations.forEach((status, label) -> {
             OrderResponse response = new OrderResponse();

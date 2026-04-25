@@ -2,10 +2,9 @@ package com.example.orderapi.dto;
 
 import com.example.orderapi.domain.Order;
 import com.example.orderapi.domain.OrderStatus;
-import java.util.Objects;
-
 import java.math.BigDecimal;
 import java.util.Locale;
+import java.util.Objects;
 
 public class OrderResponse {
     // Status is expected to be the OrderStatus enum name (e.g. PENDING, CONFIRMED).
@@ -42,7 +41,7 @@ public class OrderResponse {
         if (status == null || status.trim().isEmpty()) {
             return "Unknown";
         }
-        String normalizedStatus = status.trim().toUpperCase(Locale.ROOT);
+        String normalizedStatus = status.trim().replace('-', '_').replace(' ', '_').toUpperCase(Locale.ROOT);
         return switch (normalizedStatus) {
             case "PENDING" -> "Pending";
             case "CONFIRMED" -> "Confirmed";
