@@ -7,9 +7,6 @@ import java.util.Locale;
 import java.util.Objects;
 
 public class OrderResponse {
-    // Status is expected to be the OrderStatus enum name (e.g. PENDING, CONFIRMED).
-    // getStatusLabel() also tolerates common lowercase / user-facing variants.
-    // Keep the raw status value available for API consumers while exposing a friendly label separately.
     private Long id;
     private Long customerId;
     private String productName;
@@ -32,7 +29,6 @@ public class OrderResponse {
         OrderStatus orderStatus = order.getStatus();
         response.setStatus(orderStatus != null ? orderStatus.name() : null);
         response.setShippingType(order.getShippingType());
-        // Preserve the estimated delivery days from the order entity for downstream UI rendering.
         response.setEstimatedDeliveryDays(order.getEstimatedDeliveryDays());
         return response;
     }
