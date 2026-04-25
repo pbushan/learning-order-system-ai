@@ -3,6 +3,7 @@ package com.example.orderapi.service;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TraceabilityGitHubSummaryCommentBuilderTest {
@@ -46,5 +47,13 @@ class TraceabilityGitHubSummaryCommentBuilderTest {
         assertTrue(comment.contains("- Classification: `bug`"));
         assertTrue(comment.contains("- Rationale summary:"));
         assertTrue(comment.endsWith("..."));
+    }
+
+    @Test
+    void returnsFallbackCommentForEmptyTraceabilitySummary() {
+        assertEquals(
+                "Generated via agent-assisted intake. No traceability events were available.",
+                builder.buildEmptyTraceSummaryComment()
+        );
     }
 }

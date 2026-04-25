@@ -29,6 +29,10 @@ public class TraceabilityGitHubSummaryCommentBuilder {
         return builder.toString();
     }
 
+    public String buildEmptyTraceSummaryComment() {
+        return "Generated via agent-assisted intake. No traceability events were available.";
+    }
+
     private String normalizeClassification(String classification) {
         if (!StringUtils.hasText(classification)) {
             return "unknown";
