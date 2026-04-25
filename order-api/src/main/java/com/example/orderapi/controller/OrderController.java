@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+@CrossOrigin(origins = "*")
 @RestController
 @RequestMapping("/api/orders")
 public class OrderController {
@@ -20,6 +21,7 @@ public class OrderController {
     }
 
     @PostMapping
+    @CrossOrigin(origins = "*")
     @ResponseStatus(HttpStatus.CREATED)
     public OrderResponse create(@RequestBody OrderRequest request) {
         return OrderResponse.from(orderService.create(request));
@@ -33,22 +35,26 @@ public class OrderController {
     }
 
     @GetMapping("/{id}")
+    @CrossOrigin(origins = "*")
     public OrderResponse getById(@PathVariable Long id) {
         return OrderResponse.from(orderService.getById(id));
     }
 
     @PutMapping("/{id}")
+    @CrossOrigin(origins = "*")
     public OrderResponse update(@PathVariable Long id, @RequestBody OrderRequest request) {
         return OrderResponse.from(orderService.update(id, request));
     }
 
     @DeleteMapping("/{id}")
+    @CrossOrigin(origins = "*")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable Long id) {
         orderService.delete(id);
     }
 
     @PostMapping("/{id}/submit")
+    @CrossOrigin(origins = "*")
     public OrderResponse submit(@PathVariable Long id) {
         return OrderResponse.from(orderService.submit(id));
     }
