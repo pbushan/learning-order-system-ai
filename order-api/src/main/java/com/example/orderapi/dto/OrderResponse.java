@@ -8,6 +8,8 @@ import java.math.BigDecimal;
 import java.util.Locale;
 
 public class OrderResponse {
+    // Status is expected to be the OrderStatus enum name (e.g. PENDING, CONFIRMED).
+    // getStatusLabel() also tolerates common lowercase / user-facing variants.
     private Long id;
     private Long customerId;
     private String productName;
@@ -36,12 +38,14 @@ public class OrderResponse {
         if (status == null || status.trim().isEmpty()) {
             return "Unknown";
         }
-        return switch (status.trim().toUpperCase(Locale.ROOT)) {
+        String normalizedStatus = status.trim().toUpperCase(Locale.ROOT);
+        return switch (normalizedStatus) {
             case "PENDING" -> "Pending";
             case "CONFIRMED" -> "Confirmed";
             case "SHIPPED" -> "Shipped";
             case "DELIVERED" -> "Delivered";
             case "CANCELLED" -> "Cancelled";
+            case "CANCELED" -> "Cancelled";
             default -> "Unknown";
         };
     }
