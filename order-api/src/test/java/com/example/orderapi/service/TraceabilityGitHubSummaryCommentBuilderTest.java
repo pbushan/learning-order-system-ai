@@ -26,12 +26,12 @@ class TraceabilityGitHubSummaryCommentBuilderTest {
     }
 
     @Test
-    void fallsBackToUnknownClassificationAndOmitsEmptyRationale() {
+    void fallsBackToUnknownClassificationAndUsesFallbackRationaleWhenEmpty() {
         String comment = builder.buildIssueTraceSummary("trace-xyz", "maintenance", 1, "   ");
 
         assertTrue(comment.contains("- Classification: `unknown`"));
         assertTrue(comment.contains("- Decomposed multi-issue set: no"));
-        assertFalse(comment.contains("Rationale summary:"));
+        assertTrue(comment.contains("- Rationale summary: unavailable"));
     }
 
     @Test
@@ -46,5 +46,16 @@ class TraceabilityGitHubSummaryCommentBuilderTest {
         assertTrue(comment.contains("- Classification: `bug`"));
         assertTrue(comment.contains("- Rationale summary:"));
         assertTrue(comment.endsWith("..."));
+    }
+
+    @Test
+    void usesFallbackRationaleWhenTraceSummaryContentIsMissing() {
+        String comment = builder.buildIssueTraceSummary(null, null, 0, null);
+
+        assertTrue(comment.contains("- Classification: `unknown`"));
+        assertTrue(comment.contains("- Decomposed multi-issue set: no"));
+        assertTrue(comment.contains("- Trace ID: `trace-unavailable`"));
+        assertTrue(comment.contains("- Rationale summary: unavailable"));
+        assertFalse(comment.isBlank());
     }
 }
