@@ -1,7 +1,6 @@
 package com.example.orderapi.dto;
 
 import com.example.orderapi.domain.Customer;
-import com.example.orderapi.domain.OrderStatus;
 import com.example.orderapi.domain.Order;
 import com.example.orderapi.domain.OrderStatus;
 
