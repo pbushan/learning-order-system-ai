@@ -1,6 +1,7 @@
 package com.example.orderapi.dto;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
 
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
@@ -11,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 class OrderResponseTest {
 
+    @DisplayName("Known statuses map to expected labels")
     @Test
     void knownStatusesMapToExpectedLabels() {
         Map<String, String> expectations = new LinkedHashMap<>();
@@ -30,6 +32,7 @@ class OrderResponseTest {
         });
     }
 
+    @DisplayName("Null or blank status returns fallback label")
     @Test
     void nullOrBlankStatusReturnsFallbackLabel() {
         OrderResponse nullStatus = new OrderResponse();
@@ -44,6 +47,7 @@ class OrderResponseTest {
         assertEquals("Unknown", nullValue.getStatusLabel());
     }
 
+    @DisplayName("Helper does not modify existing DTO fields")
     @Test
     void helperDoesNotModifyExistingDtoFields() {
         OrderResponse response = new OrderResponse();
@@ -69,6 +73,7 @@ class OrderResponseTest {
         assertEquals(2, response.getEstimatedDeliveryDays());
     }
 
+    @DisplayName("Unknown status falls back to Unknown label")
     @Test
     void unknownStatusFallsBackToUnknownLabel() {
         OrderResponse response = new OrderResponse();
@@ -77,6 +82,7 @@ class OrderResponseTest {
         assertEquals("Unknown", response.getStatusLabel());
     }
 
+    @DisplayName("Status label lookup does not mutate status field")
     @Test
     void statusLabelLookupDoesNotMutateStatusField() {
         OrderResponse response = new OrderResponse();
