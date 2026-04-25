@@ -1,6 +1,7 @@
 package com.example.orderapi.dto;
 
 import com.example.orderapi.domain.Order;
+import com.example.orderapi.domain.Customer;
 import com.example.orderapi.domain.OrderStatus;
 
 import java.math.BigDecimal;
@@ -19,7 +20,8 @@ public class OrderResponse {
     public static OrderResponse from(Order order) {
         OrderResponse response = new OrderResponse();
         response.setId(order.getId());
-        response.setCustomerId(order.getCustomer().getId());
+        Customer customer = order.getCustomer();
+        response.setCustomerId(customer != null ? customer.getId() : null);
         response.setProductName(order.getProductName());
         response.setQuantity(order.getQuantity());
         response.setTotalAmount(order.getTotalAmount());
