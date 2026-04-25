@@ -6,11 +6,14 @@ import com.example.orderapi.dto.CustomerRequest;
 import com.example.orderapi.exception.ResourceNotFoundException;
 import com.example.orderapi.repository.CustomerRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.util.List;
 
 @Service
 public class CustomerService {
+
+    private static final String UNKNOWN_CUSTOMER = "Unknown customer";
 
     private final CustomerRepository customerRepository;
 
@@ -44,13 +47,17 @@ public class CustomerService {
         customerRepository.delete(customer);
     }
 
+    static String buildDisplayName(String firstName, String lastName) {
+        String first = StringUtils.hasText(firstName) ? firstName.trim() : "";
+        String last = StringUtils.hasText(lastName) ? lastName.trim() : "";
+        String displayName = (first + " " + last).trim();
+        return StringUtils.hasText(displayName) ? displayName : UNKNOWN_CUSTOMER;
+    }
+
     private void applyRequest(Customer customer, CustomerRequest request) {
         customer.setFirstName(request.getName().getFirstName().trim());
         customer.setLastName(request.getName().getLastName().trim());
-        customer.setName(("%s %s".formatted(
-                request.getName().getFirstName().trim(),
-                request.getName().getLastName().trim()
-        )).trim());
+        customer.setName(buildDisplayName(request.getName().getFirstName(), request.getName().getLastName()));
         customer.setEmail(request.getEmail().trim().toLowerCase());
         customer.setPhone(request.getPhone().trim());
 
