@@ -1,10 +1,13 @@
 package com.example.orderapi.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import org.springframework.util.StringUtils;
 
 import java.util.Map;
 
 public class DecisionTraceEventResponse {
+
+    private static final String UNTITLED_EVENT_LABEL = "Untitled event";
 
     @JsonProperty("traceId")
     private String traceId;
@@ -136,5 +139,15 @@ public class DecisionTraceEventResponse {
 
     public void setGovernanceMetadata(Map<String, Object> governanceMetadata) {
         this.governanceMetadata = governanceMetadata;
+    }
+
+    public String getDisplayLabel() {
+        if (StringUtils.hasText(eventType)) {
+            return eventType.trim();
+        }
+        if (StringUtils.hasText(summary)) {
+            return summary.trim();
+        }
+        return UNTITLED_EVENT_LABEL;
     }
 }
