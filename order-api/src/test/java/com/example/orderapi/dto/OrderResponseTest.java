@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class OrderResponseTest {
 
@@ -18,6 +19,8 @@ class OrderResponseTest {
         expectations.put("SHIPPED", "Shipped");
         expectations.put("DELIVERED", "Delivered");
         expectations.put("CANCELLED", "Cancelled");
+        expectations.put("pending", "Pending");
+        expectations.put("  shipped  ", "Shipped");
 
         expectations.forEach((status, label) -> {
             OrderResponse response = new OrderResponse();
@@ -35,6 +38,10 @@ class OrderResponseTest {
         OrderResponse blankStatus = new OrderResponse();
         blankStatus.setStatus("   ");
         assertEquals("Unknown", blankStatus.getStatusLabel());
+
+        OrderResponse nullValue = new OrderResponse();
+        nullValue.setStatus(null);
+        assertEquals("Unknown", nullValue.getStatusLabel());
     }
 
     @Test
@@ -60,5 +67,23 @@ class OrderResponseTest {
         assertEquals("pending", response.getStatus());
         assertEquals("EXPRESS", response.getShippingType());
         assertEquals(2, response.getEstimatedDeliveryDays());
+    }
+
+    @Test
+    void unknownStatusFallsBackToUnknownLabel() {
+        OrderResponse response = new OrderResponse();
+        response.setStatus("IN_TRANSIT");
+
+        assertEquals("Unknown", response.getStatusLabel());
+    }
+
+    @Test
+    void statusLabelLookupDoesNotMutateStatusField() {
+        OrderResponse response = new OrderResponse();
+        response.setStatus("  confirmed ");
+
+        assertEquals("Confirmed", response.getStatusLabel());
+        assertEquals("  confirmed ", response.getStatus());
+        assertNull(response.getCustomerId());
     }
 }
