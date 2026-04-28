@@ -1,7 +1,11 @@
 package com.example.orderapi.service;
 
+import com.example.orderapi.dto.DecisionTraceEventResponse;
+import com.example.orderapi.dto.DecisionTraceResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
+
+import java.util.List;
 
 @Component
 public class TraceabilityGitHubSummaryCommentBuilder {
@@ -29,6 +33,30 @@ public class TraceabilityGitHubSummaryCommentBuilder {
         return builder.toString();
     }
 
+    public String buildDecisionTraceSummary(DecisionTraceResponse response) {
+        if (response == null) {
+            return "trace-unavailable";
+        }
+
+        String summary = trimSummary(response.getSummary());
+        if (StringUtils.hasText(summary)) {
+            return summary;
+        }
+
+        String traceId = StringUtils.hasText(response.getTraceId()) ? response.getTraceId().trim() : "trace-unavailable";
+        int eventCount = safeEventCount(response.getEvents());
+        StringBuilder builder = new StringBuilder();
+        builder.append("Trace ").append(traceId);
+        if (eventCount > 0) {
+            builder.append(" (" ).append(eventCount).append(eventCount == 1 ? " event)" : " events)");
+        }
+        return builder.toString();
+    }
+
+    private int safeEventCount(List<DecisionTraceEventResponse> events) {
+        return events == null ? 0 : events.size();
+    }
+
     private String normalizeClassification(String classification) {
         if (!StringUtils.hasText(classification)) {
             return "unknown";
@@ -50,5 +78,12 @@ public class TraceabilityGitHubSummaryCommentBuilder {
             return cleaned;
         }
         return cleaned.substring(0, maxLength - 3).trim() + "...";
+    }
+
+    private String trimSummary(String summary) {
+        if (!StringUtils.hasText(summary)) {
+            return "";
+        }
+        return summary.trim().replaceAll("\\s+", " ");
     }
 }

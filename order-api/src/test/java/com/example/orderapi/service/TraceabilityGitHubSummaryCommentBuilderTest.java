@@ -1,8 +1,10 @@
 package com.example.orderapi.service;
 
+import com.example.orderapi.dto.DecisionTraceResponse;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TraceabilityGitHubSummaryCommentBuilderTest {
@@ -46,5 +48,27 @@ class TraceabilityGitHubSummaryCommentBuilderTest {
         assertTrue(comment.contains("- Classification: `bug`"));
         assertTrue(comment.contains("- Rationale summary:"));
         assertTrue(comment.endsWith("..."));
+    }
+
+    @Test
+    void buildsDecisionTraceSummaryFromExistingSummaryWhenPresent() {
+        DecisionTraceResponse response = new DecisionTraceResponse();
+        response.setTraceId(" trace-42 ");
+        response.setSummary("  Decision trace summary with extra   whitespace.  ");
+
+        assertEquals("Decision trace summary with extra whitespace.", builder.buildDecisionTraceSummary(response));
+    }
+
+    @Test
+    void buildsDecisionTraceSummaryFromTraceIdAndEventCountWhenSummaryMissing() {
+        DecisionTraceResponse response = new DecisionTraceResponse();
+        response.setTraceId("trace-99");
+
+        assertEquals("Trace trace-99", builder.buildDecisionTraceSummary(response));
+    }
+
+    @Test
+    void buildsDecisionTraceSummaryWithFallbackForNullResponse() {
+        assertEquals("trace-unavailable", builder.buildDecisionTraceSummary(null));
     }
 }

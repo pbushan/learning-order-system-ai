@@ -12,6 +12,9 @@ public class DecisionTraceResponse {
     @JsonProperty("events")
     private List<DecisionTraceEventResponse> events;
 
+    @JsonProperty("summary")
+    private String summary;
+
     public String getTraceId() {
         return traceId;
     }
@@ -26,5 +29,13 @@ public class DecisionTraceResponse {
 
     public void setEvents(List<DecisionTraceEventResponse> events) {
         this.events = events;
+    }
+
+    public String getSummary() {
+        return summary;
+    }
+
+    public void setSummary(String summary) {
+        this.summary = summary;
     }
 }
