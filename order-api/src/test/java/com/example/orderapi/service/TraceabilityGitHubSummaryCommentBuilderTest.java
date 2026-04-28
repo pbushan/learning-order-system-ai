@@ -31,7 +31,8 @@ class TraceabilityGitHubSummaryCommentBuilderTest {
 
         assertTrue(comment.contains("- Classification: `unknown`"));
         assertTrue(comment.contains("- Decomposed multi-issue set: no"));
-        assertFalse(comment.contains("Rationale summary:"));
+        assertTrue(comment.contains("- Rationale summary: none provided"));
+        assertFalse(comment.contains("Rationale summary: Intake"));
     }
 
     @Test

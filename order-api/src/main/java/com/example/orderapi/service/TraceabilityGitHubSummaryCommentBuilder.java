@@ -25,6 +25,9 @@ public class TraceabilityGitHubSummaryCommentBuilder {
         if (StringUtils.hasText(rationale)) {
             builder.append(System.lineSeparator());
             builder.append("- Rationale summary: ").append(rationale);
+        } else {
+            builder.append(System.lineSeparator());
+            builder.append("- Rationale summary: none provided");
         }
         return builder.toString();
     }
