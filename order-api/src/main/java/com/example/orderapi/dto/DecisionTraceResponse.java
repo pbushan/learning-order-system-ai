@@ -1,6 +1,7 @@
 package com.example.orderapi.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.ArrayList;
 
 import java.util.List;
 
@@ -11,7 +12,7 @@ public class DecisionTraceResponse {
 
     @JsonProperty("events")
     private List<DecisionTraceEventResponse> events;
-
+    
     @JsonProperty("summary")
     private String summary;
 
@@ -24,6 +25,9 @@ public class DecisionTraceResponse {
     }
 
     public List<DecisionTraceEventResponse> getEvents() {
+        if (events == null) {
+            events = new ArrayList<>();
+        }
         return events;
     }
 

@@ -1,11 +1,13 @@
 package com.example.orderapi.service;
 
 import com.example.orderapi.dto.DecisionTraceEventResponse;
+import com.example.orderapi.dto.DecisionTraceEventResponse;
 import com.example.orderapi.dto.DecisionTraceResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+
 
 @Component
 public class TraceabilityGitHubSummaryCommentBuilder {
@@ -37,7 +39,7 @@ public class TraceabilityGitHubSummaryCommentBuilder {
         if (response == null) {
             return "trace-unavailable";
         }
-
+        
         String summary = trimSummary(response.getSummary());
         if (StringUtils.hasText(summary)) {
             return summary;
@@ -45,12 +47,27 @@ public class TraceabilityGitHubSummaryCommentBuilder {
 
         String traceId = StringUtils.hasText(response.getTraceId()) ? response.getTraceId().trim() : "trace-unavailable";
         int eventCount = safeEventCount(response.getEvents());
-        StringBuilder builder = new StringBuilder();
+        StringBuilder builder = new StringBuilder(32);
         builder.append("Trace ").append(traceId);
         if (eventCount > 0) {
             builder.append(" (").append(eventCount).append(eventCount == 1 ? " event)" : " events)");
         }
         return builder.toString();
+    }
+
+    public String buildDecisionTraceSummary(String traceId, List<DecisionTraceEventResponse> events) {
+        DecisionTraceResponse response = new DecisionTraceResponse();
+        response.setTraceId(traceId);
+        response.setEvents(events);
+        return buildDecisionTraceSummary(response);
+    }
+
+    public String buildDecisionTraceSummary(String traceId, String summary, List<DecisionTraceEventResponse> events) {
+        DecisionTraceResponse response = new DecisionTraceResponse();
+        response.setTraceId(traceId);
+        response.setSummary(summary);
+        response.setEvents(events);
+        return buildDecisionTraceSummary(response);
     }
 
     private int safeEventCount(List<DecisionTraceEventResponse> events) {
