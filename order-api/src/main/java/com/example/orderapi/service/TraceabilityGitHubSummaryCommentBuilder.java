@@ -1,6 +1,7 @@
 package com.example.orderapi.service;
 
 import com.example.orderapi.dto.DecisionTraceEventResponse;
+import com.example.orderapi.dto.DecisionTraceEventResponse;
 import com.example.orderapi.dto.DecisionTraceResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -69,7 +70,7 @@ public class TraceabilityGitHubSummaryCommentBuilder {
     }
 
     private int safeEventCount(List<DecisionTraceEventResponse> events) {
-        return events == null ? 0 : events.size();
+        return events == null ? 0 : (int) events.stream().filter(java.util.Objects::nonNull).count();
     }
 
     private String normalizeClassification(String classification) {
@@ -87,7 +88,7 @@ public class TraceabilityGitHubSummaryCommentBuilder {
         if (!StringUtils.hasText(rationaleSummary)) {
             return "";
         }
-        String cleaned = rationaleSummary.trim().replaceAll("\\s+", " ").replaceAll("[\\r\\n]+", " ");
+        String cleaned = rationaleSummary.trim().replaceAll("[\\r\\n]+", " ").replaceAll("\\s+", " ");
         int maxLength = 180;
         if (cleaned.length() <= maxLength) {
             return cleaned;
