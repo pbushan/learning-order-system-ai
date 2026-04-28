@@ -87,7 +87,7 @@ public class TraceabilityGitHubSummaryCommentBuilder {
         if (!StringUtils.hasText(rationaleSummary)) {
             return "";
         }
-        String cleaned = rationaleSummary.trim().replaceAll("\\s+", " ");
+        String cleaned = rationaleSummary.trim().replaceAll("\\s+", " ").replaceAll("[\\r\\n]+", " ");
         int maxLength = 180;
         if (cleaned.length() <= maxLength) {
             return cleaned;
