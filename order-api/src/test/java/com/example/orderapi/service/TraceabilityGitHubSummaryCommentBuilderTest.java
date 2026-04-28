@@ -48,20 +48,4 @@ class TraceabilityGitHubSummaryCommentBuilderTest {
         assertTrue(comment.contains("- Rationale summary:"));
         assertTrue(comment.endsWith("..."));
     }
-
-    @Test
-    void returnsFallbackForEmptyEventLikeInputs() {
-        String comment = builder.buildIssueTraceSummary(null, null, 0, null);
-
-        assertTrue(comment.contains("Traceability summary unavailable."));
-        assertFalse(comment.contains("Generated via agent-assisted intake."));
-    }
-
-    @Test
-    void returnsFallbackForBlankSummaryContent() {
-        String comment = builder.buildIssueTraceSummary("   ", "   ", 0, "   ");
-
-        assertTrue(comment.contains("Traceability summary unavailable."));
-        assertFalse(comment.contains("- Classification:"));
-    }
 }

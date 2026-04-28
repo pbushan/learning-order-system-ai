@@ -11,10 +11,6 @@ public class TraceabilityGitHubSummaryCommentBuilder {
                                          String classification,
                                          int issueCount,
                                          String rationaleSummary) {
-        if (issueCount <= 0 && !StringUtils.hasText(rationaleSummary)) {
-            return "Traceability summary unavailable.";
-        }
-
         String normalizedClassification = normalizeClassification(classification);
         String normalizedTraceId = StringUtils.hasText(traceId) ? traceId.trim() : "trace-unavailable";
         String decomposedSet = issueCount > 1 ? "yes (" + issueCount + " issues)" : "no";
