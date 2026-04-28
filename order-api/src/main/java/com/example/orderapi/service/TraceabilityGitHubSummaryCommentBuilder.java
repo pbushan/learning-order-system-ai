@@ -1,7 +1,6 @@
 package com.example.orderapi.service;
 
 import com.example.orderapi.dto.DecisionTraceEventResponse;
-import com.example.orderapi.dto.DecisionTraceEventResponse;
 import com.example.orderapi.dto.DecisionTraceResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -9,6 +8,7 @@ import org.springframework.util.StringUtils;
 import java.util.List;
 
 @Component
+@SuppressWarnings("unused")
 public class TraceabilityGitHubSummaryCommentBuilder {
     // Keep this formatter aligned with traceability/github_summary.py (shared traceability contract).
 
@@ -100,6 +100,6 @@ public class TraceabilityGitHubSummaryCommentBuilder {
         if (!StringUtils.hasText(summary)) {
             return "";
         }
-        return summary.trim().replaceAll("\\s+", " ");
+        return summary.trim().replaceAll("[\\r\\n]+", " ").replaceAll("\\s+", " ");
     }
 }
