@@ -1,10 +1,13 @@
 package com.example.orderapi.service;
 
+import com.example.orderapi.dto.DecisionTraceEventResponse;
 import com.example.orderapi.dto.DecisionTraceResponse;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TraceabilityGitHubSummaryCommentBuilderTest {
@@ -63,8 +66,9 @@ class TraceabilityGitHubSummaryCommentBuilderTest {
     void buildsDecisionTraceSummaryFromTraceIdAndEventCountWhenSummaryMissing() {
         DecisionTraceResponse response = new DecisionTraceResponse();
         response.setTraceId("trace-99");
+        response.setEvents(List.of(new DecisionTraceEventResponse(), new DecisionTraceEventResponse()));
 
-        assertEquals("Trace trace-99", builder.buildDecisionTraceSummary(response));
+        assertEquals("Trace trace-99 (2 events)", builder.buildDecisionTraceSummary(response));
     }
 
     @Test

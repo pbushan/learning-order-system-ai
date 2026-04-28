@@ -1,13 +1,11 @@
 package com.example.orderapi.service;
 
 import com.example.orderapi.dto.DecisionTraceEventResponse;
-import com.example.orderapi.dto.DecisionTraceEventResponse;
 import com.example.orderapi.dto.DecisionTraceResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
-
 
 @Component
 public class TraceabilityGitHubSummaryCommentBuilder {
@@ -39,7 +37,7 @@ public class TraceabilityGitHubSummaryCommentBuilder {
         if (response == null) {
             return "trace-unavailable";
         }
-        
+
         String summary = trimSummary(response.getSummary());
         if (StringUtils.hasText(summary)) {
             return summary;
