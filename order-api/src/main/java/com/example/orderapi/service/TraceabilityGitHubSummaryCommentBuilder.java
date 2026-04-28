@@ -48,7 +48,7 @@ public class TraceabilityGitHubSummaryCommentBuilder {
         StringBuilder builder = new StringBuilder();
         builder.append("Trace ").append(traceId);
         if (eventCount > 0) {
-            builder.append(" (" ).append(eventCount).append(eventCount == 1 ? " event)" : " events)");
+            builder.append(" (").append(eventCount).append(eventCount == 1 ? " event)" : " events)");
         }
         return builder.toString();
     }
