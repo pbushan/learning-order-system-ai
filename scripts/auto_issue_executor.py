@@ -663,8 +663,14 @@ def sanitize_for_issue_comment(raw: str, token: str) -> str:
         return "internal error (details redacted)"
     if not sanitized:
         return "internal error (details redacted)"
-    # If sanitization appears to leave token-like prefixes, suppress raw details.
-    if re.search(r"(gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)", sanitized):
+
+    # Conservative second pass: strip likely secret-like blobs and credential query params.
+    sanitized = re.sub(r"(?i)([?&](?:access_token|token|auth|password)=)[^&\s]+", r"\1***", sanitized)
+    sanitized = re.sub(r"(?i)\b(?:gh[pousr]_[A-Za-z0-9_]{16,}|github_pat_[A-Za-z0-9_]{20,})\b", "***", sanitized)
+    sanitized = re.sub(r"\b[A-Za-z0-9_\-]{32,}\b", "***", sanitized)
+
+    # If any strong token indicators still remain, suppress all details.
+    if re.search(r"(?i)(gh[pousr]_|github_pat_|x-access-token:|authorization:\s*(?:bearer|token|basic)\s+)", sanitized):
         return "internal error (details redacted)"
     return sanitized
 
