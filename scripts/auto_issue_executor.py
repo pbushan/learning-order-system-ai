@@ -1278,12 +1278,13 @@ def main() -> int:
                     log(f"Issue #{issue_number}: FAILED - {error}")
                     log_step5_event("approved-issue-execution-failed", issue_number=issue_number, error=error)
                     try:
+                        safe_error = sanitize_git_error(error, token)
                         comment_issue(
                             args.owner,
                             args.repo,
                             token,
                             issue_number,
-                            f"Automation attempt failed: {error}",
+                            f"Automation attempt failed: {safe_error}",
                         )
                     except Exception:
                         pass
