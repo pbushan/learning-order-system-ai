@@ -654,25 +654,10 @@ def sanitize_git_error(raw: str, token: str) -> str:
 
 
 def sanitize_for_issue_comment(raw: str, token: str) -> str:
-    text = (raw or "").strip()
-    if not text:
-        return "internal error"
-    try:
-        sanitized = sanitize_git_error(text, token).strip()
-    except Exception:
-        return "internal error (details redacted)"
-    if not sanitized:
-        return "internal error (details redacted)"
-
-    # Conservative second pass: strip likely secret-like blobs and credential query params.
-    sanitized = re.sub(r"(?i)([?&](?:access_token|token|auth|password)=)[^&\s]+", r"\1***", sanitized)
-    sanitized = re.sub(r"(?i)\b(?:gh[pousr]_[A-Za-z0-9_]{16,}|github_pat_[A-Za-z0-9_]{20,})\b", "***", sanitized)
-    sanitized = re.sub(r"\b[A-Za-z0-9_\-]{32,}\b", "***", sanitized)
-
-    # If any strong token indicators still remain, suppress all details.
-    if re.search(r"(?i)(gh[pousr]_|github_pat_|x-access-token:|authorization:\s*(?:bearer|token|basic)\s+)", sanitized):
-        return "internal error (details redacted)"
-    return sanitized
+    _ = raw
+    _ = token
+    # Avoid leaking any runtime exception details to public issue comments.
+    return "internal error (details redacted)"
 
 
 def authenticated_remote_url(origin_url: str, username: str, token: str) -> str:
