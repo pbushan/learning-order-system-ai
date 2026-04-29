@@ -53,6 +53,7 @@ class TraceabilityGitHubSummaryCommentBuilderTest {
     void handlesNullAndBlankInputsWithSafeDefaults() {
         String comment = builder.buildIssueTraceSummary(null, "   ", 0, null);
 
+        assertTrue(comment.startsWith("Generated via agent-assisted intake." + System.lineSeparator() + System.lineSeparator()));
         assertTrue(comment.contains("- Classification: `unknown`"));
         assertTrue(comment.contains("- Decomposed multi-issue set: no"));
         assertTrue(comment.contains("- Trace ID: `trace-unavailable`"));

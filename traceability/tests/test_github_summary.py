@@ -32,6 +32,16 @@ class GitHubTraceSummaryTest(unittest.TestCase):
         self.assertIn("- Decomposed multi-issue set: no", comment)
         self.assertIn("- Rationale summary: none provided", comment)
 
+    def test_build_issue_trace_summary_treats_whitespace_rationale_as_empty(self) -> None:
+        comment = build_issue_trace_summary(
+            trace_id="trace-456",
+            classification="feature",
+            issue_count=1,
+            rationale_summary="   \n\t   ",
+        )
+
+        self.assertIn("- Rationale summary: none provided", comment)
+
     def test_build_issue_trace_summary_trims_rationale(self) -> None:
         comment = build_issue_trace_summary(
             trace_id="trace-789",
