@@ -653,6 +653,22 @@ def sanitize_git_error(raw: str, token: str) -> str:
     return text
 
 
+def sanitize_for_issue_comment(raw: str, token: str) -> str:
+    text = (raw or "").strip()
+    if not text:
+        return "internal error"
+    try:
+        sanitized = sanitize_git_error(text, token).strip()
+    except Exception:
+        return "internal error (details redacted)"
+    if not sanitized:
+        return "internal error (details redacted)"
+    # If sanitization appears to leave token-like prefixes, suppress raw details.
+    if re.search(r"(gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)", sanitized):
+        return "internal error (details redacted)"
+    return sanitized
+
+
 def authenticated_remote_url(origin_url: str, username: str, token: str) -> str:
     parsed = urllib.parse.urlparse((origin_url or "").strip())
     if parsed.scheme != "https" or not parsed.netloc:
@@ -1278,7 +1294,7 @@ def main() -> int:
                     log(f"Issue #{issue_number}: FAILED - {error}")
                     log_step5_event("approved-issue-execution-failed", issue_number=issue_number, error=error)
                     try:
-                        safe_error = sanitize_git_error(error, token)
+                        safe_error = sanitize_for_issue_comment(error, token)
                         comment_issue(
                             args.owner,
                             args.repo,
@@ -1286,8 +1302,8 @@ def main() -> int:
                             issue_number,
                             f"Automation attempt failed: {safe_error}",
                         )
-                    except Exception:
-                        pass
+                    except Exception as comment_ex:
+                        log(f"Issue #{issue_number}: failed to publish failure comment ({type(comment_ex).__name__})")
 
             if args.once:
                 return 0
