@@ -1274,19 +1274,17 @@ def main() -> int:
                     result = process_issue(args.owner, args.repo, token, issue, args.auto_merge)
                     log(json.dumps({"result": result}, ensure_ascii=True))
                 except Exception as exc:  # minimal explicit failure visibility
-                    error = str(exc)
-                    safe_error = sanitize_git_error(error, token)
-                    log(f"Issue #{issue_number}: FAILED - {safe_error}")
-                    log_step5_event("approved-issue-execution-failed", issue_number=issue_number, error=safe_error)
+                    redacted_error = f"{type(exc).__name__} (details redacted)"
+                    log(f"Issue #{issue_number}: FAILED - {redacted_error}")
+                    log_step5_event("approved-issue-execution-failed", issue_number=issue_number, error=redacted_error)
                     try:
                         # Issue comments are public-facing; expose only error class, never message content.
-                        safe_error = f"{type(exc).__name__} (details redacted)"
                         comment_issue(
                             args.owner,
                             args.repo,
                             token,
                             issue_number,
-                            f"Automation attempt failed: {safe_error}",
+                            f"Automation attempt failed: {redacted_error}",
                         )
                     except Exception as comment_ex:
                         log(f"Issue #{issue_number}: failed to publish failure comment ({type(comment_ex).__name__})")
