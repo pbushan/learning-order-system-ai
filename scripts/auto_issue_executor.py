@@ -45,6 +45,10 @@ def log(msg: str) -> None:
     print(msg, flush=True)
 
 
+def redacted_exception_label(exc: Exception) -> str:
+    return f"{type(exc).__name__} (details redacted)"
+
+
 def run_cmd(*args: str, check: bool = True, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     proc = subprocess.run(
         list(args),
@@ -360,7 +364,7 @@ def call_mcp_tool(tool_name: str, arguments: dict[str, Any], token: str) -> dict
                 raise RuntimeError(f"missing MCP result payload: {envelope}")
             return result
         except Exception as ex:
-            last_error = str(ex)
+            last_error = redacted_exception_label(ex)
             if attempt == 3:
                 break
             time.sleep(delay)
@@ -1033,12 +1037,12 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
             try:
                 post_ready_note(owner, repo, token, pr_number)
             except Exception as ex:
-                log(f"Issue #{issue_number}: ready-note skipped due to error: {ex}")
+                log(f"Issue #{issue_number}: ready-note skipped due to error: {redacted_exception_label(ex)}")
                 log_step5_event(
                     "ready-to-merge-note-skipped",
                     issue_number=issue_number,
                     metadata={"prNumber": pr_number},
-                    error=str(ex),
+                    error=redacted_exception_label(ex),
                 )
 
             log(f"Issue #{issue_number}: merging PR #{pr_number}")
@@ -1056,7 +1060,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
     except Exception as ex:
         if isinstance(ex, NoFileChangeError):
             log(f"Issue #{issue_number}: no-op detected, awaiting human review")
-            log_step5_event("approved-issue-no-op", issue_number=issue_number, error=str(ex))
+            log_step5_event("approved-issue-no-op", issue_number=issue_number, error=redacted_exception_label(ex))
             try:
                 comment_issue(
                     owner,
@@ -1088,7 +1092,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
             }
         if isinstance(ex, UnsupportedInstructionError):
             log(f"Issue #{issue_number}: unsupported automation scope, deferring to human")
-            log_step5_event("approved-issue-unsupported", issue_number=issue_number, error=str(ex))
+            log_step5_event("approved-issue-unsupported", issue_number=issue_number, error=redacted_exception_label(ex))
             try:
                 comment_issue(
                     owner,
@@ -1125,7 +1129,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
             }
         if isinstance(ex, GitHubPermissionError):
             log(f"Issue #{issue_number}: token permission blocker, deferring until credentials are fixed")
-            log_step5_event("approved-issue-permission-blocked", issue_number=issue_number, error=str(ex))
+            log_step5_event("approved-issue-permission-blocked", issue_number=issue_number, error=redacted_exception_label(ex))
             try:
                 comment_issue(
                     owner,
@@ -1239,7 +1243,7 @@ def main() -> int:
             print(json.dumps({"step6FixResult": result}, ensure_ascii=True))
             return 0
         except Exception as exc:
-            error = str(exc)
+            error = redacted_exception_label(exc)
             log_step5_event(
                 "step6-safe-fix-failed",
                 issue_number=None,
@@ -1274,19 +1278,20 @@ def main() -> int:
                     result = process_issue(args.owner, args.repo, token, issue, args.auto_merge)
                     log(json.dumps({"result": result}, ensure_ascii=True))
                 except Exception as exc:  # minimal explicit failure visibility
-                    error = str(exc)
-                    log(f"Issue #{issue_number}: FAILED - {error}")
-                    log_step5_event("approved-issue-execution-failed", issue_number=issue_number, error=error)
+                    redacted_error = redacted_exception_label(exc)
+                    log(f"Issue #{issue_number}: FAILED - {redacted_error}")
+                    log_step5_event("approved-issue-execution-failed", issue_number=issue_number, error=redacted_error)
                     try:
+                        # Issue comments are public-facing; expose only error class, never message content.
                         comment_issue(
                             args.owner,
                             args.repo,
                             token,
                             issue_number,
-                            f"Automation attempt failed: {error}",
+                            f"Automation attempt failed: {redacted_error}",
                         )
-                    except Exception:
-                        pass
+                    except Exception as comment_ex:
+                        log(f"Issue #{issue_number}: failed to publish failure comment ({type(comment_ex).__name__})")
 
             if args.once:
                 return 0
@@ -1295,7 +1300,7 @@ def main() -> int:
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
-            error = str(exc)
+            error = redacted_exception_label(exc)
             log(f"Poll loop failed: {error}")
             log_step5_event("approved-issue-poll-failed", error=error)
             if args.once:
