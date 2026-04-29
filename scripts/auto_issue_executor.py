@@ -45,6 +45,10 @@ def log(msg: str) -> None:
     print(msg, flush=True)
 
 
+def redacted_exception_label(exc: Exception) -> str:
+    return f"{type(exc).__name__} (details redacted)"
+
+
 def run_cmd(*args: str, check: bool = True, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     proc = subprocess.run(
         list(args),
@@ -1239,7 +1243,7 @@ def main() -> int:
             print(json.dumps({"step6FixResult": result}, ensure_ascii=True))
             return 0
         except Exception as exc:
-            error = str(exc)
+            error = redacted_exception_label(exc)
             log_step5_event(
                 "step6-safe-fix-failed",
                 issue_number=None,
@@ -1274,7 +1278,7 @@ def main() -> int:
                     result = process_issue(args.owner, args.repo, token, issue, args.auto_merge)
                     log(json.dumps({"result": result}, ensure_ascii=True))
                 except Exception as exc:  # minimal explicit failure visibility
-                    redacted_error = f"{type(exc).__name__} (details redacted)"
+                    redacted_error = redacted_exception_label(exc)
                     log(f"Issue #{issue_number}: FAILED - {redacted_error}")
                     log_step5_event("approved-issue-execution-failed", issue_number=issue_number, error=redacted_error)
                     try:
@@ -1296,7 +1300,7 @@ def main() -> int:
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
-            error = str(exc)
+            error = redacted_exception_label(exc)
             log(f"Poll loop failed: {error}")
             log_step5_event("approved-issue-poll-failed", error=error)
             if args.once:
