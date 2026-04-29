@@ -50,18 +50,28 @@ class TraceabilityGitHubSummaryCommentBuilderTest {
     }
 
     @Test
-    void returnsFallbackForEmptyEventLikeInputs() {
-        String comment = builder.buildIssueTraceSummary(null, null, 0, null);
+    void handlesNullAndBlankInputsWithSafeDefaults() {
+        String comment = builder.buildIssueTraceSummary(null, "   ", 0, null);
 
-        assertTrue(comment.contains("Traceability summary unavailable."));
-        assertFalse(comment.contains("Generated via agent-assisted intake."));
+        assertTrue(comment.contains("Generated via agent-assisted intake."));
+        assertTrue(comment.contains("- Classification: `unknown`"));
+        assertTrue(comment.contains("- Decomposed multi-issue set: no"));
+        assertTrue(comment.contains("- Trace ID: `trace-unavailable`"));
+        assertTrue(comment.contains("- Rationale summary: none provided"));
     }
 
     @Test
-    void returnsFallbackForBlankSummaryContent() {
-        String comment = builder.buildIssueTraceSummary("   ", "   ", 0, "   ");
+    void trimsTraceIdAndCollapsesRationaleWhitespace() {
+        String comment = builder.buildIssueTraceSummary(
+                "  trace-xyz  ",
+                "Feature",
+                2,
+                "Line one.   Line two.\n\nLine three."
+        );
 
-        assertTrue(comment.contains("Traceability summary unavailable."));
-        assertFalse(comment.contains("- Classification:"));
+        assertTrue(comment.contains("- Classification: `feature`"));
+        assertTrue(comment.contains("- Decomposed multi-issue set: yes (2 issues)"));
+        assertTrue(comment.contains("- Trace ID: `trace-xyz`"));
+        assertTrue(comment.contains("- Rationale summary: Line one. Line two. Line three."));
     }
 }

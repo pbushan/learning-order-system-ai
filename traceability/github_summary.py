@@ -25,6 +25,8 @@ def build_issue_trace_summary(
     ]
     if rationale:
         lines.append(f"- Rationale summary: {rationale}")
+    else:
+        lines.append("- Rationale summary: none provided")
     return "\n".join(lines)
 
 
