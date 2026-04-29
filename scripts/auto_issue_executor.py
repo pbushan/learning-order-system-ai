@@ -1279,6 +1279,7 @@ def main() -> int:
                     log(f"Issue #{issue_number}: FAILED - {safe_error}")
                     log_step5_event("approved-issue-execution-failed", issue_number=issue_number, error=safe_error)
                     try:
+                        # Issue comments are public-facing; expose only error class, never message content.
                         safe_error = f"{type(exc).__name__} (details redacted)"
                         comment_issue(
                             args.owner,
