@@ -1282,8 +1282,9 @@ def main() -> int:
                     log(json.dumps({"result": result}, ensure_ascii=True))
                 except Exception as exc:  # minimal explicit failure visibility
                     error = str(exc)
-                    log(f"Issue #{issue_number}: FAILED - {error}")
-                    log_step5_event("approved-issue-execution-failed", issue_number=issue_number, error=error)
+                    safe_error = sanitize_git_error(error, token)
+                    log(f"Issue #{issue_number}: FAILED - {safe_error}")
+                    log_step5_event("approved-issue-execution-failed", issue_number=issue_number, error=safe_error)
                     try:
                         safe_error = sanitize_for_issue_comment(error, token)
                         comment_issue(
