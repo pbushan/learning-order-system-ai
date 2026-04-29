@@ -364,7 +364,7 @@ def call_mcp_tool(tool_name: str, arguments: dict[str, Any], token: str) -> dict
                 raise RuntimeError(f"missing MCP result payload: {envelope}")
             return result
         except Exception as ex:
-            last_error = str(ex)
+            last_error = redacted_exception_label(ex)
             if attempt == 3:
                 break
             time.sleep(delay)
@@ -1037,12 +1037,12 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
             try:
                 post_ready_note(owner, repo, token, pr_number)
             except Exception as ex:
-                log(f"Issue #{issue_number}: ready-note skipped due to error: {ex}")
+                log(f"Issue #{issue_number}: ready-note skipped due to error: {redacted_exception_label(ex)}")
                 log_step5_event(
                     "ready-to-merge-note-skipped",
                     issue_number=issue_number,
                     metadata={"prNumber": pr_number},
-                    error=str(ex),
+                    error=redacted_exception_label(ex),
                 )
 
             log(f"Issue #{issue_number}: merging PR #{pr_number}")
@@ -1060,7 +1060,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
     except Exception as ex:
         if isinstance(ex, NoFileChangeError):
             log(f"Issue #{issue_number}: no-op detected, awaiting human review")
-            log_step5_event("approved-issue-no-op", issue_number=issue_number, error=str(ex))
+            log_step5_event("approved-issue-no-op", issue_number=issue_number, error=redacted_exception_label(ex))
             try:
                 comment_issue(
                     owner,
@@ -1092,7 +1092,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
             }
         if isinstance(ex, UnsupportedInstructionError):
             log(f"Issue #{issue_number}: unsupported automation scope, deferring to human")
-            log_step5_event("approved-issue-unsupported", issue_number=issue_number, error=str(ex))
+            log_step5_event("approved-issue-unsupported", issue_number=issue_number, error=redacted_exception_label(ex))
             try:
                 comment_issue(
                     owner,
@@ -1129,7 +1129,7 @@ def process_issue(owner: str, repo: str, token: str, issue: dict[str, Any], auto
             }
         if isinstance(ex, GitHubPermissionError):
             log(f"Issue #{issue_number}: token permission blocker, deferring until credentials are fixed")
-            log_step5_event("approved-issue-permission-blocked", issue_number=issue_number, error=str(ex))
+            log_step5_event("approved-issue-permission-blocked", issue_number=issue_number, error=redacted_exception_label(ex))
             try:
                 comment_issue(
                     owner,
