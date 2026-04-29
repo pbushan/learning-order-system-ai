@@ -653,13 +653,6 @@ def sanitize_git_error(raw: str, token: str) -> str:
     return text
 
 
-def sanitize_for_issue_comment(raw: str, token: str) -> str:
-    _ = raw
-    _ = token
-    # Avoid leaking any runtime exception details to public issue comments.
-    return "internal error (details redacted)"
-
-
 def authenticated_remote_url(origin_url: str, username: str, token: str) -> str:
     parsed = urllib.parse.urlparse((origin_url or "").strip())
     if parsed.scheme != "https" or not parsed.netloc:
@@ -1286,7 +1279,7 @@ def main() -> int:
                     log(f"Issue #{issue_number}: FAILED - {safe_error}")
                     log_step5_event("approved-issue-execution-failed", issue_number=issue_number, error=safe_error)
                     try:
-                        safe_error = sanitize_for_issue_comment(error, token)
+                        safe_error = f"{type(exc).__name__} (details redacted)"
                         comment_issue(
                             args.owner,
                             args.repo,
