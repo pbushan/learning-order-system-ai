@@ -14,6 +14,9 @@ This project is a hands-on sandbox to demonstrate:
 
 ---
 
+## License
+This project is licensed under the MIT License - see the LICENSE file for details.
+
 ## 🎯 Why this project exists
 
 This is not just a demo project.
