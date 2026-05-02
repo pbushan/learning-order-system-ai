@@ -43,7 +43,13 @@
     }
 
     function buildCompactTraceSummary(input) {
-        const events = Array.isArray(input) ? input : (Array.isArray(input?.events) ? input.events : []);
+        const events = Array.isArray(input)
+            ? input
+            : (Array.isArray(input?.events)
+                ? input.events
+                : (Array.isArray(input?.normalized?.events)
+                    ? input.normalized.events
+                    : (Array.isArray(input?.summary?.events) ? input.summary.events : [])));
         if (events.length === 0) {
             return "No trace events available.";
         }
@@ -175,7 +181,7 @@
         if (normalizedStatus === "failed" || normalizedStatus === "error") {
             return true;
         }
-        return /(?:^|[._-])failed$/i.test(eventType || "");
+        return /(?:^|[._/\-\s])fail(?:ed|ure)$/i.test(eventType || "");
     }
 
     function readableEventType(eventType) {

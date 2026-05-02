@@ -130,6 +130,24 @@ test('buildCustomerTimeline detects failure when eventType ends with failed usin
   assert.equal(timeline[0].stepTitle, 'GitHub summary comment posting had failures');
 });
 
+test('buildCustomerTimeline detects failure when eventType uses slash and failure suffix', () => {
+  const timeline = ui.buildCustomerTimeline([
+    {
+      eventType: 'intake.github.summary-comment/failure',
+      timestamp: '2026-04-17T10:00:07Z',
+      status: 'completed',
+      summary: 'slash-delimited failure suffix',
+      decisionMetadata: {},
+      inputSummary: {},
+      artifactSummary: {},
+      governanceMetadata: {}
+    }
+  ]);
+
+  assert.equal(timeline.length, 1);
+  assert.equal(timeline[0].stepTitle, 'GitHub summary comment posting had failures');
+});
+
 test('buildCustomerTimeline does not classify non-failed status values as failure', () => {
   const timeline = ui.buildCustomerTimeline([
     {
@@ -289,5 +307,7 @@ test('summary helpers remain backward-compatible for compact event counts', () =
   assert.equal(trace.engineerTimeline.length, 1);
   assert.equal(compactFromArray, '1 trace event available.');
   assert.equal(compactFromResponse, '1 trace event available.');
+  assert.equal(ui.buildCompactTraceSummary({ normalized: { events: trace.events } }), '1 trace event available.');
+  assert.equal(ui.buildCompactTraceSummary({ summary: { events: trace.events } }), '1 trace event available.');
   assert.equal(ui.buildCompactTraceSummary([]), 'No trace events available.');
 });
