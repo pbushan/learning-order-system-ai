@@ -42,8 +42,15 @@
         };
     }
 
-    function buildCompactTraceSummary(events) {
-        if (!Array.isArray(events) || events.length === 0) {
+    function buildCompactTraceSummary(input) {
+        const events = Array.isArray(input)
+            ? input
+            : (Array.isArray(input?.events)
+                ? input.events
+                : (Array.isArray(input?.normalized?.events)
+                    ? input.normalized.events
+                    : (Array.isArray(input?.summary?.events) ? input.summary.events : [])));
+        if (events.length === 0) {
             return "No trace events available.";
         }
         return `${events.length} trace event${events.length === 1 ? "" : "s"} available.`;
@@ -142,46 +149,69 @@
             return { key: "github_issues", title: "GitHub issues created" };
         }
         if (eventType.startsWith("intake.github.summary-comment")) {
-            return { key: "github_comments", title: "GitHub summary comment posted" };
+            return { key: "github_comments", title: "GitHub trace summary comments" };
         }
         return { key: "", title: readableEventType(eventType) };
     }
 
-    function resolveStepTitle(stepTitle, event) {
-        if (event.status && String(event.status).toLowerCase() === "failed") {
-            if (stepTitle === "GitHub issues created") {
-                return "GitHub issue creation failed";
-            }
-            if (stepTitle === "GitHub summary comment posted") {
-                return "GitHub summary comment posting had failures";
-            }
-            if (stepTitle === "Classified as bug or feature") {
-                return "Classification needs clarification";
-            }
+    function resolveStepTitle(baseTitle, event) {
+        const eventType = toText(event?.eventType);
+        const status = (event?.status ?? "").toString().toLowerCase();
+        const failed = isFailedEvent(status, eventType);
+        if (eventType.startsWith("intake.classification") && (status === "pending" || failed)) {
+            return "Classification needs clarification";
         }
-        return stepTitle;
+        if (eventType.startsWith("intake.decomposition") && failed) {
+            return "Decomposition failed";
+        }
+        if (eventType.startsWith("intake.github.issue-creation") && failed) {
+            return "GitHub issue creation failed";
+        }
+        if (eventType.startsWith("intake.github.summary-comment") && failed) {
+            return "GitHub summary comment posting had failures";
+        }
+        return baseTitle;
+    }
+
+    function isFailedEvent(status, eventType) {
+        const normalizedStatus = (status || "").toLowerCase();
+        if (normalizedStatus === "failed" || normalizedStatus === "error") {
+            return true;
+        }
+        return /(?:^|[._/\-\s])fail(?:ed|ure)$/i.test(eventType || "");
     }
 
     function readableEventType(eventType) {
-        return eventType ? eventType.replace(/\./g, " ") : "Trace event";
-    }
-
-    function compactDetails(details) {
-        return Object.fromEntries(Object.entries(details).filter(([, value]) => value !== undefined && value !== null && value !== ""));
-    }
-
-    function optionalCount(summary, key) {
-        const value = summary?.[key];
-        if (value === undefined || value === null || value === "") {
-            return undefined;
+        if (!eventType) {
+            return "Trace event";
         }
-        const parsed = Number(value);
-        return Number.isFinite(parsed) ? parsed : undefined;
+        return eventType
+            .replace(/\./g, " ")
+            .replace(/\-/g, " ")
+            .replace(/\b\w/g, (match) => match.toUpperCase());
     }
 
     function extractIssueLinks(event) {
-        const links = event?.artifactSummary?.issueLinks;
-        return Array.isArray(links) ? links.filter((link) => typeof link === "string" && link.trim()) : [];
+        const direct = event?.artifactSummary?.issueLinks;
+        if (Array.isArray(direct)) {
+            return direct.filter((entry) => typeof entry === "string" && entry.trim());
+        }
+        const single = event?.artifactSummary?.issueUrl;
+        if (typeof single === "string" && single.trim()) {
+            return [single.trim()];
+        }
+        return [];
+    }
+
+    function formatTimestamp(timestamp) {
+        if (!timestamp) {
+            return "";
+        }
+        const parsed = new Date(timestamp);
+        if (Number.isNaN(parsed.getTime())) {
+            return timestamp;
+        }
+        return parsed.toISOString();
     }
 
     function toText(value) {
@@ -189,23 +219,64 @@
     }
 
     function asObject(value) {
-        return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+            return {};
+        }
+        return value;
+    }
+
+    function optionalCount(source, key) {
+        if (!source || typeof source !== "object" || !(key in source)) {
+            return undefined;
+        }
+        const value = source[key];
+        if (value === null || value === undefined || value === "") {
+            return undefined;
+        }
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+        return toText(value) || undefined;
+    }
+
+    function compactDetails(details) {
+        const compact = {};
+        Object.entries(details).forEach(([key, value]) => {
+            if (value === undefined || value === null || value === "") {
+                return;
+            }
+            compact[key] = value;
+        });
+        return compact;
+    }
+
+    function buildTraceSummary(response) {
+        const normalized = normalizeTraceResponse(response || {});
+        return {
+            traceId: normalized.traceId,
+            events: normalized.events,
+            customerTimeline: buildCustomerTimeline(normalized.events),
+            engineerTimeline: buildEngineerTimeline(normalized.events)
+        };
     }
 
     return {
         normalizeTraceResponse,
         normalizeEvent,
-        buildCompactTraceSummary,
         buildCustomerTimeline,
         buildEngineerTimeline,
         buildTraceItem,
         classifyStep,
         resolveStepTitle,
+        formatTimestamp,
         readableEventType,
         compactDetails,
         optionalCount,
         extractIssueLinks,
         toText,
-        asObject
+        asObject,
+        buildTraceSummary,
+        buildCompactTraceSummary
     };
 }));
