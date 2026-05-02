@@ -158,10 +158,7 @@
         const eventType = toText(event?.eventType);
         const status = (event?.status ?? "").toString().toLowerCase();
         const failed = isFailedEvent(status, eventType);
-        if (eventType.startsWith("intake.classification") && status === "pending") {
-            return "Classification needs clarification";
-        }
-        if (baseTitle === "Classified as bug or feature" && failed) {
+        if (eventType.startsWith("intake.classification") && (status === "pending" || failed)) {
             return "Classification needs clarification";
         }
         if (eventType.startsWith("intake.decomposition") && failed) {

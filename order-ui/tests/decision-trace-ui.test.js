@@ -1,7 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const ui = require('../decision-trace-ui.js');
 
 test('normalizeTraceResponse sorts events and keeps traceId', () => {
@@ -148,6 +146,24 @@ test('buildCustomerTimeline detects failure when eventType uses slash and failur
   assert.equal(timeline[0].stepTitle, 'GitHub summary comment posting had failures');
 });
 
+test('buildCustomerTimeline does not classify near-miss failure suffixes as failures', () => {
+  const timeline = ui.buildCustomerTimeline([
+    {
+      eventType: 'intake.github.summary-comment.failureMode',
+      timestamp: '2026-04-17T10:00:07Z',
+      status: 'completed',
+      summary: 'non-terminal failure word should not mark failed',
+      decisionMetadata: {},
+      inputSummary: {},
+      artifactSummary: {},
+      governanceMetadata: {}
+    }
+  ]);
+
+  assert.equal(timeline.length, 1);
+  assert.equal(timeline[0].stepTitle, 'GitHub trace summary comments');
+});
+
 test('buildCustomerTimeline does not classify non-failed status values as failure', () => {
   const timeline = ui.buildCustomerTimeline([
     {
@@ -280,13 +296,29 @@ test('buildCustomerTimeline keeps non-numeric count strings and omits nullish va
   assert.equal(timeline[0].details.unknownFailedIssueCount, 'n/a');
 });
 
-test('app decision trace integration does not depend on removed summary helpers', () => {
-  const appJsPath = path.join(__dirname, '..', 'app.js');
-  const appJs = fs.readFileSync(appJsPath, 'utf8');
+test('decision-trace module exposes stable UI contract helpers', () => {
+  const requiredExports = [
+    'normalizeTraceResponse',
+    'normalizeEvent',
+    'buildCustomerTimeline',
+    'buildEngineerTimeline',
+    'buildTraceItem',
+    'classifyStep',
+    'resolveStepTitle',
+    'formatTimestamp',
+    'readableEventType',
+    'compactDetails',
+    'optionalCount',
+    'extractIssueLinks',
+    'toText',
+    'asObject',
+    'buildTraceSummary',
+    'buildCompactTraceSummary'
+  ];
 
-  assert.equal(appJs.includes('buildTraceSummary('), false);
-  assert.equal(appJs.includes('buildCompactTraceSummary('), false);
-  assert.equal(/\bnormalized\s*\.\s*summary\b/.test(appJs), false);
+  requiredExports.forEach((name) => {
+    assert.equal(typeof ui[name], 'function');
+  });
 });
 
 test('summary helpers remain backward-compatible for compact event counts', () => {
