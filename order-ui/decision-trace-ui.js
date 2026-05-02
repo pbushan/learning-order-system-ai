@@ -42,6 +42,14 @@
         };
     }
 
+    function buildCompactTraceSummary(input) {
+        const events = Array.isArray(input) ? input : (Array.isArray(input?.events) ? input.events : []);
+        if (events.length === 0) {
+            return "No trace events available.";
+        }
+        return `${events.length} trace event${events.length === 1 ? "" : "s"} available.`;
+    }
+
     function buildCustomerTimeline(events) {
         const byStep = new Map();
         events.forEach((event) => {
@@ -147,6 +155,9 @@
         if (eventType.startsWith("intake.classification") && status === "pending") {
             return "Classification needs clarification";
         }
+        if (baseTitle === "Classified as bug or feature" && failed) {
+            return "Classification needs clarification";
+        }
         if (eventType.startsWith("intake.decomposition") && failed) {
             return "Decomposition failed";
         }
@@ -247,23 +258,21 @@
         };
     }
 
-    function buildCompactTraceSummary(response) {
-        const normalized = normalizeTraceResponse(response || {});
-        return {
-            traceId: normalized.traceId,
-            events: normalized.events,
-            timeline: buildCustomerTimeline(normalized.events)
-        };
-    }
-
     return {
         normalizeTraceResponse,
+        normalizeEvent,
         buildCustomerTimeline,
         buildEngineerTimeline,
+        buildTraceItem,
         classifyStep,
+        resolveStepTitle,
         formatTimestamp,
         readableEventType,
         compactDetails,
+        optionalCount,
+        extractIssueLinks,
+        toText,
+        asObject,
         buildTraceSummary,
         buildCompactTraceSummary
     };

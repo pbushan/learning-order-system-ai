@@ -22,6 +22,9 @@ test('summary helper exports remain available for compatibility', () => {
   assert.equal(typeof ui.buildCompactTraceSummary, 'function');
   assert.equal(typeof ui.readableEventType, 'function');
   assert.equal(typeof ui.compactDetails, 'function');
+  assert.equal(typeof ui.normalizeEvent, 'function');
+  assert.equal(typeof ui.buildTraceItem, 'function');
+  assert.equal(typeof ui.resolveStepTitle, 'function');
 });
 
 test('buildCustomerTimeline presents lifecycle steps compactly', () => {
@@ -268,23 +271,23 @@ test('app decision trace integration does not depend on removed summary helpers'
   assert.equal(/\bnormalized\s*\.\s*summary\b/.test(appJs), false);
 });
 
-test('summary helpers build stable timeline payloads', () => {
+test('summary helpers remain backward-compatible for compact event counts', () => {
   const trace = ui.buildTraceSummary({
     traceId: 'trace-2',
     events: [
       { eventType: 'intake.session.started', timestamp: '2026-04-17T10:00:00Z', status: 'recorded', summary: 'started' }
     ]
   });
-  const compact = ui.buildCompactTraceSummary({
+  const compactFromArray = ui.buildCompactTraceSummary(trace.events);
+  const compactFromResponse = ui.buildCompactTraceSummary({
     traceId: 'trace-2',
-    events: [
-      { eventType: 'intake.session.started', timestamp: '2026-04-17T10:00:00Z', status: 'recorded', summary: 'started' }
-    ]
+    events: trace.events
   });
 
   assert.equal(trace.traceId, 'trace-2');
   assert.equal(trace.customerTimeline.length, 1);
   assert.equal(trace.engineerTimeline.length, 1);
-  assert.equal(compact.traceId, 'trace-2');
-  assert.equal(compact.timeline.length, 1);
+  assert.equal(compactFromArray, '1 trace event available.');
+  assert.equal(compactFromResponse, '1 trace event available.');
+  assert.equal(ui.buildCompactTraceSummary([]), 'No trace events available.');
 });
