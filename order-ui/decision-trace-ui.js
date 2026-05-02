@@ -164,7 +164,7 @@
         if (normalizedStatus === "failed" || normalizedStatus === "error") {
             return true;
         }
-        return /(?:^|[.-])failed$/i.test(eventType || "");
+        return /(?:^|[._-])failed$/i.test(eventType || "");
     }
 
     function readableEventType(eventType) {
@@ -237,11 +237,34 @@
         return compact;
     }
 
+    function buildTraceSummary(response) {
+        const normalized = normalizeTraceResponse(response || {});
+        return {
+            traceId: normalized.traceId,
+            events: normalized.events,
+            customerTimeline: buildCustomerTimeline(normalized.events),
+            engineerTimeline: buildEngineerTimeline(normalized.events)
+        };
+    }
+
+    function buildCompactTraceSummary(response) {
+        const normalized = normalizeTraceResponse(response || {});
+        return {
+            traceId: normalized.traceId,
+            events: normalized.events,
+            timeline: buildCustomerTimeline(normalized.events)
+        };
+    }
+
     return {
         normalizeTraceResponse,
         buildCustomerTimeline,
         buildEngineerTimeline,
         classifyStep,
-        formatTimestamp
+        formatTimestamp,
+        readableEventType,
+        compactDetails,
+        buildTraceSummary,
+        buildCompactTraceSummary
     };
 }));

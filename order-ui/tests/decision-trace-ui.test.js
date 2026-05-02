@@ -17,9 +17,11 @@ test('normalizeTraceResponse sorts events and keeps traceId', () => {
   assert.equal(Object.prototype.hasOwnProperty.call(normalized, 'summary'), false);
 });
 
-test('summary helper exports are intentionally absent after revert', () => {
-  assert.equal(typeof ui.buildTraceSummary, 'undefined');
-  assert.equal(typeof ui.buildCompactTraceSummary, 'undefined');
+test('summary helper exports remain available for compatibility', () => {
+  assert.equal(typeof ui.buildTraceSummary, 'function');
+  assert.equal(typeof ui.buildCompactTraceSummary, 'function');
+  assert.equal(typeof ui.readableEventType, 'function');
+  assert.equal(typeof ui.compactDetails, 'function');
 });
 
 test('buildCustomerTimeline presents lifecycle steps compactly', () => {
@@ -104,6 +106,24 @@ test('buildCustomerTimeline detects failure when eventType ends with failed with
 
   assert.equal(timeline.length, 1);
   assert.equal(timeline[0].status, 'completed');
+  assert.equal(timeline[0].stepTitle, 'GitHub summary comment posting had failures');
+});
+
+test('buildCustomerTimeline detects failure when eventType ends with failed using underscore delimiter', () => {
+  const timeline = ui.buildCustomerTimeline([
+    {
+      eventType: 'intake.github.summary-comment_failed',
+      timestamp: '2026-04-17T10:00:07Z',
+      status: 'completed',
+      summary: 'legacy failed suffix event with underscore',
+      decisionMetadata: {},
+      inputSummary: {},
+      artifactSummary: {},
+      governanceMetadata: {}
+    }
+  ]);
+
+  assert.equal(timeline.length, 1);
   assert.equal(timeline[0].stepTitle, 'GitHub summary comment posting had failures');
 });
 
@@ -246,4 +266,25 @@ test('app decision trace integration does not depend on removed summary helpers'
   assert.equal(appJs.includes('buildTraceSummary('), false);
   assert.equal(appJs.includes('buildCompactTraceSummary('), false);
   assert.equal(/\bnormalized\s*\.\s*summary\b/.test(appJs), false);
+});
+
+test('summary helpers build stable timeline payloads', () => {
+  const trace = ui.buildTraceSummary({
+    traceId: 'trace-2',
+    events: [
+      { eventType: 'intake.session.started', timestamp: '2026-04-17T10:00:00Z', status: 'recorded', summary: 'started' }
+    ]
+  });
+  const compact = ui.buildCompactTraceSummary({
+    traceId: 'trace-2',
+    events: [
+      { eventType: 'intake.session.started', timestamp: '2026-04-17T10:00:00Z', status: 'recorded', summary: 'started' }
+    ]
+  });
+
+  assert.equal(trace.traceId, 'trace-2');
+  assert.equal(trace.customerTimeline.length, 1);
+  assert.equal(trace.engineerTimeline.length, 1);
+  assert.equal(compact.traceId, 'trace-2');
+  assert.equal(compact.timeline.length, 1);
 });
