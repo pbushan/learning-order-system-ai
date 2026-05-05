@@ -2,5 +2,16 @@ package com.example.orderapi.domain;
 
 public enum OrderStatus {
     DRAFT,
-    SUBMITTED
+    SUBMITTED;
+
+    public String getDisplayLabel() {
+        return switch (this) {
+            case DRAFT -> "Draft";
+            case SUBMITTED -> "Submitted";
+        };
+    }
+
+    public static String getDisplayLabel(OrderStatus status) {
+        return status != null ? status.getDisplayLabel() : "Unknown";
+    }
 }
