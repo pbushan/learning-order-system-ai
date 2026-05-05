@@ -1,18 +1,20 @@
 package com.example.orderapi.domain;
 
 public enum OrderStatus {
-    DRAFT,
-    SUBMITTED;
+    DRAFT("Draft"),
+    SUBMITTED("Submitted");
+
+    private final String displayLabel;
+
+    OrderStatus(String displayLabel) {
+        this.displayLabel = displayLabel;
+    }
 
     public String getDisplayLabel() {
-        return switch (this) {
-            case DRAFT -> "Draft";
-            case SUBMITTED -> "Submitted";
-            default -> "Unknown";
-        };
+        return displayLabel;
     }
 
     public static String getDisplayLabel(OrderStatus status) {
-        return status != null ? status.getDisplayLabel() : "Unknown";
+        return status == null ? "Unknown" : status.getDisplayLabel();
     }
 }
