@@ -11,7 +11,11 @@ public enum OrderStatus {
     }
 
     public String getDisplayLabel() {
-        return displayLabel;
+        return switch (this) {
+            case DRAFT -> displayLabel;
+            case SUBMITTED -> displayLabel;
+            default -> "Unknown";
+        };
     }
 
     public static String getDisplayLabel(OrderStatus status) {
