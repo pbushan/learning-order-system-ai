@@ -8,6 +8,7 @@ public enum OrderStatus {
         return switch (this) {
             case DRAFT -> "Draft";
             case SUBMITTED -> "Submitted";
+            default -> "Unknown";
         };
     }
 

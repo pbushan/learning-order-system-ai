@@ -13,6 +13,12 @@ class OrderStatusTest {
     }
 
     @Test
+    void staticDisplayLabelMatchesExpectedValue() {
+        assertEquals("Draft", OrderStatus.getDisplayLabel(OrderStatus.DRAFT));
+        assertEquals("Submitted", OrderStatus.getDisplayLabel(OrderStatus.SUBMITTED));
+    }
+
+    @Test
     void staticDisplayLabelHandlesNullSafely() {
         assertEquals("Unknown", OrderStatus.getDisplayLabel(null));
     }
